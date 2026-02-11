@@ -1033,6 +1033,103 @@
                 font-size: 12px;
             }
         }
+
+        /* ===== LANDSCAPE MOBILE RESPONSIVE (≤1024px width AND ≤500px height) ===== */
+        @media (max-width: 1024px) and (max-height: 500px) {
+            /* Allow scrolling on mobile */
+            html, body {
+                overflow: auto;
+            }
+
+            .main-panel {
+                overflow: visible;
+            }
+
+            /* Show mobile toggle buttons */
+            .mobile-menu-toggle,
+            .mobile-analysis-toggle {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            /* Watchlist as overlay */
+            .watchlist-sidebar {
+                position: fixed;
+                left: -250px;
+                top: 0;
+                bottom: 0;
+                width: 220px;
+                z-index: 1000;
+                transition: left 0.3s ease;
+            }
+
+            .watchlist-sidebar.mobile-open {
+                left: 0;
+            }
+
+            /* Analysis sidebar as overlay */
+            .analysis-sidebar {
+                position: fixed;
+                right: -280px;
+                top: 0;
+                bottom: 0;
+                width: 260px;
+                z-index: 1000;
+                transition: right 0.3s ease;
+                overflow-y: auto;
+            }
+
+            .analysis-sidebar.mobile-open {
+                right: 0;
+            }
+
+            /* Show mobile close buttons */
+            .mobile-close-btn {
+                display: block;
+            }
+
+            /* Main panel takes full width */
+            .main-panel {
+                flex: 1;
+                width: 100%;
+            }
+
+            /* Header adjustments for mobile buttons */
+            .header {
+                padding-top: 60px;
+            }
+
+            /* Controls Summary - Hidden by default, shown after first analyze */
+            .controls-summary {
+                display: none;
+            }
+            
+            .controls-summary.active {
+                display: flex;
+            }
+            
+            /* Signal Peek - Show on mobile only */
+            .signal-peek {
+                display: block;
+            }
+            
+            /* Adjust mobile-analysis-toggle to not overlap peek */
+            .mobile-analysis-toggle {
+                bottom: 80px;
+            }
+
+            /* Chart Area - Allow scrolling */
+            .chart-area {
+                flex-direction: column;
+                overflow: visible;
+                min-height: 500px;
+            }
+
+            .charts-container {
+                min-height: 400px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1098,7 +1195,7 @@
                 <button class="controls-chevron" id="controls-chevron">▼</button>
             </div>
             
-            <div class="controls-bar">
+            <div class="controls-bar" id="controls-bar">
                 <div class="control-group">
                     <label>Exp</label>
                     <select id="expiration" style="min-width: 140px;">
@@ -1227,6 +1324,15 @@
         // Signal peek state
         let latestSignalData = null;
         
+        // Mobile responsiveness breakpoints
+        // Portrait mobile: width <= 768px (standard mobile breakpoint)
+        // Landscape mobile: width <= 1024px AND height <= 500px
+        // This ensures phones in landscape (e.g., iPhone X: 812x375) are detected as mobile
+        // while tablets in landscape (typically height > 500px) are treated as desktop
+        const MOBILE_MAX_WIDTH = 768;
+        const LANDSCAPE_MAX_WIDTH = 1024;
+        const LANDSCAPE_MAX_HEIGHT = 500;
+        
         // Signal type constants
         const BULLISH_SIGNALS = [
             'strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 
@@ -1254,7 +1360,9 @@
 
         // ===== MOBILE FUNCTIONS =====
         function isMobile() {
-            return window.innerWidth <= 768;
+            // Check for portrait mobile or landscape mobile
+            return window.innerWidth <= MOBILE_MAX_WIDTH || 
+                   (window.innerWidth <= LANDSCAPE_MAX_WIDTH && window.innerHeight <= LANDSCAPE_MAX_HEIGHT);
         }
 
         function openWatchlist() {
@@ -1319,9 +1427,30 @@
         }
 
         function handleResize() {
-            // Reset mobile panels when switching to desktop
-            if (!isMobile()) {
+            // Handle mobile controls visibility and state
+            if (isMobile()) {
+                // Cache DOM references
+                const controlsSummary = document.getElementById('controls-summary');
+                
+                // Ensure controls-summary is active on mobile
+                if (controlsSummary && !controlsSummary.classList.contains('active')) {
+                    controlsSummary.classList.add('active');
+                    collapseControls();
+                }
+            } else {
+                // Reset mobile panels when switching to desktop
                 closeAllMobilePanels();
+                
+                // Cache DOM references
+                const controlsSummary = document.getElementById('controls-summary');
+                const controlsBar = document.getElementById('controls-bar');
+                
+                // Reset controls state on desktop
+                if (controlsSummary && controlsBar && controlsSummary.classList.contains('active')) {
+                    controlsSummary.classList.remove('active');
+                    controlsBar.classList.remove('collapsed');
+                    controlsCollapsed = false;
+                }
             }
             // Trigger chart resize
             if (priceChart && volumeChart) {
@@ -1792,11 +1921,10 @@
                 updateCharts(data);
                 updateAnalysis(data);
                 
-                // Update summary text and collapse controls on first analyze (mobile only)
+                // Update summary text after analyze
                 updateSummaryText();
                 if (isMobile() && !hasAnalyzed) {
                     hasAnalyzed = true;
-                    collapseControls();
                 }
                 
             } catch (e) {
@@ -2002,6 +2130,17 @@
             
             // Init charts
             initCharts();
+            
+            // Initialize mobile controls visibility and state
+            if (isMobile()) {
+                const controlsSummary = document.getElementById('controls-summary');
+                // Show controls-summary immediately on mobile
+                if (controlsSummary) {
+                    controlsSummary.classList.add('active');
+                    // Start with controls collapsed on mobile to maximize chart space
+                    collapseControls();
+                }
+            }
             
             // Load watchlist prices FIRST (needed for ATM calculation)
             await loadWatchlistPrices();
