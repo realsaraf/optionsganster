@@ -271,6 +271,7 @@ async def analyze_option(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     interval: int = Query(1, description="Interval in minutes (1, 5, 15, etc.)"),
+    nocache: bool = Query(False, description="Bypass OHLCV cache for live updates"),
     poly: PolygonClient = Depends(get_polygon),
     engine: VPAEngine = Depends(get_vpa),
 ) -> AnalysisResponse:
@@ -287,6 +288,18 @@ async def analyze_option(
             if start_date
             else end_dt - timedelta(days=5)
         )
+
+        # Clear cache if nocache=true (for live mode)
+        if nocache:
+            poly.clear_ohlcv_cache(
+                symbol=symbol.upper(),
+                expiration=exp_date,
+                strike=strike,
+                right=right.upper(),
+                start_date=start_dt,
+                end_date=end_dt,
+                interval_min=interval,
+            )
 
         # Fetch OHLCV data (async + cached)
         df = await poly.get_option_ohlcv(
@@ -356,33 +369,27 @@ async def get_watchlist_prices(
     symbols: str = Query("SPY,QQQ,IWM,AAPL,MSFT,NVDA,TSLA,AMD"),
     poly: PolygonClient = Depends(get_polygon),
 ):
-    """Get current prices for watchlist symbols using grouped daily (1 API call)."""
+    """Get real-time/delayed prices for watchlist symbols using snapshot API."""
     try:
         symbol_list = [s.strip().upper() for s in symbols.split(",")]
 
-        # Find last trading day (skip weekends)
-        prev_date = date.today() - timedelta(days=1)
-        while prev_date.weekday() >= 5:
-            prev_date -= timedelta(days=1)
-
-        price_lookup = await poly.get_grouped_daily(prev_date)
+        # Use snapshot API for real-time/15-min delayed prices
+        price_lookup = await poly.get_snapshot_prices(symbol_list)
 
         results = []
         for sym in symbol_list:
-            agg = price_lookup.get(sym, {})
-            close = float(agg.get("c", 0))
-            open_price = float(agg.get("o", 0))
-            high = float(agg.get("h", 0))
-            low = float(agg.get("l", 0))
-            volume = int(agg.get("v", 0))
-
-            change = close - open_price
-            change_pct = (change / open_price * 100) if open_price else 0
+            snapshot = price_lookup.get(sym, {})
+            last_price = float(snapshot.get("lastPrice", 0))
+            change = float(snapshot.get("todaysChange", 0))
+            change_pct = float(snapshot.get("todaysChangePerc", 0))
+            high = float(snapshot.get("dayHigh", 0))
+            low = float(snapshot.get("dayLow", 0))
+            volume = int(snapshot.get("dayVolume", 0))
 
             results.append(
                 {
                     "symbol": sym,
-                    "price": close,
+                    "price": last_price,
                     "change": round(change, 2),
                     "changePct": round(change_pct, 2),
                     "high": high,

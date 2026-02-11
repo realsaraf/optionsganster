@@ -377,15 +377,17 @@
         .controls-summary {
             display: none;
             background: #1e222d;
-            padding: 8px 12px;
+            padding: 4px 8px;
             border-bottom: 1px solid #2a2e39;
             align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
+            gap: 6px;
+            flex-wrap: nowrap;
+            height: 32px;
+            overflow: hidden;
         }
         
         .summary-text {
-            font-size: 12px;
+            font-size: 11px;
             color: #d1d4dc;
             font-weight: 600;
             white-space: nowrap;
@@ -396,11 +398,7 @@
         }
         
         .summary-intervals {
-            display: flex;
-            gap: 2px;
-            background: #131722;
-            padding: 2px;
-            border-radius: 4px;
+            display: none; /* Hidden on mobile collapsed mode */
         }
         
         .summary-interval-btn {
@@ -408,19 +406,44 @@
             font-size: 10px;
         }
         
-        .summary-analyze-btn,
+        .summary-analyze-btn {
+            padding: 4px 8px;
+            font-size: 14px;
+            min-width: 28px;
+            background: transparent;
+            border: 1px solid #2a2e39;
+        }
+        
+        .summary-analyze-btn:hover {
+            background: rgba(41, 98, 255, 0.1);
+            border-color: #2962ff;
+        }
+        
         .summary-live-btn {
-            padding: 6px 12px;
-            font-size: 11px;
+            display: none; /* Hidden on mobile collapsed mode */
+        }
+        
+        .summary-live-indicator {
+            font-size: 10px;
+            color: #787b86;
+            white-space: nowrap;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(120, 123, 134, 0.1);
+        }
+        
+        .summary-live-indicator.active {
+            color: #ef5350;
+            background: rgba(239, 83, 80, 0.15);
         }
         
         .controls-chevron {
             background: transparent;
             border: none;
             color: #787b86;
-            font-size: 16px;
+            font-size: 14px;
             cursor: pointer;
-            padding: 4px 8px;
+            padding: 4px 6px;
             border-radius: 4px;
             transition: all 0.15s;
         }
@@ -441,13 +464,14 @@
             bottom: 0;
             left: 0;
             right: 0;
-            background: #1e222d;
+            background: linear-gradient(to right, rgba(38, 166, 154, 0.15), #1e222d);
             border-top: 3px solid #26a69a;
             padding: 12px 16px;
             z-index: 998;
             transform: translateY(100%);
             transition: transform 0.3s ease-in-out;
             cursor: pointer;
+            min-height: 68px;
         }
         
         .signal-peek.visible {
@@ -456,24 +480,78 @@
         
         .signal-peek.bearish {
             border-top-color: #ef5350;
+            background: linear-gradient(to right, rgba(239, 83, 80, 0.15), #1e222d);
         }
         
         .signal-peek-content {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .signal-peek-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        
+        .signal-peek-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: #d1d4dc;
+            flex: 1;
+        }
+        
+        .signal-peek-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .signal-peek-badge.bullish {
+            background: rgba(38, 166, 154, 0.2);
+            color: #26a69a;
+        }
+        
+        .signal-peek-badge.bearish {
+            background: rgba(239, 83, 80, 0.2);
+            color: #ef5350;
+        }
+        
+        .signal-peek-details {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
         }
         
-        .signal-peek-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: #d1d4dc;
+        .signal-peek-description {
+            font-size: 11px;
+            color: #9ca3af;
             flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .signal-peek-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+        }
+        
+        .signal-peek-confidence {
+            color: #2962ff;
+            font-weight: 600;
         }
         
         .signal-peek-time {
-            font-size: 11px;
+            font-size: 10px;
             color: #787b86;
         }
         
@@ -1183,15 +1261,9 @@
             
             <!-- Controls Summary Bar (Mobile only, shown after first analyze) -->
             <div class="controls-summary" id="controls-summary">
-                <span class="summary-text" id="summary-text">SPY $500C | Feb 14 | 5m</span>
-                <div class="interval-buttons summary-intervals">
-                    <button class="interval-btn summary-interval-btn" data-interval="1">1m</button>
-                    <button class="interval-btn summary-interval-btn active" data-interval="5">5m</button>
-                    <button class="interval-btn summary-interval-btn" data-interval="15">15m</button>
-                    <button class="interval-btn summary-interval-btn" data-interval="60">1H</button>
-                </div>
                 <button class="analyze-btn summary-analyze-btn" id="summary-analyze-btn">▶</button>
-                <button class="live-btn summary-live-btn" id="summary-live-btn">⚪ LIVE</button>
+                <span class="summary-text" id="summary-text">SPY $500C 5m</span>
+                <span class="summary-live-indicator" id="summary-live-indicator"></span>
                 <button class="controls-chevron" id="controls-chevron">▼</button>
             </div>
             
@@ -1294,9 +1366,18 @@
     <!-- Signal Peek Banner (Mobile only) -->
     <div class="signal-peek" id="signal-peek">
         <div class="signal-peek-content">
-            <span class="signal-peek-name" id="signal-peek-name">-</span>
-            <span class="signal-peek-time" id="signal-peek-time">-</span>
-            <span class="signal-peek-price" id="signal-peek-price">-</span>
+            <div class="signal-peek-header">
+                <span class="signal-peek-name" id="signal-peek-name">-</span>
+                <span class="signal-peek-badge bullish" id="signal-peek-badge">BULLISH</span>
+            </div>
+            <div class="signal-peek-details">
+                <span class="signal-peek-description" id="signal-peek-description">-</span>
+                <div class="signal-peek-meta">
+                    <span class="signal-peek-confidence" id="signal-peek-confidence">-</span>
+                    <span class="signal-peek-time" id="signal-peek-time">-</span>
+                    <span class="signal-peek-price" id="signal-peek-price">-</span>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -1323,6 +1404,9 @@
         
         // Signal peek state
         let latestSignalData = null;
+        
+        // Chart data tracking for incremental updates
+        let currentBarTimestamps = new Set();
         
         // Mobile responsiveness breakpoints
         // Portrait mobile: width <= 768px (standard mobile breakpoint)
@@ -1497,23 +1581,11 @@
             const symbol = currentSymbol;
             const strike = document.getElementById('strike').value;
             const right = document.getElementById('right').value;
-            const expiration = document.getElementById('expiration').value;
             const intervalText = currentInterval === 1 ? '1m' : currentInterval === 5 ? '5m' : currentInterval === 15 ? '15m' : '1H';
             
-            if (strike && expiration) {
-                // Parse date more reliably - expiration is in YYYY-MM-DD format from the API
-                let expShort = expiration;
-                try {
-                    // Split and create date to avoid timezone issues
-                    const [year, month, day] = expiration.split('-');
-                    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-                    expShort = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                } catch (e) {
-                    // Fallback to just the date part if parsing fails
-                    expShort = expiration.substring(5).replace('-', '/');
-                }
+            if (strike) {
                 const rightText = right === 'C' ? 'C' : 'P';
-                document.getElementById('summary-text').textContent = `${symbol} $${strike}${rightText} | ${expShort} | ${intervalText}`;
+                document.getElementById('summary-text').textContent = `${symbol} $${strike}${rightText} ${intervalText}`;
             }
         }
         
@@ -1534,8 +1606,15 @@
             peek.className = `signal-peek ${isBullish ? '' : 'bearish'}`;
             
             document.getElementById('signal-peek-name').textContent = latestSignal.signal.replace(/_/g, ' ').toUpperCase();
-            document.getElementById('signal-peek-time').textContent = new Date(latestSignal.datetime).toLocaleTimeString();
+            document.getElementById('signal-peek-description').textContent = latestSignal.description || '';
+            document.getElementById('signal-peek-confidence').textContent = `${Math.round(latestSignal.confidence * 100)}%`;
+            document.getElementById('signal-peek-time').textContent = new Date(latestSignal.datetime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
             document.getElementById('signal-peek-price').textContent = `$${latestSignal.price.toFixed(2)}`;
+            
+            // Update badge
+            const badge = document.getElementById('signal-peek-badge');
+            badge.textContent = isBullish ? 'BULLISH' : 'BEARISH';
+            badge.className = `signal-peek-badge ${isBullish ? 'bullish' : 'bearish'}`;
             
             // Only show if analysis sidebar is not open
             if (isMobile() && !document.getElementById('analysis-sidebar').classList.contains('mobile-open')) {
@@ -1546,15 +1625,17 @@
         // ===== LIVE MODE FUNCTIONS =====
         function updateLiveButton() {
             const desktopBtn = document.getElementById('live-btn');
-            const summaryBtn = document.getElementById('summary-live-btn');
+            const summaryIndicator = document.getElementById('summary-live-indicator');
             
             if (liveMode) {
                 const text = `🔴 LIVE ${liveCountdown}s`;
                 desktopBtn.textContent = text;
-                summaryBtn.textContent = text;
+                summaryIndicator.textContent = `🔴 ${liveCountdown}s`;
+                summaryIndicator.classList.add('active');
             } else {
                 desktopBtn.textContent = '⚪ LIVE';
-                summaryBtn.textContent = '⚪ LIVE';
+                summaryIndicator.textContent = '';
+                summaryIndicator.classList.remove('active');
             }
         }
         
@@ -1566,9 +1647,8 @@
                 liveMode = true;
                 liveCountdown = 10;
                 
-                // Add active class to both buttons
+                // Add active class to button
                 document.getElementById('live-btn').classList.add('active');
-                document.getElementById('summary-live-btn').classList.add('active');
                 
                 // Start countdown
                 updateLiveButton();
@@ -1601,9 +1681,8 @@
                     liveCountdownInterval = null;
                 }
                 
-                // Remove active class from both buttons
+                // Remove active class from button
                 document.getElementById('live-btn').classList.remove('active');
-                document.getElementById('summary-live-btn').classList.remove('active');
                 
                 // Reset button text
                 updateLiveButton();
@@ -1894,6 +1973,7 @@
                 let url = `/api/analyze?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
                 if (startDate) url += `&start_date=${startDate}`;
                 if (endDate) url += `&end_date=${endDate}`;
+                if (liveMode) url += `&nocache=true`;  // Bypass cache in live mode
                 
                 const res = await fetch(url);
                 if (!res.ok) {
@@ -1918,7 +1998,12 @@
                     document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
                 }
                 
-                updateCharts(data);
+                // Use incremental updates in live mode, full redraw otherwise
+                if (liveMode && currentBarTimestamps.size > 0) {
+                    updateChartsIncremental(data);
+                } else {
+                    updateCharts(data);
+                }
                 updateAnalysis(data);
                 
                 // Update summary text after analyze
@@ -1992,6 +2077,55 @@
                 } catch (_) { /* chart not ready yet – fitContent already handled it */ }
             }
           } catch(chartErr) { console.warn('Chart update warning:', chartErr.message); }
+        }
+        
+        function updateChartsIncremental(data) {
+          try {
+            const candleData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            }));
+            
+            const volumeData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                value: bar.volume,
+                color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            }));
+            
+            // Build new set of timestamps
+            const newTimestamps = new Set(candleData.map(d => d.time));
+            
+            // Suppress timescale sync during updates
+            window._chartDataLoading = true;
+            
+            // Update bars (lightweight-charts update() handles both existing and new bars)
+            for (let i = 0; i < candleData.length; i++) {
+                candlestickSeries.update(candleData[i]);
+                volumeSeries.update(volumeData[i]);
+            }
+            
+            window._chartDataLoading = false;
+            
+            // Update tracked timestamps
+            currentBarTimestamps = newTimestamps;
+            
+            // Update markers for signals
+            const markers = data.signals.map(signal => {
+                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
+                return {
+                    time: new Date(signal.datetime).getTime() / 1000,
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#26a69a' : '#ef5350',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+            candlestickSeries.setMarkers(markers);
+            
+          } catch(chartErr) { console.warn('Chart incremental update warning:', chartErr.message); }
         }
         
         function updateAnalysis(data) {
@@ -2069,9 +2203,8 @@
         document.getElementById('analyze-btn').addEventListener('click', analyze);
         document.getElementById('summary-analyze-btn').addEventListener('click', analyze);
         
-        // Live mode buttons
+        // Live mode button
         document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
-        document.getElementById('summary-live-btn').addEventListener('click', toggleLiveMode);
         
         // Controls chevron
         document.getElementById('controls-chevron').addEventListener('click', toggleControls);
@@ -2148,8 +2281,8 @@
             // Select default symbol (will now have price data for ATM)
             selectSymbol('SPY');
             
-            // Start price updates (every 60 seconds)
-            priceUpdateInterval = setInterval(loadWatchlistPrices, 60000);
+            // Start price updates (every 15 seconds for real-time feel)
+            priceUpdateInterval = setInterval(loadWatchlistPrices, 15000);
         }
         
         init();
