@@ -2101,20 +2101,10 @@
             // Suppress timescale sync during updates
             window._chartDataLoading = true;
             
-            // Update existing bars and append new bars
+            // Update bars (lightweight-charts update() handles both existing and new bars)
             for (let i = 0; i < candleData.length; i++) {
-                const candleBar = candleData[i];
-                const volumeBar = volumeData[i];
-                
-                if (currentBarTimestamps.has(candleBar.time)) {
-                    // Update existing bar (likely the last bar being updated)
-                    candlestickSeries.update(candleBar);
-                    volumeSeries.update(volumeBar);
-                } else {
-                    // New bar - append it
-                    candlestickSeries.update(candleBar);
-                    volumeSeries.update(volumeBar);
-                }
+                candlestickSeries.update(candleData[i]);
+                volumeSeries.update(volumeData[i]);
             }
             
             window._chartDataLoading = false;

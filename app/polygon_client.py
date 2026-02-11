@@ -275,13 +275,13 @@ class PolygonClient:
         """
         Fetch snapshot prices for multiple symbols (real-time or 15-min delayed).
         Returns near-real-time prices including last trade, day OHLV, prev close.
-        Uses a short TTL cache (10 seconds) for efficiency.
+        Uses a 10-second TTL cache for efficiency.
         """
         # Create cache key from sorted symbols
         cache_key = tuple(sorted(s.upper() for s in symbols))
         
-        # Check snapshot cache (separate from price_cache, uses CACHE_TTL_PRICES/3 for ~10s)
-        snapshot_cache_ttl = max(10, settings.CACHE_TTL_PRICES // 3)
+        # Check snapshot cache (separate from price_cache, uses 10s TTL)
+        snapshot_cache_ttl = 10
         if not hasattr(self, '_snapshot_cache'):
             self._snapshot_cache = TTLCache(maxsize=64, ttl=snapshot_cache_ttl)
         
@@ -324,7 +324,8 @@ class PolygonClient:
             return result
             
         except Exception as e:
-            # Fallback to empty dict on error
+            # Log error and fallback to empty dict
+            print(f"Error fetching snapshot prices for {ticker_str}: {e}")
             return {}
 
     # ── Cache management ─────────────────────────────────────
