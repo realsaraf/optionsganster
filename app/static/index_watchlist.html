@@ -1325,6 +1325,10 @@
         let latestSignalData = null;
         
         // Mobile responsiveness breakpoints
+        // Portrait mobile: width <= 768px (standard mobile breakpoint)
+        // Landscape mobile: width <= 1024px AND height <= 500px
+        // This ensures phones in landscape (e.g., iPhone X: 812x375) are detected as mobile
+        // while tablets in landscape (typically height > 500px) are treated as desktop
         const MOBILE_MAX_WIDTH = 768;
         const LANDSCAPE_MAX_WIDTH = 1024;
         const LANDSCAPE_MAX_HEIGHT = 500;
@@ -1429,7 +1433,7 @@
                 const controlsSummary = document.getElementById('controls-summary');
                 
                 // Ensure controls-summary is active on mobile
-                if (!controlsSummary.classList.contains('active')) {
+                if (controlsSummary && !controlsSummary.classList.contains('active')) {
                     controlsSummary.classList.add('active');
                     collapseControls();
                 }
@@ -1442,7 +1446,7 @@
                 const controlsBar = document.getElementById('controls-bar');
                 
                 // Reset controls state on desktop
-                if (controlsSummary.classList.contains('active')) {
+                if (controlsSummary && controlsBar && controlsSummary.classList.contains('active')) {
                     controlsSummary.classList.remove('active');
                     controlsBar.classList.remove('collapsed');
                     controlsCollapsed = false;
@@ -2129,10 +2133,13 @@
             
             // Initialize mobile controls visibility and state
             if (isMobile()) {
+                const controlsSummary = document.getElementById('controls-summary');
                 // Show controls-summary immediately on mobile
-                document.getElementById('controls-summary').classList.add('active');
-                // Start with controls collapsed on mobile to maximize chart space
-                collapseControls();
+                if (controlsSummary) {
+                    controlsSummary.classList.add('active');
+                    // Start with controls collapsed on mobile to maximize chart space
+                    collapseControls();
+                }
             }
             
             // Load watchlist prices FIRST (needed for ATM calculation)
