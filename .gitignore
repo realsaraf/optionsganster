@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Testing / caches
+.pytest_cache/
+.playwright-mcp/
+htmlcov/
+.coverage
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Test utility scripts (not part of the app)
+check_qqq.py
+test_data.py
+test_liquid.py
+test_strikes.py

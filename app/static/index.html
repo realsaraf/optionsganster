@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptionsGanster - VPA Analysis</title>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100vh;
+        }
+        
+        .header {
+            background: #161b22;
+            padding: 16px 24px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #58a6ff;
+        }
+        
+        .header h1 span {
+            color: #f85149;
+        }
+        
+        .controls {
+            background: #161b22;
+            padding: 16px 24px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .control-group label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        
+        .control-group input,
+        .control-group select {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #e6edf3;
+            font-size: 14px;
+            min-width: 120px;
+        }
+        
+        .control-group input:focus,
+        .control-group select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        
+        button {
+            background: #238636;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #2ea043;
+        }
+        
+        button:disabled {
+            background: #21262d;
+            cursor: not-allowed;
+        }
+        
+        .main-content {
+            display: flex;
+            height: calc(100vh - 140px);
+        }
+        
+        .chart-container {
+            flex: 1;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        #price-chart {
+            flex: 3;
+            background: #161b22;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+        }
+        
+        #volume-chart {
+            flex: 1;
+            background: #161b22;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+        }
+        
+        .sidebar {
+            width: 350px;
+            background: #161b22;
+            border-left: 1px solid #30363d;
+            overflow-y: auto;
+        }
+        
+        .sidebar-section {
+            padding: 16px;
+            border-bottom: 1px solid #30363d;
+        }
+        
+        .sidebar-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        
+        .bias-indicator {
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .bias-indicator.bullish {
+            background: rgba(35, 134, 54, 0.2);
+            border: 1px solid #238636;
+        }
+        
+        .bias-indicator.bearish {
+            background: rgba(248, 81, 73, 0.2);
+            border: 1px solid #f85149;
+        }
+        
+        .bias-indicator.neutral {
+            background: rgba(139, 148, 158, 0.2);
+            border: 1px solid #8b949e;
+        }
+        
+        .bias-indicator .bias-label {
+            font-size: 24px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .bias-indicator.bullish .bias-label { color: #3fb950; }
+        .bias-indicator.bearish .bias-label { color: #f85149; }
+        .bias-indicator.neutral .bias-label { color: #8b949e; }
+        
+        .bias-indicator .bias-strength {
+            font-size: 14px;
+            margin-top: 8px;
+            color: #8b949e;
+        }
+        
+        .bias-indicator .bias-reason {
+            font-size: 12px;
+            margin-top: 4px;
+            color: #6e7681;
+        }
+        
+        .signal-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .signal-item {
+            padding: 12px;
+            background: #0d1117;
+            border-radius: 6px;
+            border-left: 3px solid;
+        }
+        
+        .signal-item.strong_bullish,
+        .signal-item.accumulation,
+        .signal-item.test_support,
+        .signal-item.climax_bottom,
+        .signal-item.weak_down {
+            border-color: #3fb950;
+        }
+        
+        .signal-item.strong_bearish,
+        .signal-item.distribution,
+        .signal-item.test_resistance,
+        .signal-item.climax_top,
+        .signal-item.weak_up {
+            border-color: #f85149;
+        }
+        
+        .signal-item.neutral {
+            border-color: #8b949e;
+        }
+        
+        .signal-item .signal-time {
+            font-size: 11px;
+            color: #6e7681;
+        }
+        
+        .signal-item .signal-name {
+            font-size: 13px;
+            font-weight: 600;
+            margin: 4px 0;
+        }
+        
+        .signal-item .signal-desc {
+            font-size: 12px;
+            color: #8b949e;
+        }
+        
+        .signal-item .signal-meta {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #6e7681;
+        }
+        
+        .timeframe-buttons {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .timeframe-btn {
+            background: #21262d;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .timeframe-btn.active {
+            background: #58a6ff;
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #8b949e;
+        }
+        
+        .error {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid #f85149;
+            color: #f85149;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Options<span>Ganster</span></h1>
+        <div class="timeframe-buttons">
+            <button class="timeframe-btn active" data-interval="1">1m</button>
+            <button class="timeframe-btn" data-interval="5">5m</button>
+            <button class="timeframe-btn" data-interval="15">15m</button>
+            <button class="timeframe-btn" data-interval="60">1h</button>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label>Symbol</label>
+            <input type="text" id="symbol" value="QQQ" placeholder="QQQ, SPY...">
+        </div>
+        
+        <div class="control-group">
+            <label>Expiration</label>
+            <input type="date" id="expiration" value="">
+        </div>
+        
+        <div class="control-group">
+            <label>Strike</label>
+            <input type="number" id="strike" value="590" step="1" min="1" style="width: 100px;">
+        </div>
+        
+        <div class="control-group">
+            <label>Type</label>
+            <select id="right">
+                <option value="C">Call</option>
+                <option value="P">Put</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label>Start Date</label>
+            <input type="date" id="start-date">
+        </div>
+        
+        <div class="control-group">
+            <label>End Date</label>
+            <input type="date" id="end-date">
+        </div>
+        
+        <button id="analyze-btn">Analyze</button>
+    </div>
+    
+    <div class="main-content">
+        <div class="chart-container">
+            <div id="price-chart"></div>
+            <div id="volume-chart"></div>
+        </div>
+        
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <h3>Market Bias</h3>
+                <div id="bias-container" class="bias-indicator neutral">
+                    <div class="bias-label">-</div>
+                    <div class="bias-strength">Load data to analyze</div>
+                </div>
+            </div>
+            
+            <div class="sidebar-section">
+                <h3>VPA Signals</h3>
+                <div id="signals-container" class="signal-list">
+                    <div class="loading">No signals yet</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // State
+        let priceChart = null;
+        let volumeChart = null;
+        let candlestickSeries = null;
+        let volumeSeries = null;
+        let currentInterval = 1;
+        
+        // Initialize charts
+        function initCharts() {
+            const priceContainer = document.getElementById('price-chart');
+            const volumeContainer = document.getElementById('volume-chart');
+            
+            // Price chart
+            priceChart = LightweightCharts.createChart(priceContainer, {
+                layout: {
+                    background: { color: '#161b22' },
+                    textColor: '#8b949e',
+                },
+                grid: {
+                    vertLines: { color: '#21262d' },
+                    horzLines: { color: '#21262d' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                },
+                rightPriceScale: {
+                    borderColor: '#30363d',
+                },
+                timeScale: {
+                    borderColor: '#30363d',
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+            });
+            
+            candlestickSeries = priceChart.addCandlestickSeries({
+                upColor: '#3fb950',
+                downColor: '#f85149',
+                borderUpColor: '#3fb950',
+                borderDownColor: '#f85149',
+                wickUpColor: '#3fb950',
+                wickDownColor: '#f85149',
+            });
+            
+            // Volume chart
+            volumeChart = LightweightCharts.createChart(volumeContainer, {
+                layout: {
+                    background: { color: '#161b22' },
+                    textColor: '#8b949e',
+                },
+                grid: {
+                    vertLines: { color: '#21262d' },
+                    horzLines: { color: '#21262d' },
+                },
+                rightPriceScale: {
+                    borderColor: '#30363d',
+                },
+                timeScale: {
+                    borderColor: '#30363d',
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+            });
+            
+            volumeSeries = volumeChart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: '',
+            });
+            
+            // Sync charts
+            priceChart.timeScale().subscribeVisibleTimeRangeChange(() => {
+                volumeChart.timeScale().setVisibleRange(priceChart.timeScale().getVisibleRange());
+            });
+            
+            // Resize handler
+            const resizeObserver = new ResizeObserver(entries => {
+                for (let entry of entries) {
+                    if (entry.target === priceContainer) {
+                        priceChart.applyOptions({ 
+                            width: entry.contentRect.width,
+                            height: entry.contentRect.height 
+                        });
+                    } else if (entry.target === volumeContainer) {
+                        volumeChart.applyOptions({ 
+                            width: entry.contentRect.width,
+                            height: entry.contentRect.height 
+                        });
+                    }
+                }
+            });
+            
+            resizeObserver.observe(priceContainer);
+            resizeObserver.observe(volumeContainer);
+        }
+        
+        // No longer needed - using manual input for expiration and strike
+        function loadExpirations() {
+            // Historical analysis - user enters expiration manually
+        }
+        
+        function loadStrikes() {
+            // Historical analysis - user enters strike manually
+        }
+        
+        // Run analysis
+        async function analyze() {
+            const symbol = document.getElementById('symbol').value;
+            const expiration = document.getElementById('expiration').value;
+            const strike = document.getElementById('strike').value;
+            const right = document.getElementById('right').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            
+            if (!symbol || !expiration || !strike) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            const btn = document.getElementById('analyze-btn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            
+            try {
+                let url = `/api/analyze?symbol=${symbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
+                if (startDate) url += `&start_date=${startDate}`;
+                if (endDate) url += `&end_date=${endDate}`;
+                
+                const res = await fetch(url);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Analysis failed');
+                }
+                
+                const data = await res.json();
+                updateCharts(data);
+                updateBias(data.bias);
+                updateSignals(data.signals);
+                
+            } catch (e) {
+                document.getElementById('signals-container').innerHTML = 
+                    `<div class="error">${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Analyze';
+            }
+        }
+        
+        // Update charts with data
+        function updateCharts(data) {
+            const candleData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            }));
+            
+            const volumeData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                value: bar.volume,
+                color: bar.close >= bar.open ? 'rgba(63, 185, 80, 0.5)' : 'rgba(248, 81, 73, 0.5)',
+            }));
+            
+            candlestickSeries.setData(candleData);
+            volumeSeries.setData(volumeData);
+            
+            // Add markers for signals
+            const markers = data.signals.map(signal => {
+                const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down'].includes(signal.signal);
+                return {
+                    time: new Date(signal.datetime).getTime() / 1000,
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#3fb950' : '#f85149',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+            
+            candlestickSeries.setMarkers(markers);
+            
+            // Scroll to show the most recent data (last 100 bars visible)
+            if (candleData.length > 0) {
+                const barsToShow = Math.min(100, candleData.length);
+                const fromIndex = Math.max(0, candleData.length - barsToShow);
+                priceChart.timeScale().setVisibleRange({
+                    from: candleData[fromIndex].time,
+                    to: candleData[candleData.length - 1].time
+                });
+            }
+        }
+        
+        // Update bias indicator
+        function updateBias(bias) {
+            const container = document.getElementById('bias-container');
+            container.className = `bias-indicator ${bias.bias}`;
+            container.innerHTML = `
+                <div class="bias-label">${bias.bias}</div>
+                <div class="bias-strength">Strength: ${Math.round(bias.strength * 100)}%</div>
+                <div class="bias-reason">${bias.reason}</div>
+            `;
+        }
+        
+        // Update signals list
+        function updateSignals(signals) {
+            const container = document.getElementById('signals-container');
+            
+            if (signals.length === 0) {
+                container.innerHTML = '<div class="loading">No significant signals</div>';
+                return;
+            }
+            
+            container.innerHTML = signals
+                .reverse()  // Most recent first
+                .slice(0, 50)  // Limit to 50
+                .map(signal => `
+                    <div class="signal-item ${signal.signal}">
+                        <div class="signal-time">${new Date(signal.datetime).toLocaleString()}</div>
+                        <div class="signal-name">${signal.signal.replace(/_/g, ' ').toUpperCase()}</div>
+                        <div class="signal-desc">${signal.description}</div>
+                        <div class="signal-meta">
+                            <span>Price: $${signal.price.toFixed(2)}</span>
+                            <span>Vol: ${signal.volume.toLocaleString()}</span>
+                            <span>Vol Ratio: ${signal.volume_ratio}x</span>
+                        </div>
+                    </div>
+                `)
+                .join('');
+        }
+        
+        // Event listeners
+        document.getElementById('analyze-btn').addEventListener('click', analyze);
+        
+        document.querySelectorAll('.timeframe-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.timeframe-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentInterval = parseInt(btn.dataset.interval);
+                analyze();
+            });
+        });
+        
+        // Set defaults for historical analysis demo
+        // SPY Dec 20, 2024 $590 Call - this has good data
+        document.getElementById('symbol').value = 'SPY';
+        document.getElementById('expiration').value = '2024-12-20';
+        document.getElementById('strike').value = '590';
+        document.getElementById('start-date').value = '2024-12-16';
+        document.getElementById('end-date').value = '2024-12-20';
+        
+        // Initialize
+        initCharts();
+    </script>
+</body>
+</html>

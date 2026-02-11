@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptionsGanster - VPA Analysis</title>
+    <!-- TradingView Lightweight Charts - Supports Custom Data -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+            background: #131722;
+            color: #d1d4dc;
+            min-height: 100vh;
+        }
+        
+        /* TradingView-style header */
+        .header {
+            background: #1e222d;
+            padding: 8px 16px;
+            border-bottom: 1px solid #2a2e39;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: #2962ff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .logo span {
+            color: #f23645;
+        }
+        
+        /* Symbol info bar */
+        .symbol-bar {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex: 1;
+        }
+        
+        .symbol-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .price-info {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+        
+        .current-price {
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .price-change {
+            font-size: 14px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        
+        .price-change.up {
+            color: #26a69a;
+            background: rgba(38, 166, 154, 0.1);
+        }
+        
+        .price-change.down {
+            color: #ef5350;
+            background: rgba(239, 83, 80, 0.1);
+        }
+        
+        /* Toolbar */
+        .toolbar {
+            background: #1e222d;
+            padding: 8px 16px;
+            border-bottom: 1px solid #2a2e39;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .toolbar-group {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            padding-right: 12px;
+            border-right: 1px solid #2a2e39;
+        }
+        
+        .toolbar-group:last-child {
+            border-right: none;
+        }
+        
+        .toolbar label {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-right: 4px;
+        }
+        
+        .toolbar input,
+        .toolbar select {
+            background: #2a2e39;
+            border: 1px solid #363a45;
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: #d1d4dc;
+            font-size: 13px;
+        }
+        
+        .toolbar input:focus,
+        .toolbar select:focus {
+            outline: none;
+            border-color: #2962ff;
+        }
+        
+        .toolbar input[type="text"] {
+            width: 80px;
+        }
+        
+        .toolbar input[type="number"] {
+            width: 70px;
+        }
+        
+        .toolbar input[type="date"] {
+            width: 130px;
+        }
+        
+        .tv-btn {
+            background: #2a2e39;
+            border: 1px solid #363a45;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: #d1d4dc;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        
+        .tv-btn:hover {
+            background: #363a45;
+        }
+        
+        .tv-btn.active {
+            background: #2962ff;
+            border-color: #2962ff;
+            color: #fff;
+        }
+        
+        .tv-btn.primary {
+            background: #2962ff;
+            border-color: #2962ff;
+            color: #fff;
+        }
+        
+        .tv-btn.primary:hover {
+            background: #1e53e4;
+        }
+        
+        /* Main layout */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 100px);
+        }
+        
+        /* Chart area */
+        .chart-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #131722;
+        }
+        
+        .chart-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        #tv-chart {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Chart legend overlay */
+        .chart-legend {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(30, 34, 45, 0.9);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        
+        .legend-row {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 4px;
+        }
+        
+        .legend-item {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .legend-label {
+            color: #787b86;
+        }
+        
+        .legend-value {
+            color: #d1d4dc;
+            font-weight: 500;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 320px;
+            background: #1e222d;
+            border-left: 1px solid #2a2e39;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid #2a2e39;
+        }
+        
+        .sidebar-tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: #787b86;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        
+        .sidebar-tab:hover {
+            color: #d1d4dc;
+        }
+        
+        .sidebar-tab.active {
+            color: #2962ff;
+            border-bottom-color: #2962ff;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        
+        /* Bias card */
+        .bias-card {
+            background: #131722;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        
+        .bias-card h4 {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        
+        .bias-indicator {
+            text-align: center;
+            padding: 16px;
+            border-radius: 6px;
+        }
+        
+        .bias-indicator.bullish {
+            background: rgba(38, 166, 154, 0.1);
+            border: 1px solid rgba(38, 166, 154, 0.3);
+        }
+        
+        .bias-indicator.bearish {
+            background: rgba(239, 83, 80, 0.1);
+            border: 1px solid rgba(239, 83, 80, 0.3);
+        }
+        
+        .bias-indicator.neutral {
+            background: rgba(120, 123, 134, 0.1);
+            border: 1px solid rgba(120, 123, 134, 0.3);
+        }
+        
+        .bias-label {
+            font-size: 20px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .bias-indicator.bullish .bias-label { color: #26a69a; }
+        .bias-indicator.bearish .bias-label { color: #ef5350; }
+        .bias-indicator.neutral .bias-label { color: #787b86; }
+        
+        .bias-strength {
+            font-size: 13px;
+            color: #787b86;
+            margin-top: 4px;
+        }
+        
+        .bias-reason {
+            font-size: 11px;
+            color: #5d606b;
+            margin-top: 8px;
+        }
+        
+        /* Signal list */
+        .signal-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .signal-item {
+            background: #131722;
+            border-radius: 6px;
+            padding: 10px 12px;
+            border-left: 3px solid;
+        }
+        
+        .signal-item.strong_bullish,
+        .signal-item.accumulation,
+        .signal-item.test_support,
+        .signal-item.climax_bottom {
+            border-color: #26a69a;
+        }
+        
+        .signal-item.strong_bearish,
+        .signal-item.distribution,
+        .signal-item.test_resistance,
+        .signal-item.climax_top {
+            border-color: #ef5350;
+        }
+        
+        .signal-item.weak_up,
+        .signal-item.weak_down {
+            border-color: #787b86;
+        }
+        
+        .signal-time {
+            font-size: 11px;
+            color: #5d606b;
+        }
+        
+        .signal-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d1d4dc;
+            margin: 4px 0;
+        }
+        
+        .signal-desc {
+            font-size: 11px;
+            color: #787b86;
+        }
+        
+        .signal-meta {
+            display: flex;
+            gap: 12px;
+            margin-top: 6px;
+            font-size: 11px;
+            color: #5d606b;
+        }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .stat-item {
+            background: #131722;
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #d1d4dc;
+        }
+        
+        .stat-label {
+            font-size: 10px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-top: 4px;
+        }
+        
+        /* Loading/Error states */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #787b86;
+        }
+        
+        .error-msg {
+            background: rgba(239, 83, 80, 0.1);
+            border: 1px solid rgba(239, 83, 80, 0.3);
+            color: #ef5350;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        /* Crosshair tooltip */
+        .chart-tooltip {
+            position: absolute;
+            display: none;
+            background: rgba(30, 34, 45, 0.95);
+            border: 1px solid #363a45;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 12px;
+            z-index: 100;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            Options<span>Ganster</span>
+        </div>
+        <div class="symbol-bar">
+            <div class="symbol-name" id="symbol-display">-</div>
+            <div class="price-info">
+                <div class="current-price" id="current-price">-</div>
+                <div class="price-change up" id="price-change">-</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="toolbar">
+        <div class="toolbar-group">
+            <label>Symbol</label>
+            <input type="text" id="symbol" list="symbol-list" value="SPY" placeholder="SPY" autocomplete="off">
+            <datalist id="symbol-list">
+                <option value="SPY">S&P 500 ETF</option>
+                <option value="QQQ">Nasdaq 100 ETF</option>
+                <option value="IWM">Russell 2000 ETF</option>
+                <option value="DIA">Dow Jones ETF</option>
+                <option value="AAPL">Apple</option>
+                <option value="MSFT">Microsoft</option>
+                <option value="GOOGL">Google</option>
+                <option value="AMZN">Amazon</option>
+                <option value="META">Meta</option>
+                <option value="TSLA">Tesla</option>
+                <option value="NVDA">NVIDIA</option>
+                <option value="AMD">AMD</option>
+                <option value="NFLX">Netflix</option>
+                <option value="COIN">Coinbase</option>
+                <option value="MSTR">MicroStrategy</option>
+                <option value="XSP">S&P 500 Mini</option>
+                <option value="VIX">VIX Index</option>
+                <option value="GLD">Gold ETF</option>
+                <option value="SLV">Silver ETF</option>
+                <option value="USO">Oil ETF</option>
+                <option value="TLT">20+ Year Treasury</option>
+                <option value="HYG">High Yield Bond</option>
+            </datalist>
+        </div>
+        
+        <div class="toolbar-group">
+            <label>Expiration</label>
+            <select id="expiration">
+                <option value="">Loading...</option>
+            </select>
+        </div>
+        
+        <div class="toolbar-group">
+            <label>Strike</label>
+            <select id="strike">
+                <option value="">Select expiration first</option>
+            </select>
+        </div>
+        
+        <div class="toolbar-group">
+            <label>Type</label>
+            <select id="right">
+                <option value="C">Call</option>
+                <option value="P">Put</option>
+            </select>
+        </div>
+        
+        <div class="toolbar-group">
+            <label>From</label>
+            <input type="date" id="start-date">
+        </div>
+        
+        <div class="toolbar-group">
+            <label>To</label>
+            <input type="date" id="end-date">
+        </div>
+        
+        <div class="toolbar-group">
+            <label>Interval</label>
+            <button class="tv-btn active" data-interval="1">1m</button>
+            <button class="tv-btn" data-interval="5">5m</button>
+            <button class="tv-btn" data-interval="15">15m</button>
+            <button class="tv-btn" data-interval="60">1H</button>
+        </div>
+        
+        <button class="tv-btn primary" id="analyze-btn">▶ Analyze</button>
+    </div>
+    
+    <div class="main-container">
+        <div class="chart-area">
+            <div class="chart-container">
+                <div id="tv-chart"></div>
+                <div class="chart-legend" id="chart-legend">
+                    <div class="legend-row">
+                        <div class="legend-item">
+                            <span class="legend-label">O</span>
+                            <span class="legend-value" id="legend-o">-</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-label">H</span>
+                            <span class="legend-value" id="legend-h">-</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-label">L</span>
+                            <span class="legend-value" id="legend-l">-</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-label">C</span>
+                            <span class="legend-value" id="legend-c">-</span>
+                        </div>
+                    </div>
+                    <div class="legend-row">
+                        <div class="legend-item">
+                            <span class="legend-label">Vol</span>
+                            <span class="legend-value" id="legend-vol">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <div class="sidebar-tabs">
+                <div class="sidebar-tab active" data-tab="analysis">Analysis</div>
+                <div class="sidebar-tab" data-tab="signals">Signals</div>
+            </div>
+            
+            <div class="sidebar-content" id="sidebar-content">
+                <div class="bias-card">
+                    <h4>Market Bias</h4>
+                    <div class="bias-indicator neutral" id="bias-indicator">
+                        <div class="bias-label">-</div>
+                        <div class="bias-strength">Load data to analyze</div>
+                    </div>
+                </div>
+                
+                <div class="stats-grid" id="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-bars">-</div>
+                        <div class="stat-label">Bars</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-signals">-</div>
+                        <div class="stat-label">Signals</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-bullish">-</div>
+                        <div class="stat-label">Bullish</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-bearish">-</div>
+                        <div class="stat-label">Bearish</div>
+                    </div>
+                </div>
+                
+                <div class="bias-card">
+                    <h4>Recent Signals</h4>
+                    <div class="signal-list" id="signal-list">
+                        <div class="loading">No signals yet</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let chart = null;
+        let candleSeries = null;
+        let volumeSeries = null;
+        let currentInterval = 1;
+        let chartData = null;
+        
+        // Initialize chart
+        function initChart() {
+            const container = document.getElementById('tv-chart');
+            
+            chart = LightweightCharts.createChart(container, {
+                layout: {
+                    background: { type: 'solid', color: '#131722' },
+                    textColor: '#d1d4dc',
+                },
+                grid: {
+                    vertLines: { color: '#1e222d' },
+                    horzLines: { color: '#1e222d' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: {
+                        color: '#758696',
+                        width: 1,
+                        style: LightweightCharts.LineStyle.Dashed,
+                        labelBackgroundColor: '#2962ff',
+                    },
+                    horzLine: {
+                        color: '#758696',
+                        width: 1,
+                        style: LightweightCharts.LineStyle.Dashed,
+                        labelBackgroundColor: '#2962ff',
+                    },
+                },
+                rightPriceScale: {
+                    borderColor: '#2a2e39',
+                    scaleMargins: { top: 0.1, bottom: 0.2 },
+                },
+                timeScale: {
+                    borderColor: '#2a2e39',
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+                localization: {
+                    timeFormatter: (time) => {
+                        // Convert Unix timestamp to EST/EDT
+                        const date = new Date(time * 1000);
+                        return date.toLocaleTimeString('en-US', {
+                            timeZone: 'America/New_York',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                        });
+                    },
+                },
+                handleScroll: { vertTouchDrag: true },
+                handleScale: { axisPressedMouseMove: true },
+            });
+            
+            // Candlestick series
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#26a69a',
+                downColor: '#ef5350',
+                borderUpColor: '#26a69a',
+                borderDownColor: '#ef5350',
+                wickUpColor: '#26a69a',
+                wickDownColor: '#ef5350',
+            });
+            
+            // Volume series
+            volumeSeries = chart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: 'volume',
+                scaleMargins: { top: 0.85, bottom: 0 },
+            });
+            
+            chart.priceScale('volume').applyOptions({
+                scaleMargins: { top: 0.85, bottom: 0 },
+            });
+            
+            // Crosshair move handler for legend
+            chart.subscribeCrosshairMove(param => {
+                if (param.time && chartData) {
+                    const bar = chartData.bars.find(b => {
+                        const barTime = new Date(b.datetime).getTime() / 1000;
+                        return Math.abs(barTime - param.time) < 60;
+                    });
+                    if (bar) {
+                        document.getElementById('legend-o').textContent = bar.open.toFixed(2);
+                        document.getElementById('legend-h').textContent = bar.high.toFixed(2);
+                        document.getElementById('legend-l').textContent = bar.low.toFixed(2);
+                        document.getElementById('legend-c').textContent = bar.close.toFixed(2);
+                        document.getElementById('legend-vol').textContent = bar.volume.toLocaleString();
+                    }
+                }
+            });
+            
+            // Resize handler
+            const resizeObserver = new ResizeObserver(entries => {
+                chart.applyOptions({ 
+                    width: entries[0].contentRect.width,
+                    height: entries[0].contentRect.height 
+                });
+            });
+            resizeObserver.observe(container);
+        }
+        
+        // Analyze
+        async function analyze() {
+            const btn = document.getElementById('analyze-btn');
+            const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            const expiration = document.getElementById('expiration').value;
+            const strike = document.getElementById('strike').value;
+            const right = document.getElementById('right').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            
+            // Validate required fields
+            if (!symbol) {
+                document.getElementById('signal-list').innerHTML = 
+                    '<div class="error-msg">Please enter a symbol</div>';
+                return;
+            }
+            if (!expiration) {
+                document.getElementById('signal-list').innerHTML = 
+                    '<div class="error-msg">Please select an expiration date</div>';
+                return;
+            }
+            if (!strike) {
+                document.getElementById('signal-list').innerHTML = 
+                    '<div class="error-msg">Please select a strike price</div>';
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ Loading...';
+            
+            try {
+                const url = `/api/analyze?symbol=${symbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}&start_date=${startDate}&end_date=${endDate}`;
+                const res = await fetch(url);
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Analysis failed');
+                }
+                
+                chartData = await res.json();
+                
+                if (!chartData.bars || chartData.bars.length === 0) {
+                    throw new Error('No trading data found for this contract. Try a more liquid strike or different dates.');
+                }
+                
+                updateChart(chartData);
+                updateHeader(chartData);
+                updateAnalysis(chartData);
+                
+            } catch (e) {
+                document.getElementById('signal-list').innerHTML = 
+                    `<div class="error-msg">${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Analyze';
+            }
+        }
+        
+        // Update chart
+        function updateChart(data) {
+            // Parse datetime as US Eastern time - Polygon returns ET timestamps
+            // We need to convert ET time to UTC timestamp for TradingView
+            function parseLocalTime(dateStr) {
+                // dateStr format: "2025-01-17 15:30:00" (this is in ET)
+                const [datePart, timePart] = dateStr.split(' ');
+                const [year, month, day] = datePart.split('-').map(Number);
+                const [hour, min, sec] = timePart.split(':').map(Number);
+                
+                // Create an ISO string with explicit Eastern timezone
+                // This ensures proper handling regardless of browser timezone
+                const isoString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+                
+                // Parse as Eastern Time and get UTC timestamp
+                // TradingView expects UTC timestamps
+                const etDate = new Date(isoString + '-05:00'); // EST offset (use -04:00 for EDT)
+                
+                // Determine if date is in DST (simplified check for US)
+                const jan = new Date(year, 0, 1);
+                const jul = new Date(year, 6, 1);
+                const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+                const checkDate = new Date(year, month - 1, day);
+                const isDST = checkDate.getTimezoneOffset() < stdOffset;
+                
+                // Recalculate with correct offset
+                const offset = isDST ? '-04:00' : '-05:00';
+                const correctDate = new Date(isoString + offset);
+                
+                return Math.floor(correctDate.getTime() / 1000);
+            }
+            
+            const candles = data.bars.map(bar => ({
+                time: parseLocalTime(bar.datetime),
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            }));
+            
+            const volumes = data.bars.map(bar => ({
+                time: parseLocalTime(bar.datetime),
+                value: bar.volume,
+                color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            }));
+            
+            candleSeries.setData(candles);
+            volumeSeries.setData(volumes);
+            
+            // Add signal markers
+            const markers = data.signals
+                .filter(s => ['strong_bullish', 'strong_bearish', 'climax_top', 'climax_bottom', 'accumulation', 'distribution'].includes(s.signal))
+                .map(signal => {
+                    const isBullish = ['strong_bullish', 'accumulation', 'climax_bottom'].includes(signal.signal);
+                    return {
+                        time: parseLocalTime(signal.datetime),
+                        position: isBullish ? 'belowBar' : 'aboveBar',
+                        color: isBullish ? '#26a69a' : '#ef5350',
+                        shape: isBullish ? 'arrowUp' : 'arrowDown',
+                        text: signal.signal.split('_').map(w => w[0].toUpperCase()).join(''),
+                    };
+                });
+            
+            candleSeries.setMarkers(markers);
+            chart.timeScale().fitContent();
+        }
+        
+        // Update header
+        function updateHeader(data) {
+            const symbol = data.symbol;
+            const strike = data.strike;
+            const right = data.right === 'C' ? 'Call' : 'Put';
+            const exp = data.expiration;
+            
+            document.getElementById('symbol-display').textContent = 
+                `${symbol} $${strike} ${right} (${exp})`;
+            
+            if (data.bars.length > 0) {
+                const lastBar = data.bars[data.bars.length - 1];
+                const firstBar = data.bars[0];
+                const change = lastBar.close - firstBar.open;
+                const changePct = (change / firstBar.open * 100).toFixed(2);
+                
+                document.getElementById('current-price').textContent = `$${lastBar.close.toFixed(2)}`;
+                
+                const changeEl = document.getElementById('price-change');
+                changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePct}%)`;
+                changeEl.className = `price-change ${change >= 0 ? 'up' : 'down'}`;
+            }
+        }
+        
+        // Update analysis panel
+        function updateAnalysis(data) {
+            // Bias
+            const biasEl = document.getElementById('bias-indicator');
+            biasEl.className = `bias-indicator ${data.bias.bias}`;
+            biasEl.innerHTML = `
+                <div class="bias-label">${data.bias.bias}</div>
+                <div class="bias-strength">Strength: ${Math.round(data.bias.strength * 100)}%</div>
+                <div class="bias-reason">${data.bias.reason}</div>
+            `;
+            
+            // Stats
+            const bullishSignals = data.signals.filter(s => 
+                ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom'].includes(s.signal)
+            ).length;
+            const bearishSignals = data.signals.filter(s => 
+                ['strong_bearish', 'distribution', 'test_resistance', 'climax_top'].includes(s.signal)
+            ).length;
+            
+            document.getElementById('stat-bars').textContent = data.bars.length.toLocaleString();
+            document.getElementById('stat-signals').textContent = data.signals.length;
+            document.getElementById('stat-bullish').textContent = bullishSignals;
+            document.getElementById('stat-bearish').textContent = bearishSignals;
+            
+            // Signal list
+            const signalHtml = data.signals
+                .slice(-30)
+                .reverse()
+                .map(s => `
+                    <div class="signal-item ${s.signal}">
+                        <div class="signal-time">${new Date(s.datetime).toLocaleString()}</div>
+                        <div class="signal-name">${s.signal.replace(/_/g, ' ').toUpperCase()}</div>
+                        <div class="signal-desc">${s.description}</div>
+                        <div class="signal-meta">
+                            <span>$${s.price.toFixed(2)}</span>
+                            <span>Vol: ${s.volume.toLocaleString()}</span>
+                            <span>${s.volume_ratio.toFixed(1)}x avg</span>
+                        </div>
+                    </div>
+                `).join('');
+            
+            document.getElementById('signal-list').innerHTML = signalHtml || '<div class="loading">No signals</div>';
+        }
+        
+        // Event listeners
+        document.querySelectorAll('.toolbar-group .tv-btn[data-interval]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.toolbar-group .tv-btn[data-interval]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentInterval = parseInt(btn.dataset.interval);
+                if (chartData) analyze();
+            });
+        });
+        
+        document.getElementById('analyze-btn').addEventListener('click', analyze);
+        
+        // Enter key to analyze
+        document.querySelectorAll('.toolbar input').forEach(input => {
+            input.addEventListener('keypress', e => {
+                if (e.key === 'Enter') analyze();
+            });
+        });
+        
+        // Sidebar tabs
+        document.querySelectorAll('.sidebar-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+            });
+        });
+        
+        // Current underlying price (cached)
+        let cachedUnderlyingPrice = 0;
+        
+        // Format date as YYYY-MM-DD
+        function formatDate(date) {
+            return date.toISOString().split('T')[0];
+        }
+        
+        // Get today's date string
+        function getTodayStr() {
+            return formatDate(new Date());
+        }
+        
+        // Initialize date inputs with sensible defaults
+        function initDateInputs() {
+            const today = new Date();
+            const todayStr = formatDate(today);
+            
+            // Set end date to today
+            const endDateInput = document.getElementById('end-date');
+            endDateInput.value = todayStr;
+            endDateInput.max = todayStr;
+            
+            // Set start date to 5 trading days ago
+            const startDate = new Date(today);
+            startDate.setDate(startDate.getDate() - 7);
+            const startDateInput = document.getElementById('start-date');
+            startDateInput.value = formatDate(startDate);
+            startDateInput.max = todayStr;
+        }
+        
+        // Load expirations for a symbol
+        async function loadExpirations() {
+            const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            const expirationSelect = document.getElementById('expiration');
+            const strikeSelect = document.getElementById('strike');
+            
+            if (!symbol) {
+                expirationSelect.innerHTML = '<option value="">Enter symbol first</option>';
+                strikeSelect.innerHTML = '<option value="">Select expiration first</option>';
+                return;
+            }
+            
+            expirationSelect.innerHTML = '<option value="">Loading...</option>';
+            expirationSelect.disabled = true;
+            strikeSelect.innerHTML = '<option value="">Select expiration first</option>';
+            
+            try {
+                // Fetch expirations from API
+                const res = await fetch(`/api/expirations/${symbol}`);
+                if (!res.ok) throw new Error('Failed to fetch expirations');
+                const data = await res.json();
+                
+                const expirations = data.expirations || [];
+                
+                if (expirations.length === 0) {
+                    expirationSelect.innerHTML = '<option value="">No expirations available</option>';
+                } else {
+                    // Show next 20 expirations with formatted labels
+                    const today = new Date();
+                    expirationSelect.innerHTML = expirations.slice(0, 20).map((exp, i) => {
+                        const expDate = new Date(exp + 'T00:00:00');
+                        const daysOut = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+                        const dayLabel = daysOut === 0 ? '(0DTE)' : daysOut === 1 ? '(1DTE)' : `(${daysOut}d)`;
+                        const dateLabel = expDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        return `<option value="${exp}" ${i === 0 ? 'selected' : ''}>${dateLabel} ${dayLabel}</option>`;
+                    }).join('');
+                    
+                    // Auto-load strikes for first expiration
+                    loadStrikes();
+                }
+                
+            } catch (e) {
+                console.error('Error loading expirations:', e);
+                expirationSelect.innerHTML = '<option value="">Error loading expirations</option>';
+            } finally {
+                expirationSelect.disabled = false;
+            }
+        }
+        
+        // Load strikes when symbol or expiration changes
+        async function loadStrikes() {
+            const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            const expiration = document.getElementById('expiration').value;
+            const strikeSelect = document.getElementById('strike');
+            
+            if (!symbol || !expiration) {
+                strikeSelect.innerHTML = '<option value="">Select expiration first</option>';
+                return;
+            }
+            
+            strikeSelect.innerHTML = '<option value="">Loading...</option>';
+            strikeSelect.disabled = true;
+            
+            try {
+                // Fetch strikes and underlying price in parallel
+                const [strikesRes, priceRes] = await Promise.all([
+                    fetch(`/api/strikes/${symbol}/${expiration}`),
+                    fetch(`/api/underlying/${symbol}`)
+                ]);
+                
+                if (!strikesRes.ok) throw new Error('Failed to fetch strikes');
+                const strikesData = await strikesRes.json();
+                
+                // Get underlying price
+                let underlyingPrice = 0;
+                if (priceRes.ok) {
+                    const priceData = await priceRes.json();
+                    underlyingPrice = priceData.price || 0;
+                    cachedUnderlyingPrice = underlyingPrice;
+                }
+                
+                const allStrikes = strikesData.strikes || [];
+                
+                // Filter to strikes near the money (within 10% of underlying price)
+                let nearMoneyStrikes = allStrikes;
+                if (underlyingPrice > 0) {
+                    const range = underlyingPrice * 0.10;
+                    nearMoneyStrikes = allStrikes.filter(s => 
+                        Math.abs(s - underlyingPrice) <= range
+                    );
+                    // If too few strikes, expand range
+                    if (nearMoneyStrikes.length < 15) {
+                        const range2 = underlyingPrice * 0.20;
+                        nearMoneyStrikes = allStrikes.filter(s => 
+                            Math.abs(s - underlyingPrice) <= range2
+                        );
+                    }
+                }
+                
+                // Limit to reasonable number and create options
+                const strikesToShow = nearMoneyStrikes.slice(0, 60);
+                
+                if (strikesToShow.length === 0) {
+                    strikeSelect.innerHTML = '<option value="">No strikes available</option>';
+                } else {
+                    // Find closest to ATM
+                    let closestIdx = 0;
+                    if (underlyingPrice > 0) {
+                        let minDiff = Infinity;
+                        strikesToShow.forEach((s, i) => {
+                            const diff = Math.abs(s - underlyingPrice);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                closestIdx = i;
+                            }
+                        });
+                    }
+                    
+                    strikeSelect.innerHTML = strikesToShow.map((s, i) => {
+                        const isATM = i === closestIdx && underlyingPrice > 0;
+                        const label = isATM ? `${s} (ATM)` : s;
+                        return `<option value="${s}" ${isATM ? 'selected' : ''}>${label}</option>`;
+                    }).join('');
+                }
+                
+            } catch (e) {
+                console.error('Error loading strikes:', e);
+                strikeSelect.innerHTML = '<option value="">Error loading strikes</option>';
+            } finally {
+                strikeSelect.disabled = false;
+            }
+        }
+        
+        // Debounce helper
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+        
+        // Track last loaded symbol to avoid unnecessary reloads
+        let lastLoadedSymbol = '';
+        
+        // Wrapped loadExpirations that checks for changes
+        function handleSymbolChange() {
+            const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            if (symbol && symbol !== lastLoadedSymbol) {
+                lastLoadedSymbol = symbol;
+                loadExpirations();
+            }
+        }
+        
+        // Debounced symbol change handler
+        const debouncedSymbolChange = debounce(handleSymbolChange, 500);
+        
+        // Event listeners for symbol changes
+        document.getElementById('symbol').addEventListener('input', debouncedSymbolChange);
+        document.getElementById('symbol').addEventListener('change', handleSymbolChange);
+        
+        // Event listener for expiration changes
+        document.getElementById('expiration').addEventListener('change', loadStrikes);
+        
+        // Initialize
+        initChart();
+        initDateInputs();
+        
+        // Load expirations for initial symbol
+        lastLoadedSymbol = document.getElementById('symbol').value.trim().toUpperCase();
+        loadExpirations();
+    </script>
+</body>
+</html>

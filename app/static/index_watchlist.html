@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptionsGanster - VPA Analysis</title>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #131722;
+            color: #d1d4dc;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* ===== WATCHLIST SIDEBAR (LEFT) ===== */
+        .watchlist-sidebar {
+            width: 220px;
+            background: #1e222d;
+            border-right: 1px solid #2a2e39;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+        
+        .watchlist-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #2a2e39;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .watchlist-header h2 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #787b86;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .watchlist-add-btn {
+            background: transparent;
+            border: none;
+            color: #2962ff;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        .watchlist-add-btn:hover {
+            background: rgba(41, 98, 255, 0.1);
+        }
+        
+        .watchlist-search {
+            padding: 8px 12px;
+            border-bottom: 1px solid #2a2e39;
+        }
+        
+        .watchlist-search input {
+            width: 100%;
+            background: #131722;
+            border: 1px solid #2a2e39;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #d1d4dc;
+            font-size: 13px;
+        }
+        
+        .watchlist-search input:focus {
+            outline: none;
+            border-color: #2962ff;
+        }
+        
+        .watchlist-search input::placeholder {
+            color: #787b86;
+        }
+        
+        .watchlist-items {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .watchlist-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #2a2e39;
+            transition: background 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .watchlist-item:hover {
+            background: #2a2e39;
+        }
+        
+        .watchlist-item.selected {
+            background: #2962ff20;
+            border-left: 3px solid #2962ff;
+        }
+        
+        .watchlist-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .watchlist-symbol {
+            font-size: 14px;
+            font-weight: 600;
+            color: #d1d4dc;
+        }
+        
+        .watchlist-name {
+            font-size: 11px;
+            color: #787b86;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .watchlist-price-info {
+            text-align: right;
+        }
+        
+        .watchlist-price {
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+        
+        .watchlist-change {
+            font-size: 11px;
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+        
+        .watchlist-change.positive {
+            color: #26a69a;
+        }
+        
+        .watchlist-change.negative {
+            color: #ef5350;
+        }
+        
+        .price-flash {
+            animation: flash 0.3s ease-out;
+        }
+        
+        @keyframes flash {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .price-up {
+            color: #26a69a !important;
+        }
+        
+        .price-down {
+            color: #ef5350 !important;
+        }
+        
+        /* ===== MAIN LAYOUT ===== */
+        .app-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        .main-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+        }
+        
+        /* ===== HEADER ===== */
+        .header {
+            background: #1e222d;
+            padding: 8px 16px;
+            border-bottom: 1px solid #2a2e39;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .header-logo h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: #2962ff;
+        }
+        
+        .header-logo h1 span {
+            color: #ef5350;
+        }
+        
+        .header-contract {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 6px 12px;
+            background: #131722;
+            border-radius: 6px;
+        }
+        
+        .contract-symbol {
+            font-size: 16px;
+            font-weight: 700;
+            color: #d1d4dc;
+        }
+        
+        .contract-details {
+            font-size: 12px;
+            color: #787b86;
+        }
+        
+        .contract-price {
+            font-size: 18px;
+            font-weight: 700;
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+        
+        .contract-change {
+            font-size: 13px;
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+        
+        .contract-change.positive { color: #26a69a; }
+        .contract-change.negative { color: #ef5350; }
+        
+        /* ===== CONTROLS BAR ===== */
+        .controls-bar {
+            background: #1e222d;
+            padding: 8px 16px;
+            border-bottom: 1px solid #2a2e39;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .control-group label {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+        }
+        
+        .control-group select,
+        .control-group input {
+            background: #131722;
+            border: 1px solid #2a2e39;
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: #d1d4dc;
+            font-size: 13px;
+        }
+        
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: #2962ff;
+        }
+        
+        .interval-buttons {
+            display: flex;
+            gap: 2px;
+            background: #131722;
+            padding: 2px;
+            border-radius: 4px;
+        }
+        
+        .interval-btn {
+            background: transparent;
+            border: none;
+            color: #787b86;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: all 0.15s;
+        }
+        
+        .interval-btn:hover {
+            color: #d1d4dc;
+        }
+        
+        .interval-btn.active {
+            background: #2962ff;
+            color: white;
+        }
+        
+        .analyze-btn {
+            background: #2962ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        
+        .analyze-btn:hover {
+            background: #1e53e4;
+        }
+        
+        .analyze-btn:disabled {
+            background: #363a45;
+            cursor: not-allowed;
+        }
+        
+        /* ===== CHART AREA ===== */
+        .chart-area {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            min-height: 0;
+        }
+        
+        .charts-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #131722;
+            min-height: 0;
+            min-width: 0;
+        }
+        
+        #price-chart {
+            flex: 3;
+            min-height: 0;
+        }
+        
+        #volume-chart {
+            flex: 1;
+            border-top: 1px solid #2a2e39;
+            min-height: 0;
+        }
+        
+        .chart-legend {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(30, 34, 45, 0.9);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        
+        .chart-legend .ohlc {
+            display: flex;
+            gap: 16px;
+        }
+        
+        .chart-legend .ohlc span {
+            color: #787b86;
+        }
+        
+        .chart-legend .ohlc span strong {
+            color: #d1d4dc;
+            font-weight: 600;
+        }
+        
+        /* ===== ANALYSIS SIDEBAR (RIGHT) ===== */
+        .analysis-sidebar {
+            width: 320px;
+            background: #1e222d;
+            border-left: 1px solid #2a2e39;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            min-height: 0;
+            overflow: hidden;
+        }
+        
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid #2a2e39;
+        }
+        
+        .sidebar-tab {
+            flex: 1;
+            padding: 12px;
+            background: transparent;
+            border: none;
+            color: #787b86;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        
+        .sidebar-tab:hover {
+            color: #d1d4dc;
+        }
+        
+        .sidebar-tab.active {
+            color: #2962ff;
+            border-bottom-color: #2962ff;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        
+        /* Bias Indicator */
+        .bias-card {
+            background: #131722;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .bias-card h4 {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        
+        .bias-indicator {
+            text-align: center;
+            padding: 16px;
+            border-radius: 6px;
+        }
+        
+        .bias-indicator.bullish {
+            background: rgba(38, 166, 154, 0.1);
+            border: 1px solid #26a69a;
+        }
+        
+        .bias-indicator.bearish {
+            background: rgba(239, 83, 80, 0.1);
+            border: 1px solid #ef5350;
+        }
+        
+        .bias-indicator.neutral {
+            background: rgba(120, 123, 134, 0.1);
+            border: 1px solid #787b86;
+        }
+        
+        .bias-label {
+            font-size: 24px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .bias-indicator.bullish .bias-label { color: #26a69a; }
+        .bias-indicator.bearish .bias-label { color: #ef5350; }
+        .bias-indicator.neutral .bias-label { color: #787b86; }
+        
+        .bias-strength {
+            font-size: 13px;
+            color: #787b86;
+            margin-top: 8px;
+        }
+        
+        .bias-reason {
+            font-size: 12px;
+            color: #5d606b;
+            margin-top: 4px;
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .stat-item {
+            background: #131722;
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #d1d4dc;
+        }
+        
+        .stat-label {
+            font-size: 11px;
+            color: #787b86;
+            margin-top: 4px;
+        }
+        
+        /* Signals List */
+        .signals-header {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        
+        .signal-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .signal-item {
+            background: #131722;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid;
+        }
+        
+        .signal-item.bullish { border-color: #26a69a; }
+        .signal-item.bearish { border-color: #ef5350; }
+        
+        .signal-time {
+            font-size: 11px;
+            color: #5d606b;
+        }
+        
+        .signal-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d1d4dc;
+            margin: 4px 0;
+        }
+        
+        .signal-desc {
+            font-size: 12px;
+            color: #787b86;
+        }
+        
+        .signal-meta {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #5d606b;
+        }
+        
+        /* Loading & Error States */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: #787b86;
+        }
+        
+        .error-message {
+            background: rgba(239, 83, 80, 0.1);
+            border: 1px solid #ef5350;
+            color: #ef5350;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #131722;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #363a45;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4a4e59;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- LEFT: Watchlist Sidebar -->
+        <div class="watchlist-sidebar">
+            <div class="watchlist-header">
+                <h2>Watchlist</h2>
+                <button class="watchlist-add-btn" title="Add Symbol">+</button>
+            </div>
+            <div class="watchlist-search">
+                <input type="text" id="watchlist-search" placeholder="Search symbols...">
+            </div>
+            <div class="watchlist-items" id="watchlist-container">
+                <!-- Watchlist items will be populated here -->
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
+        <!-- MAIN: Chart & Controls -->
+        <div class="main-panel">
+            <div class="header">
+                <div class="header-logo">
+                    <h1>Options<span>Ganster</span></h1>
+                </div>
+                <div class="header-contract" id="contract-info">
+                    <div>
+                        <div class="contract-symbol" id="contract-symbol">-</div>
+                        <div class="contract-details" id="contract-details">Select a symbol</div>
+                    </div>
+                    <div>
+                        <div class="contract-price" id="contract-price">-</div>
+                        <div class="contract-change" id="contract-change">-</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="controls-bar">
+                <div class="control-group">
+                    <label>Exp</label>
+                    <select id="expiration" style="min-width: 140px;">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Strike</label>
+                    <select id="strike" style="min-width: 100px;">
+                        <option value="">-</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Type</label>
+                    <select id="right" style="min-width: 70px;">
+                        <option value="C">Call</option>
+                        <option value="P">Put</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>From</label>
+                    <input type="date" id="start-date" style="width: 130px;">
+                </div>
+                
+                <div class="control-group">
+                    <label>To</label>
+                    <input type="date" id="end-date" style="width: 130px;">
+                </div>
+                
+                <div class="interval-buttons">
+                    <button class="interval-btn" data-interval="1">1m</button>
+                    <button class="interval-btn active" data-interval="5">5m</button>
+                    <button class="interval-btn" data-interval="15">15m</button>
+                    <button class="interval-btn" data-interval="60">1H</button>
+                </div>
+                
+                <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
+            </div>
+            
+            <div class="chart-area">
+                <div class="charts-container">
+                    <div id="price-chart"></div>
+                    <div id="volume-chart"></div>
+                </div>
+                
+                <!-- RIGHT: Analysis Sidebar -->
+                <div class="analysis-sidebar">
+                    <div class="sidebar-tabs">
+                        <button class="sidebar-tab active" data-tab="analysis">Analysis</button>
+                        <button class="sidebar-tab" data-tab="signals">Signals</button>
+                    </div>
+                    
+                    <div class="sidebar-content" id="sidebar-content">
+                        <div class="bias-card">
+                            <h4>Market Bias</h4>
+                            <div id="bias-container" class="bias-indicator neutral">
+                                <div class="bias-label">-</div>
+                                <div class="bias-strength">Load data to analyze</div>
+                            </div>
+                        </div>
+                        
+                        <div class="stats-grid" id="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-value" id="stat-bars">-</div>
+                                <div class="stat-label">Bars</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="stat-signals">-</div>
+                                <div class="stat-label">Signals</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="stat-bullish">-</div>
+                                <div class="stat-label">Bullish</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="stat-bearish">-</div>
+                                <div class="stat-label">Bearish</div>
+                            </div>
+                        </div>
+                        
+                        <div class="signals-header">Recent Signals</div>
+                        <div id="signals-container" class="signal-list">
+                            <div class="loading">No signals yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // ===== STATE =====
+        let priceChart = null;
+        let volumeChart = null;
+        let candlestickSeries = null;
+        let volumeSeries = null;
+        let currentInterval = 5;
+        let currentSymbol = 'SPY';
+        let watchlistData = {};
+        let priceUpdateInterval = null;
+        
+        // Default watchlist symbols with metadata
+        const defaultWatchlist = [
+            { symbol: 'SPY', name: 'S&P 500 ETF' },
+            { symbol: 'QQQ', name: 'Nasdaq 100 ETF' },
+            { symbol: 'IWM', name: 'Russell 2000 ETF' },
+            { symbol: 'AAPL', name: 'Apple Inc' },
+            { symbol: 'MSFT', name: 'Microsoft Corp' },
+            { symbol: 'NVDA', name: 'NVIDIA Corp' },
+            { symbol: 'TSLA', name: 'Tesla Inc' },
+            { symbol: 'AMD', name: 'AMD Inc' },
+            { symbol: 'AMZN', name: 'Amazon.com' },
+            { symbol: 'META', name: 'Meta Platforms' },
+            { symbol: 'GOOGL', name: 'Alphabet Inc' }
+        ];
+        
+        // ===== WATCHLIST FUNCTIONS =====
+        async function loadWatchlistPrices() {
+            try {
+                const symbols = defaultWatchlist.map(w => w.symbol).join(',');
+                const res = await fetch(`/api/watchlist/prices?symbols=${symbols}`);
+                if (!res.ok) throw new Error('Failed to fetch prices');
+                
+                const data = await res.json();
+                data.prices.forEach(price => {
+                    const prevPrice = watchlistData[price.symbol]?.price;
+                    watchlistData[price.symbol] = {
+                        ...price,
+                        prevPrice: prevPrice || price.price,
+                        direction: prevPrice ? (price.price > prevPrice ? 'up' : price.price < prevPrice ? 'down' : null) : null
+                    };
+                });
+                
+                renderWatchlist();
+            } catch (e) {
+                console.error('Error loading watchlist:', e);
+            }
+        }
+        
+        function renderWatchlist() {
+            const container = document.getElementById('watchlist-container');
+            const searchTerm = document.getElementById('watchlist-search').value.toLowerCase();
+            
+            const filteredList = defaultWatchlist.filter(item => 
+                item.symbol.toLowerCase().includes(searchTerm) ||
+                item.name.toLowerCase().includes(searchTerm)
+            );
+            
+            container.innerHTML = filteredList.map(item => {
+                const data = watchlistData[item.symbol] || {};
+                const isSelected = item.symbol === currentSymbol;
+                const changeClass = data.changePct >= 0 ? 'positive' : 'negative';
+                const changeSign = data.changePct >= 0 ? '+' : '';
+                const priceClass = data.direction === 'up' ? 'price-up' : data.direction === 'down' ? 'price-down' : '';
+                const flashClass = data.direction ? 'price-flash' : '';
+                
+                return `
+                    <div class="watchlist-item ${isSelected ? 'selected' : ''}" data-symbol="${item.symbol}">
+                        <div class="watchlist-item-info">
+                            <div class="watchlist-symbol">${item.symbol}</div>
+                            <div class="watchlist-name">${item.name}</div>
+                        </div>
+                        <div class="watchlist-price-info">
+                            <div class="watchlist-price ${priceClass} ${flashClass}">${data.price ? data.price.toFixed(2) : '-'}</div>
+                            <div class="watchlist-change ${changeClass}">${data.changePct ? `${changeSign}${data.changePct.toFixed(2)}%` : '-'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            // Add click handlers
+            container.querySelectorAll('.watchlist-item').forEach(item => {
+                item.addEventListener('click', () => selectSymbol(item.dataset.symbol));
+            });
+            
+            // Clear direction flags after render
+            Object.keys(watchlistData).forEach(sym => {
+                watchlistData[sym].direction = null;
+            });
+        }
+        
+        function selectSymbol(symbol) {
+            currentSymbol = symbol;
+            renderWatchlist();
+            loadExpirations(symbol);
+            
+            // Update contract info
+            const data = watchlistData[symbol] || {};
+            document.getElementById('contract-symbol').textContent = symbol;
+            document.getElementById('contract-details').textContent = 'Select expiration & strike';
+        }
+        
+        // ===== EXPIRATIONS & STRIKES =====
+        async function loadExpirations(symbol) {
+            const select = document.getElementById('expiration');
+            select.innerHTML = '<option value="">Loading...</option>';
+            
+            const maxRetries = 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const res = await fetch(`/api/expirations/${symbol}`);
+                    if (res.status === 429) {
+                        select.innerHTML = '<option value="">Rate limited, retrying...</option>';
+                        await new Promise(r => setTimeout(r, (attempt + 1) * 5000));
+                        continue;
+                    }
+                    if (!res.ok) throw new Error('Failed to load');
+                    
+                    const data = await res.json();
+                    const today = new Date();
+                    
+                    select.innerHTML = data.expirations.map(exp => {
+                        const expDate = new Date(exp + 'T00:00:00');
+                        const diffDays = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+                        const label = diffDays === 0 ? '0DTE' : diffDays === 1 ? '1DTE' : `${diffDays}d`;
+                        const dateStr = expDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        return `<option value="${exp}">${dateStr} (${label})</option>`;
+                    }).join('');
+                    
+                    if (data.expirations.length > 0) {
+                        loadStrikes(symbol, data.expirations[0]);
+                    }
+                    return;  // success
+                } catch (e) {
+                    if (attempt === maxRetries - 1) {
+                        select.innerHTML = '<option value="">Error loading</option>';
+                        // Show retry button next to expiration dropdown
+                        showRetryButton(symbol);
+                    }
+                }
+            }
+        }
+
+        function showRetryButton(symbol) {
+            // Remove existing retry button if any
+            const existing = document.getElementById('retry-exp-btn');
+            if (existing) existing.remove();
+
+            const btn = document.createElement('button');
+            btn.id = 'retry-exp-btn';
+            btn.textContent = '↻ Retry';
+            btn.style.cssText = 'margin-left:6px;padding:4px 10px;background:#2962ff;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+            btn.addEventListener('click', () => {
+                btn.remove();
+                loadExpirations(symbol);
+            });
+            document.getElementById('expiration').parentNode.appendChild(btn);
+        }
+        
+        async function loadStrikes(symbol, expiration) {
+            const select = document.getElementById('strike');
+            select.innerHTML = '<option value="">Loading...</option>';
+            
+            try {
+                // Use watchlistData price if available (no extra API call)
+                let underlyingPrice = watchlistData[symbol]?.price || 0;
+                
+                // If no cached price, try API as fallback
+                if (!underlyingPrice) {
+                    try {
+                        const priceRes = await fetch(`/api/underlying/${symbol}`);
+                        const priceData = await priceRes.json();
+                        underlyingPrice = priceData.price || 0;
+                    } catch (e) {
+                        console.warn('Could not fetch underlying price');
+                    }
+                }
+                
+                const res = await fetch(`/api/strikes/${symbol}/${expiration}`);
+                if (!res.ok) throw new Error('Failed to load');
+                
+                const data = await res.json();
+                
+                // Find ATM strike
+                let atmStrike = data.strikes.reduce((prev, curr) => 
+                    Math.abs(curr - underlyingPrice) < Math.abs(prev - underlyingPrice) ? curr : prev
+                );
+                
+                select.innerHTML = data.strikes.map(strike => {
+                    const isATM = strike === atmStrike;
+                    return `<option value="${strike}" ${isATM ? 'selected' : ''}>${strike}${isATM ? ' (ATM)' : ''}</option>`;
+                }).join('');
+                
+            } catch (e) {
+                select.innerHTML = '<option value="">Error</option>';
+            }
+        }
+        
+        // ===== CHART FUNCTIONS =====
+        function initCharts() {
+            const priceContainer = document.getElementById('price-chart');
+            const volumeContainer = document.getElementById('volume-chart');
+            
+            priceChart = LightweightCharts.createChart(priceContainer, {
+                layout: {
+                    background: { color: '#131722' },
+                    textColor: '#787b86',
+                },
+                grid: {
+                    vertLines: { color: '#1e222d' },
+                    horzLines: { color: '#1e222d' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: '#758696', width: 1, style: 2 },
+                    horzLine: { color: '#758696', width: 1, style: 2 },
+                },
+                rightPriceScale: { borderColor: '#2a2e39' },
+                timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+            });
+            
+            candlestickSeries = priceChart.addCandlestickSeries({
+                upColor: '#26a69a',
+                downColor: '#ef5350',
+                borderUpColor: '#26a69a',
+                borderDownColor: '#ef5350',
+                wickUpColor: '#26a69a',
+                wickDownColor: '#ef5350',
+            });
+            
+            volumeChart = LightweightCharts.createChart(volumeContainer, {
+                layout: {
+                    background: { color: '#131722' },
+                    textColor: '#787b86',
+                },
+                grid: {
+                    vertLines: { color: '#1e222d' },
+                    horzLines: { color: '#1e222d' },
+                },
+                rightPriceScale: { borderColor: '#2a2e39' },
+                timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+            });
+            
+            volumeSeries = volumeChart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: '',
+            });
+            
+            // Sync timescales (guard against null range)
+            priceChart.timeScale().subscribeVisibleTimeRangeChange(() => {
+                const range = priceChart.timeScale().getVisibleRange();
+                if (range) volumeChart.timeScale().setVisibleRange(range);
+            });
+            
+            // Resize handler
+            const resizeObserver = new ResizeObserver(entries => {
+                for (let entry of entries) {
+                    const { width, height } = entry.contentRect;
+                    if (width === 0 || height === 0) continue;
+                    if (entry.target === priceContainer) {
+                        priceChart.applyOptions({ width, height });
+                    } else if (entry.target === volumeContainer) {
+                        volumeChart.applyOptions({ width, height });
+                    }
+                }
+            });
+            resizeObserver.observe(priceContainer);
+            resizeObserver.observe(volumeContainer);
+        }
+        
+        // ===== ANALYSIS =====
+        async function analyze() {
+            const expiration = document.getElementById('expiration').value;
+            const strike = document.getElementById('strike').value;
+            const right = document.getElementById('right').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            
+            if (!currentSymbol || !expiration || !strike) {
+                alert('Please select expiration and strike');
+                return;
+            }
+            
+            const btn = document.getElementById('analyze-btn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            
+            try {
+                let url = `/api/analyze?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
+                if (startDate) url += `&start_date=${startDate}`;
+                if (endDate) url += `&end_date=${endDate}`;
+                
+                const res = await fetch(url);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Analysis failed');
+                }
+                
+                const data = await res.json();
+                
+                // Update contract header
+                document.getElementById('contract-symbol').textContent = `${currentSymbol} $${strike} ${right === 'C' ? 'Call' : 'Put'}`;
+                document.getElementById('contract-details').textContent = `Exp: ${expiration}`;
+                
+                if (data.bars.length > 0) {
+                    const lastBar = data.bars[data.bars.length - 1];
+                    const firstBar = data.bars[0];
+                    const change = lastBar.close - firstBar.open;
+                    const changePct = (change / firstBar.open * 100);
+                    
+                    document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
+                    document.getElementById('contract-change').textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)`;
+                    document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
+                }
+                
+                updateCharts(data);
+                updateAnalysis(data);
+                
+            } catch (e) {
+                document.getElementById('signals-container').innerHTML = `<div class="error-message">${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Analyze';
+            }
+        }
+        
+        function updateCharts(data) {
+            const candleData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            }));
+            
+            const volumeData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                value: bar.volume,
+                color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            }));
+            
+            candlestickSeries.setData(candleData);
+            volumeSeries.setData(volumeData);
+            
+            // Markers for signals
+            const markers = data.signals.map(signal => {
+                const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(signal.signal);
+                return {
+                    time: new Date(signal.datetime).getTime() / 1000,
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#26a69a' : '#ef5350',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+            candlestickSeries.setMarkers(markers);
+            
+            // Scroll to recent – use fitContent first, then try setVisibleRange
+            if (candleData.length > 0) {
+                priceChart.timeScale().fitContent();
+                volumeChart.timeScale().fitContent();
+                try {
+                    const barsToShow = Math.min(100, candleData.length);
+                    const fromIndex = Math.max(0, candleData.length - barsToShow);
+                    priceChart.timeScale().setVisibleRange({
+                        from: candleData[fromIndex].time,
+                        to: candleData[candleData.length - 1].time
+                    });
+                } catch (_) { /* chart not ready yet – fitContent already handled it */ }
+            }
+        }
+        
+        function updateAnalysis(data) {
+            // Bias - with null check
+            const biasContainer = document.getElementById('bias-container');
+            if (data.bias && data.bias.bias) {
+                biasContainer.className = `bias-indicator ${data.bias.bias}`;
+                biasContainer.innerHTML = `
+                    <div class="bias-label">${data.bias.bias}</div>
+                    <div class="bias-strength">Strength: ${Math.round((data.bias.strength || 0) * 100)}%</div>
+                    <div class="bias-reason">${data.bias.reason || ''}</div>
+                `;
+            } else {
+                biasContainer.className = 'bias-indicator neutral';
+                biasContainer.innerHTML = `
+                    <div class="bias-label">neutral</div>
+                    <div class="bias-strength">Not enough data</div>
+                `;
+            }
+            
+            // Stats
+            const signals = data.signals || [];
+            const bullishSignals = signals.filter(s => ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(s.signal));
+            const bearishSignals = signals.filter(s => ['strong_bearish', 'distribution', 'test_resistance', 'climax_top', 'no_demand', 'pin_bar_bear', 'confirmed_reversal_down'].includes(s.signal));
+            
+            document.getElementById('stat-bars').textContent = (data.bars || []).length;
+            document.getElementById('stat-signals').textContent = signals.length;
+            document.getElementById('stat-bullish').textContent = bullishSignals.length;
+            document.getElementById('stat-bearish').textContent = bearishSignals.length;
+            
+            // Signals list
+            const signalsContainer = document.getElementById('signals-container');
+            if (signals.length === 0) {
+                signalsContainer.innerHTML = '<div class="loading">No significant signals</div>';
+                return;
+            }
+            
+            signalsContainer.innerHTML = [...signals]
+                .reverse()
+                .slice(0, 30)
+                .map(signal => {
+                    const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(signal.signal);
+                    return `
+                        <div class="signal-item ${isBullish ? 'bullish' : 'bearish'}">
+                            <div class="signal-time">${new Date(signal.datetime).toLocaleString()}</div>
+                            <div class="signal-name">${signal.signal.replace(/_/g, ' ').toUpperCase()}</div>
+                            <div class="signal-desc">${signal.description}</div>
+                            <div class="signal-meta">
+                                <span>$${signal.price.toFixed(2)}</span>
+                                <span>Vol: ${signal.volume.toLocaleString()}</span>
+                                <span>${signal.volume_ratio}x avg</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+        }
+        
+        // ===== EVENT LISTENERS =====
+        document.getElementById('expiration').addEventListener('change', (e) => {
+            if (currentSymbol && e.target.value) {
+                loadStrikes(currentSymbol, e.target.value);
+            }
+        });
+        
+        document.getElementById('analyze-btn').addEventListener('click', analyze);
+        
+        document.querySelectorAll('.interval-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.interval-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentInterval = parseInt(btn.dataset.interval);
+            });
+        });
+        
+        document.querySelectorAll('.sidebar-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+            });
+        });
+        
+        document.getElementById('watchlist-search').addEventListener('input', renderWatchlist);
+        
+        // ===== INITIALIZATION =====
+        async function init() {
+            // Set default dates
+            const today = new Date();
+            const weekAgo = new Date(today);
+            weekAgo.setDate(today.getDate() - 7);
+            
+            document.getElementById('start-date').value = weekAgo.toISOString().split('T')[0];
+            document.getElementById('end-date').value = today.toISOString().split('T')[0];
+            
+            // Init charts
+            initCharts();
+            
+            // Load watchlist prices FIRST (needed for ATM calculation)
+            await loadWatchlistPrices();
+            
+            // Select default symbol (will now have price data for ATM)
+            selectSymbol('SPY');
+            
+            // Start price updates (every 60 seconds)
+            priceUpdateInterval = setInterval(loadWatchlistPrices, 60000);
+        }
+        
+        init();
+    </script>
+</body>
+</html>
