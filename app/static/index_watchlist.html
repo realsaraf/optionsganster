@@ -339,6 +339,174 @@
             cursor: not-allowed;
         }
         
+        /* ===== LIVE BUTTON ===== */
+        .live-btn {
+            background: #363a45;
+            color: #787b86;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        
+        .live-btn:hover {
+            background: #4a4e59;
+            color: #d1d4dc;
+        }
+        
+        .live-btn.active {
+            background: #ef5350;
+            color: white;
+            animation: live-pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes live-pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(239, 83, 80, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 8px rgba(239, 83, 80, 0);
+            }
+        }
+        
+        /* ===== CONTROLS SUMMARY (Mobile only) ===== */
+        .controls-summary {
+            display: none;
+            background: #1e222d;
+            padding: 8px 12px;
+            border-bottom: 1px solid #2a2e39;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .summary-text {
+            font-size: 12px;
+            color: #d1d4dc;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .summary-intervals {
+            display: flex;
+            gap: 2px;
+            background: #131722;
+            padding: 2px;
+            border-radius: 4px;
+        }
+        
+        .summary-interval-btn {
+            padding: 4px 8px;
+            font-size: 10px;
+        }
+        
+        .summary-analyze-btn,
+        .summary-live-btn {
+            padding: 6px 12px;
+            font-size: 11px;
+        }
+        
+        .controls-chevron {
+            background: transparent;
+            border: none;
+            color: #787b86;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+        }
+        
+        .controls-chevron:hover {
+            background: rgba(120, 123, 134, 0.1);
+            color: #d1d4dc;
+        }
+        
+        .controls-bar.collapsed {
+            display: none;
+        }
+        
+        /* ===== SIGNAL PEEK (Mobile only) ===== */
+        .signal-peek {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1e222d;
+            border-top: 3px solid #26a69a;
+            padding: 12px 16px;
+            z-index: 998;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-in-out;
+            cursor: pointer;
+        }
+        
+        .signal-peek.visible {
+            transform: translateY(0);
+        }
+        
+        .signal-peek.bearish {
+            border-top-color: #ef5350;
+        }
+        
+        .signal-peek-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        
+        .signal-peek-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d1d4dc;
+            flex: 1;
+        }
+        
+        .signal-peek-time {
+            font-size: 11px;
+            color: #787b86;
+        }
+        
+        .signal-peek-price {
+            font-size: 13px;
+            font-weight: 600;
+            color: #2962ff;
+        }
+        
+        .live-refreshing {
+            position: relative;
+        }
+        
+        .live-refreshing::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #2962ff, transparent);
+            animation: live-refresh-slide 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes live-refresh-slide {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(100%);
+            }
+        }
+        
         /* ===== CHART AREA ===== */
         .chart-area {
             flex: 1;
@@ -808,6 +976,28 @@
                 min-height: 44px; /* Touch-friendly */
                 font-size: 14px;
             }
+            
+            .live-btn {
+                width: 100%;
+                padding: 12px 20px;
+                min-height: 44px;
+                font-size: 13px;
+            }
+            
+            /* Controls Summary - Show on mobile after first analyze */
+            .controls-summary {
+                display: flex;
+            }
+            
+            /* Signal Peek - Show on mobile only */
+            .signal-peek {
+                display: block;
+            }
+            
+            /* Adjust mobile-analysis-toggle to not overlap peek */
+            .mobile-analysis-toggle {
+                bottom: 80px;
+            }
 
             /* Chart Area - Allow scrolling */
             .chart-area {
@@ -890,6 +1080,20 @@
                 </div>
             </div>
             
+            <!-- Controls Summary Bar (Mobile only, shown after first analyze) -->
+            <div class="controls-summary" id="controls-summary">
+                <span class="summary-text" id="summary-text">SPY $500C | Feb 14 | 5m</span>
+                <div class="interval-buttons summary-intervals">
+                    <button class="interval-btn summary-interval-btn" data-interval="1">1m</button>
+                    <button class="interval-btn summary-interval-btn active" data-interval="5">5m</button>
+                    <button class="interval-btn summary-interval-btn" data-interval="15">15m</button>
+                    <button class="interval-btn summary-interval-btn" data-interval="60">1H</button>
+                </div>
+                <button class="analyze-btn summary-analyze-btn" id="summary-analyze-btn">▶</button>
+                <button class="live-btn summary-live-btn" id="summary-live-btn">⚪ LIVE</button>
+                <button class="controls-chevron" id="controls-chevron">▼</button>
+            </div>
+            
             <div class="controls-bar">
                 <div class="control-group">
                     <label>Exp</label>
@@ -931,6 +1135,7 @@
                 </div>
                 
                 <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
+                <button class="live-btn" id="live-btn">⚪ LIVE</button>
             </div>
             
             <div class="chart-area">
@@ -985,6 +1190,15 @@
         </div>
     </div>
     
+    <!-- Signal Peek Banner (Mobile only) -->
+    <div class="signal-peek" id="signal-peek">
+        <div class="signal-peek-content">
+            <span class="signal-peek-name" id="signal-peek-name">-</span>
+            <span class="signal-peek-time" id="signal-peek-time">-</span>
+            <span class="signal-peek-price" id="signal-peek-price">-</span>
+        </div>
+    </div>
+    
     <script>
         // ===== STATE =====
         let priceChart = null;
@@ -995,6 +1209,19 @@
         let currentSymbol = 'SPY';
         let watchlistData = {};
         let priceUpdateInterval = null;
+        
+        // Live mode state
+        let liveMode = false;
+        let liveInterval = null;
+        let liveCountdown = 10;
+        let liveCountdownInterval = null;
+        
+        // Controls collapse state
+        let controlsCollapsed = false;
+        let hasAnalyzed = false;
+        
+        // Signal peek state
+        let latestSignalData = null;
         
         // Default watchlist symbols with metadata
         const defaultWatchlist = [
@@ -1045,6 +1272,8 @@
             if (isMobile()) {
                 document.getElementById('analysis-sidebar').classList.add('mobile-open');
                 document.getElementById('backdrop').classList.add('active');
+                // Hide signal peek when analysis is open
+                document.getElementById('signal-peek').classList.remove('visible');
             }
         }
 
@@ -1052,6 +1281,10 @@
             if (isMobile()) {
                 document.getElementById('analysis-sidebar').classList.remove('mobile-open');
                 document.getElementById('backdrop').classList.remove('active');
+                // Show signal peek when analysis closes (if data exists)
+                if (latestSignalData) {
+                    document.getElementById('signal-peek').classList.add('visible');
+                }
             }
         }
 
@@ -1088,6 +1321,138 @@
                         document.getElementById('volume-chart').clientHeight
                     );
                 }, 100);
+            }
+        }
+        
+        // ===== CONTROLS COLLAPSE FUNCTIONS =====
+        function collapseControls() {
+            if (isMobile()) {
+                document.getElementById('controls-bar').classList.add('collapsed');
+                document.getElementById('controls-chevron').textContent = '▲';
+                controlsCollapsed = true;
+            }
+        }
+        
+        function expandControls() {
+            if (isMobile()) {
+                document.getElementById('controls-bar').classList.remove('collapsed');
+                document.getElementById('controls-chevron').textContent = '▼';
+                controlsCollapsed = false;
+            }
+        }
+        
+        function toggleControls() {
+            if (controlsCollapsed) {
+                expandControls();
+            } else {
+                collapseControls();
+            }
+        }
+        
+        function updateSummaryText() {
+            const symbol = currentSymbol;
+            const strike = document.getElementById('strike').value;
+            const right = document.getElementById('right').value;
+            const expiration = document.getElementById('expiration').value;
+            const intervalText = currentInterval === 1 ? '1m' : currentInterval === 5 ? '5m' : currentInterval === 15 ? '15m' : '1H';
+            
+            if (strike && expiration) {
+                const expShort = new Date(expiration).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const rightText = right === 'C' ? 'C' : 'P';
+                document.getElementById('summary-text').textContent = `${symbol} $${strike}${rightText} | ${expShort} | ${intervalText}`;
+            }
+        }
+        
+        // ===== SIGNAL PEEK FUNCTIONS =====
+        function updateSignalPeek(signals) {
+            if (!signals || signals.length === 0) {
+                latestSignalData = null;
+                document.getElementById('signal-peek').classList.remove('visible');
+                return;
+            }
+            
+            const latestSignal = signals[signals.length - 1];
+            latestSignalData = latestSignal;
+            
+            const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(latestSignal.signal);
+            
+            const peek = document.getElementById('signal-peek');
+            peek.className = `signal-peek ${isBullish ? '' : 'bearish'}`;
+            
+            document.getElementById('signal-peek-name').textContent = latestSignal.signal.replace(/_/g, ' ').toUpperCase();
+            document.getElementById('signal-peek-time').textContent = new Date(latestSignal.datetime).toLocaleTimeString();
+            document.getElementById('signal-peek-price').textContent = `$${latestSignal.price.toFixed(2)}`;
+            
+            // Only show if analysis sidebar is not open
+            if (isMobile() && !document.getElementById('analysis-sidebar').classList.contains('mobile-open')) {
+                peek.classList.add('visible');
+            }
+        }
+        
+        // ===== LIVE MODE FUNCTIONS =====
+        function updateLiveButton() {
+            const desktopBtn = document.getElementById('live-btn');
+            const summaryBtn = document.getElementById('summary-live-btn');
+            
+            if (liveMode) {
+                const text = `🔴 LIVE ${liveCountdown}s`;
+                desktopBtn.textContent = text;
+                summaryBtn.textContent = text;
+            } else {
+                desktopBtn.textContent = '⚪ LIVE';
+                summaryBtn.textContent = '⚪ LIVE';
+            }
+        }
+        
+        function toggleLiveMode() {
+            if (liveMode) {
+                stopLiveMode();
+            } else {
+                // Start live mode
+                liveMode = true;
+                liveCountdown = 10;
+                
+                // Add active class to both buttons
+                document.getElementById('live-btn').classList.add('active');
+                document.getElementById('summary-live-btn').classList.add('active');
+                
+                // Start countdown
+                updateLiveButton();
+                liveCountdownInterval = setInterval(() => {
+                    liveCountdown--;
+                    if (liveCountdown <= 0) {
+                        liveCountdown = 10;
+                    }
+                    updateLiveButton();
+                }, 1000);
+                
+                // Start auto-refresh
+                liveInterval = setInterval(() => {
+                    analyze();
+                }, 10000);
+            }
+        }
+        
+        function stopLiveMode() {
+            if (liveMode) {
+                liveMode = false;
+                
+                // Clear intervals
+                if (liveInterval) {
+                    clearInterval(liveInterval);
+                    liveInterval = null;
+                }
+                if (liveCountdownInterval) {
+                    clearInterval(liveCountdownInterval);
+                    liveCountdownInterval = null;
+                }
+                
+                // Remove active class from both buttons
+                document.getElementById('live-btn').classList.remove('active');
+                document.getElementById('summary-live-btn').classList.remove('active');
+                
+                // Reset button text
+                updateLiveButton();
             }
         }
         
@@ -1160,6 +1525,9 @@
             currentSymbol = symbol;
             renderWatchlist();
             loadExpirations(symbol);
+            
+            // Stop live mode when symbol changes
+            stopLiveMode();
             
             // Update contract info
             const data = watchlistData[symbol] || {};
@@ -1358,8 +1726,15 @@
             }
             
             const btn = document.getElementById('analyze-btn');
-            btn.disabled = true;
-            btn.textContent = 'Loading...';
+            
+            // In live mode, don't disable button, just show visual feedback
+            if (liveMode) {
+                const chartsContainer = document.querySelector('.charts-container');
+                chartsContainer.classList.add('live-refreshing');
+            } else {
+                btn.disabled = true;
+                btn.textContent = 'Loading...';
+            }
             
             try {
                 let url = `/api/analyze?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
@@ -1392,11 +1767,23 @@
                 updateCharts(data);
                 updateAnalysis(data);
                 
+                // Update summary text and collapse controls on first analyze (mobile only)
+                updateSummaryText();
+                if (isMobile() && !hasAnalyzed) {
+                    hasAnalyzed = true;
+                    collapseControls();
+                }
+                
             } catch (e) {
                 document.getElementById('signals-container').innerHTML = `<div class="error-message">${e.message}</div>`;
             } finally {
-                btn.disabled = false;
-                btn.textContent = '▶ Analyze';
+                if (liveMode) {
+                    const chartsContainer = document.querySelector('.charts-container');
+                    chartsContainer.classList.remove('live-refreshing');
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = '▶ Analyze';
+                }
             }
         }
         
@@ -1504,6 +1891,9 @@
                         </div>
                     `;
                 }).join('');
+            
+            // Update signal peek
+            updateSignalPeek(signals);
         }
         
         // ===== EVENT LISTENERS =====
@@ -1511,16 +1901,41 @@
             if (currentSymbol && e.target.value) {
                 loadStrikes(currentSymbol, e.target.value);
             }
+            // Stop live mode when expiration changes
+            stopLiveMode();
+        });
+        
+        document.getElementById('strike').addEventListener('change', () => {
+            // Stop live mode when strike changes
+            stopLiveMode();
         });
         
         document.getElementById('analyze-btn').addEventListener('click', analyze);
+        document.getElementById('summary-analyze-btn').addEventListener('click', analyze);
         
+        // Live mode buttons
+        document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
+        document.getElementById('summary-live-btn').addEventListener('click', toggleLiveMode);
+        
+        // Controls chevron
+        document.getElementById('controls-chevron').addEventListener('click', toggleControls);
+        
+        // Interval buttons - Handle both main and summary interval buttons
         document.querySelectorAll('.interval-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                // Update all interval buttons (both main and summary)
                 document.querySelectorAll('.interval-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
                 currentInterval = parseInt(btn.dataset.interval);
+                // Set active on all buttons with same interval
+                document.querySelectorAll(`.interval-btn[data-interval="${currentInterval}"]`).forEach(b => b.classList.add('active'));
             });
+        });
+        
+        // Signal peek click handler
+        document.getElementById('signal-peek').addEventListener('click', () => {
+            if (isMobile()) {
+                openAnalysis();
+            }
         });
         
         document.querySelectorAll('.sidebar-tab').forEach(tab => {
