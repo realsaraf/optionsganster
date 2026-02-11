@@ -984,8 +984,12 @@
                 font-size: 13px;
             }
             
-            /* Controls Summary - Show on mobile after first analyze */
+            /* Controls Summary - Hidden by default, shown after first analyze */
             .controls-summary {
+                display: none;
+            }
+            
+            .controls-summary.active {
                 display: flex;
             }
             
@@ -1328,6 +1332,7 @@
         function collapseControls() {
             if (isMobile()) {
                 document.getElementById('controls-bar').classList.add('collapsed');
+                document.getElementById('controls-summary').classList.add('active');
                 document.getElementById('controls-chevron').textContent = '▲';
                 controlsCollapsed = true;
             }
