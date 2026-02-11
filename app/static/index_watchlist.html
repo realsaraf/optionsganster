@@ -607,14 +607,260 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #4a4e59;
         }
+
+        /* ===== MOBILE TOGGLE BUTTONS ===== */
+        .mobile-menu-toggle,
+        .mobile-analysis-toggle {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            background: #2962ff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+        }
+
+        .mobile-menu-toggle {
+            top: 12px;
+            left: 12px;
+        }
+
+        .mobile-analysis-toggle {
+            bottom: 20px;
+            right: 20px;
+        }
+
+        .mobile-menu-toggle:active,
+        .mobile-analysis-toggle:active {
+            transform: scale(0.95);
+        }
+
+        .mobile-close-btn {
+            display: none;
+            background: transparent;
+            border: none;
+            color: #787b86;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+        }
+
+        .mobile-close-btn:hover {
+            background: rgba(120, 123, 134, 0.1);
+            color: #d1d4dc;
+        }
+
+        .backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 999;
+        }
+
+        .backdrop.active {
+            display: block;
+        }
+
+        /* ===== MOBILE RESPONSIVE (≤768px) ===== */
+        @media (max-width: 768px) {
+            /* Allow scrolling on mobile */
+            html, body {
+                overflow: auto;
+            }
+
+            .main-panel {
+                overflow: visible;
+            }
+
+            /* Show mobile toggle buttons */
+            .mobile-menu-toggle,
+            .mobile-analysis-toggle {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            /* Watchlist Sidebar - Hidden by default, overlay when open */
+            .watchlist-sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                width: 280px;
+                max-width: 85vw;
+                transform: translateX(-100%);
+                transition: transform 0.3s ease-in-out;
+                z-index: 1000;
+            }
+
+            .watchlist-sidebar.mobile-open {
+                transform: translateX(0);
+            }
+
+            /* Show close button in watchlist header on mobile */
+            .watchlist-sidebar .mobile-close-btn {
+                display: block;
+            }
+
+            /* Analysis Sidebar - Hidden by default, overlay when open */
+            .analysis-sidebar {
+                position: fixed;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                width: 90vw;
+                max-width: 400px;
+                transform: translateX(100%);
+                transition: transform 0.3s ease-in-out;
+                z-index: 1000;
+            }
+
+            .analysis-sidebar.mobile-open {
+                transform: translateX(0);
+            }
+
+            /* Header - Stack vertically */
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                padding: 60px 16px 12px 16px; /* Extra top padding for mobile menu button */
+            }
+
+            .header-logo h1 {
+                font-size: 16px;
+            }
+
+            .header-contract {
+                width: 100%;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .contract-symbol {
+                font-size: 14px;
+            }
+
+            .contract-details {
+                font-size: 11px;
+            }
+
+            .contract-price {
+                font-size: 16px;
+            }
+
+            .contract-change {
+                font-size: 12px;
+            }
+
+            /* Controls Bar - Responsive layout */
+            .controls-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+                padding: 12px;
+            }
+
+            .control-group {
+                width: 100%;
+            }
+
+            .control-group select,
+            .control-group input {
+                flex: 1;
+                width: 100%;
+                min-width: 0;
+                padding: 10px 12px; /* Larger for touch */
+            }
+
+            .control-group label {
+                min-width: 50px;
+            }
+
+            /* Interval buttons - Make touch-friendly */
+            .interval-buttons {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .interval-btn {
+                flex: 1;
+                padding: 12px 8px; /* Larger for touch */
+                min-height: 44px; /* Touch-friendly */
+            }
+
+            .analyze-btn {
+                width: 100%;
+                padding: 14px 20px; /* Larger for touch */
+                min-height: 44px; /* Touch-friendly */
+                font-size: 14px;
+            }
+
+            /* Chart Area - Allow scrolling */
+            .chart-area {
+                flex-direction: column;
+                overflow: visible;
+                min-height: 500px;
+            }
+
+            .charts-container {
+                min-height: 400px;
+            }
+
+            /* Watchlist search - Larger for mobile */
+            .watchlist-search input {
+                padding: 12px 14px;
+                font-size: 14px;
+            }
+
+            /* Watchlist items - Larger tap targets */
+            .watchlist-item {
+                padding: 14px 16px;
+            }
+
+            .watchlist-symbol {
+                font-size: 15px;
+            }
+
+            .watchlist-name {
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Mobile Menu Toggle Button -->
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle Watchlist">
+        ☰ <span>Watchlist</span>
+    </button>
+
+    <!-- Mobile Analysis Toggle Button -->
+    <button class="mobile-analysis-toggle" id="mobile-analysis-toggle" aria-label="Toggle Analysis">
+        📊 <span>Analysis</span>
+    </button>
+
+    <!-- Backdrop for mobile overlays -->
+    <div class="backdrop" id="backdrop"></div>
+
     <div class="app-container">
         <!-- LEFT: Watchlist Sidebar -->
-        <div class="watchlist-sidebar">
+        <div class="watchlist-sidebar" id="watchlist-sidebar">
             <div class="watchlist-header">
                 <h2>Watchlist</h2>
+                <button class="mobile-close-btn" id="watchlist-close-btn" aria-label="Close Watchlist">×</button>
                 <button class="watchlist-add-btn" title="Add Symbol">+</button>
             </div>
             <div class="watchlist-search">
@@ -694,10 +940,11 @@
                 </div>
                 
                 <!-- RIGHT: Analysis Sidebar -->
-                <div class="analysis-sidebar">
+                <div class="analysis-sidebar" id="analysis-sidebar">
                     <div class="sidebar-tabs">
                         <button class="sidebar-tab active" data-tab="analysis">Analysis</button>
                         <button class="sidebar-tab" data-tab="signals">Signals</button>
+                        <button class="mobile-close-btn" id="analysis-close-btn" aria-label="Close Analysis">×</button>
                     </div>
                     
                     <div class="sidebar-content" id="sidebar-content">
@@ -763,6 +1010,86 @@
             { symbol: 'META', name: 'Meta Platforms' },
             { symbol: 'GOOGL', name: 'Alphabet Inc' }
         ];
+
+        // ===== MOBILE FUNCTIONS =====
+        function isMobile() {
+            return window.innerWidth <= 768;
+        }
+
+        function openWatchlist() {
+            if (isMobile()) {
+                document.getElementById('watchlist-sidebar').classList.add('mobile-open');
+                document.getElementById('backdrop').classList.add('active');
+            }
+        }
+
+        function closeWatchlist() {
+            if (isMobile()) {
+                document.getElementById('watchlist-sidebar').classList.remove('mobile-open');
+                document.getElementById('backdrop').classList.remove('active');
+            }
+        }
+
+        function toggleWatchlist() {
+            const sidebar = document.getElementById('watchlist-sidebar');
+            if (sidebar.classList.contains('mobile-open')) {
+                closeWatchlist();
+            } else {
+                openWatchlist();
+                // Close analysis if open
+                closeAnalysis();
+            }
+        }
+
+        function openAnalysis() {
+            if (isMobile()) {
+                document.getElementById('analysis-sidebar').classList.add('mobile-open');
+                document.getElementById('backdrop').classList.add('active');
+            }
+        }
+
+        function closeAnalysis() {
+            if (isMobile()) {
+                document.getElementById('analysis-sidebar').classList.remove('mobile-open');
+                document.getElementById('backdrop').classList.remove('active');
+            }
+        }
+
+        function toggleAnalysis() {
+            const sidebar = document.getElementById('analysis-sidebar');
+            if (sidebar.classList.contains('mobile-open')) {
+                closeAnalysis();
+            } else {
+                openAnalysis();
+                // Close watchlist if open
+                closeWatchlist();
+            }
+        }
+
+        function closeAllMobilePanels() {
+            closeWatchlist();
+            closeAnalysis();
+        }
+
+        function handleResize() {
+            // Reset mobile panels when switching to desktop
+            if (!isMobile()) {
+                closeAllMobilePanels();
+            }
+            // Trigger chart resize
+            if (priceChart && volumeChart) {
+                setTimeout(() => {
+                    priceChart.resize(
+                        document.getElementById('price-chart').clientWidth,
+                        document.getElementById('price-chart').clientHeight
+                    );
+                    volumeChart.resize(
+                        document.getElementById('volume-chart').clientWidth,
+                        document.getElementById('volume-chart').clientHeight
+                    );
+                }, 100);
+            }
+        }
         
         // ===== WATCHLIST FUNCTIONS =====
         async function loadWatchlistPrices() {
@@ -838,6 +1165,11 @@
             const data = watchlistData[symbol] || {};
             document.getElementById('contract-symbol').textContent = symbol;
             document.getElementById('contract-details').textContent = 'Select expiration & strike';
+            
+            // Auto-close watchlist on mobile when symbol is selected
+            if (isMobile()) {
+                closeWatchlist();
+            }
         }
         
         // ===== EXPIRATIONS & STRIKES =====
@@ -1199,6 +1531,21 @@
         });
         
         document.getElementById('watchlist-search').addEventListener('input', renderWatchlist);
+
+        // ===== MOBILE EVENT LISTENERS =====
+        // Mobile toggle buttons
+        document.getElementById('mobile-menu-toggle').addEventListener('click', toggleWatchlist);
+        document.getElementById('mobile-analysis-toggle').addEventListener('click', toggleAnalysis);
+
+        // Mobile close buttons
+        document.getElementById('watchlist-close-btn').addEventListener('click', closeWatchlist);
+        document.getElementById('analysis-close-btn').addEventListener('click', closeAnalysis);
+
+        // Backdrop click to close
+        document.getElementById('backdrop').addEventListener('click', closeAllMobilePanels);
+
+        // Window resize handler
+        window.addEventListener('resize', handleResize);
         
         // ===== INITIALIZATION =====
         async function init() {
