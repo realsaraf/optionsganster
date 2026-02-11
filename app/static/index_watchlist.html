@@ -1227,6 +1227,16 @@
         // Signal peek state
         let latestSignalData = null;
         
+        // Signal type constants
+        const BULLISH_SIGNALS = [
+            'strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 
+            'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'
+        ];
+        const BEARISH_SIGNALS = [
+            'strong_bearish', 'distribution', 'test_resistance', 'climax_top', 
+            'no_demand', 'pin_bar_bear', 'confirmed_reversal_down'
+        ];
+        
         // Default watchlist symbols with metadata
         const defaultWatchlist = [
             { symbol: 'SPY', name: 'S&P 500 ETF' },
@@ -1362,7 +1372,17 @@
             const intervalText = currentInterval === 1 ? '1m' : currentInterval === 5 ? '5m' : currentInterval === 15 ? '15m' : '1H';
             
             if (strike && expiration) {
-                const expShort = new Date(expiration).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                // Parse date more reliably - expiration is in YYYY-MM-DD format from the API
+                let expShort = expiration;
+                try {
+                    // Split and create date to avoid timezone issues
+                    const [year, month, day] = expiration.split('-');
+                    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                    expShort = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                } catch (e) {
+                    // Fallback to just the date part if parsing fails
+                    expShort = expiration.substring(5).replace('-', '/');
+                }
                 const rightText = right === 'C' ? 'C' : 'P';
                 document.getElementById('summary-text').textContent = `${symbol} $${strike}${rightText} | ${expShort} | ${intervalText}`;
             }
@@ -1379,7 +1399,7 @@
             const latestSignal = signals[signals.length - 1];
             latestSignalData = latestSignal;
             
-            const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(latestSignal.signal);
+            const isBullish = BULLISH_SIGNALS.includes(latestSignal.signal);
             
             const peek = document.getElementById('signal-peek');
             peek.className = `signal-peek ${isBullish ? '' : 'bearish'}`;
@@ -1785,6 +1805,9 @@
                 if (liveMode) {
                     const chartsContainer = document.querySelector('.charts-container');
                     chartsContainer.classList.remove('live-refreshing');
+                    // Reset countdown to keep in sync with refresh interval
+                    liveCountdown = 10;
+                    updateLiveButton();
                 } else {
                     btn.disabled = false;
                     btn.textContent = '▶ Analyze';
@@ -1816,7 +1839,7 @@
             
             // Markers for signals
             const markers = data.signals.map(signal => {
-                const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(signal.signal);
+                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
                 return {
                     time: new Date(signal.datetime).getTime() / 1000,
                     position: isBullish ? 'belowBar' : 'aboveBar',
@@ -1863,8 +1886,8 @@
             
             // Stats
             const signals = data.signals || [];
-            const bullishSignals = signals.filter(s => ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(s.signal));
-            const bearishSignals = signals.filter(s => ['strong_bearish', 'distribution', 'test_resistance', 'climax_top', 'no_demand', 'pin_bar_bear', 'confirmed_reversal_down'].includes(s.signal));
+            const bullishSignals = signals.filter(s => BULLISH_SIGNALS.includes(s.signal));
+            const bearishSignals = signals.filter(s => BEARISH_SIGNALS.includes(s.signal));
             
             document.getElementById('stat-bars').textContent = (data.bars || []).length;
             document.getElementById('stat-signals').textContent = signals.length;
@@ -1882,7 +1905,7 @@
                 .reverse()
                 .slice(0, 30)
                 .map(signal => {
-                    const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down', 'no_supply', 'pin_bar_bull', 'confirmed_reversal_up'].includes(signal.signal);
+                    const isBullish = BULLISH_SIGNALS.includes(signal.signal);
                     return `
                         <div class="signal-item ${isBullish ? 'bullish' : 'bearish'}">
                             <div class="signal-time">${new Date(signal.datetime).toLocaleString()}</div>
