@@ -1324,6 +1324,9 @@
         // Signal peek state
         let latestSignalData = null;
         
+        // Chart data tracking for incremental updates
+        let currentBarTimestamps = new Set();
+        
         // Mobile responsiveness breakpoints
         // Portrait mobile: width <= 768px (standard mobile breakpoint)
         // Landscape mobile: width <= 1024px AND height <= 500px
@@ -1894,6 +1897,7 @@
                 let url = `/api/analyze?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
                 if (startDate) url += `&start_date=${startDate}`;
                 if (endDate) url += `&end_date=${endDate}`;
+                if (liveMode) url += `&nocache=true`;  // Bypass cache in live mode
                 
                 const res = await fetch(url);
                 if (!res.ok) {
@@ -1918,7 +1922,12 @@
                     document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
                 }
                 
-                updateCharts(data);
+                // Use incremental updates in live mode, full redraw otherwise
+                if (liveMode && currentBarTimestamps.size > 0) {
+                    updateChartsIncremental(data);
+                } else {
+                    updateCharts(data);
+                }
                 updateAnalysis(data);
                 
                 // Update summary text after analyze
@@ -1992,6 +2001,65 @@
                 } catch (_) { /* chart not ready yet – fitContent already handled it */ }
             }
           } catch(chartErr) { console.warn('Chart update warning:', chartErr.message); }
+        }
+        
+        function updateChartsIncremental(data) {
+          try {
+            const candleData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            }));
+            
+            const volumeData = data.bars.map(bar => ({
+                time: new Date(bar.datetime).getTime() / 1000,
+                value: bar.volume,
+                color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            }));
+            
+            // Build new set of timestamps
+            const newTimestamps = new Set(candleData.map(d => d.time));
+            
+            // Suppress timescale sync during updates
+            window._chartDataLoading = true;
+            
+            // Update existing bars and append new bars
+            for (let i = 0; i < candleData.length; i++) {
+                const candleBar = candleData[i];
+                const volumeBar = volumeData[i];
+                
+                if (currentBarTimestamps.has(candleBar.time)) {
+                    // Update existing bar (likely the last bar being updated)
+                    candlestickSeries.update(candleBar);
+                    volumeSeries.update(volumeBar);
+                } else {
+                    // New bar - append it
+                    candlestickSeries.update(candleBar);
+                    volumeSeries.update(volumeBar);
+                }
+            }
+            
+            window._chartDataLoading = false;
+            
+            // Update tracked timestamps
+            currentBarTimestamps = newTimestamps;
+            
+            // Update markers for signals
+            const markers = data.signals.map(signal => {
+                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
+                return {
+                    time: new Date(signal.datetime).getTime() / 1000,
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#26a69a' : '#ef5350',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+            candlestickSeries.setMarkers(markers);
+            
+          } catch(chartErr) { console.warn('Chart incremental update warning:', chartErr.message); }
         }
         
         function updateAnalysis(data) {
@@ -2148,8 +2216,8 @@
             // Select default symbol (will now have price data for ATM)
             selectSymbol('SPY');
             
-            // Start price updates (every 60 seconds)
-            priceUpdateInterval = setInterval(loadWatchlistPrices, 60000);
+            // Start price updates (every 15 seconds for real-time feel)
+            priceUpdateInterval = setInterval(loadWatchlistPrices, 15000);
         }
         
         init();

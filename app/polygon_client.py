@@ -269,6 +269,80 @@ class PolygonClient:
         data = await self._get_json(url)
         return {r.get("T", ""): r for r in data.get("results", [])}
 
+    # ── Snapshot prices (real-time/delayed) ──────────────────
+
+    async def get_snapshot_prices(self, symbols: list[str]) -> dict[str, dict]:
+        """
+        Fetch snapshot prices for multiple symbols (real-time or 15-min delayed).
+        Returns near-real-time prices including last trade, day OHLV, prev close.
+        Uses a short TTL cache (10 seconds) for efficiency.
+        """
+        # Create cache key from sorted symbols
+        cache_key = tuple(sorted(s.upper() for s in symbols))
+        
+        # Check snapshot cache (separate from price_cache, uses CACHE_TTL_PRICES/3 for ~10s)
+        snapshot_cache_ttl = max(10, settings.CACHE_TTL_PRICES // 3)
+        if not hasattr(self, '_snapshot_cache'):
+            self._snapshot_cache = TTLCache(maxsize=64, ttl=snapshot_cache_ttl)
+        
+        if cache_key in self._snapshot_cache:
+            return self._snapshot_cache[cache_key]
+
+        # Build comma-separated ticker list
+        ticker_str = ",".join(s.upper() for s in symbols)
+        
+        url = f"{self.BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers"
+        params = {"tickers": ticker_str}
+        
+        try:
+            data = await self._get_json(url, params)
+            tickers = data.get("tickers", [])
+            
+            # Build result dict keyed by symbol
+            result = {}
+            for ticker_data in tickers:
+                symbol = ticker_data.get("ticker", "")
+                if not symbol:
+                    continue
+                    
+                last_trade = ticker_data.get("lastTrade", {})
+                day_data = ticker_data.get("day", {})
+                prev_day = ticker_data.get("prevDay", {})
+                
+                result[symbol] = {
+                    "lastPrice": last_trade.get("p", 0.0),
+                    "todaysChange": ticker_data.get("todaysChange", 0.0),
+                    "todaysChangePerc": ticker_data.get("todaysChangePerc", 0.0),
+                    "dayOpen": day_data.get("o", 0.0),
+                    "dayHigh": day_data.get("h", 0.0),
+                    "dayLow": day_data.get("l", 0.0),
+                    "dayVolume": day_data.get("v", 0),
+                    "prevClose": prev_day.get("c", 0.0),
+                }
+            
+            self._snapshot_cache[cache_key] = result
+            return result
+            
+        except Exception as e:
+            # Fallback to empty dict on error
+            return {}
+
+    # ── Cache management ─────────────────────────────────────
+
+    def clear_ohlcv_cache(
+        self,
+        symbol: str,
+        expiration: date,
+        strike: float,
+        right: str,
+        start_date: date,
+        end_date: date,
+        interval_min: int,
+    ) -> None:
+        """Clear a specific entry from the OHLCV cache."""
+        cache_key = (symbol, expiration, strike, right, start_date, end_date, interval_min)
+        self._ohlcv_cache.pop(cache_key, None)
+
 
 # Singleton – lifecycle managed via FastAPI lifespan
 polygon_client = PolygonClient()
