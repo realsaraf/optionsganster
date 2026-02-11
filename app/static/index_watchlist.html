@@ -250,6 +250,22 @@
         .contract-change.positive { color: #26a69a; }
         .contract-change.negative { color: #ef5350; }
         
+        .logout-btn {
+            margin-left: auto;
+            color: #787b86;
+            text-decoration: none;
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .logout-btn:hover {
+            color: #ef5350;
+            background: rgba(239, 83, 80, 0.1);
+        }
+        
         /* ===== CONTROLS BAR ===== */
         .controls-bar {
             background: #1e222d;
@@ -1008,6 +1024,16 @@
                 font-size: 16px;
             }
 
+            .logout-btn {
+                position: absolute;
+                top: 12px;
+                right: 12px;
+                margin-left: 0;
+                font-size: 11px;
+                padding: 8px 12px;
+                z-index: 100;
+            }
+
             .contract-change {
                 font-size: 12px;
             }
@@ -1178,6 +1204,16 @@
                 padding-top: 60px;
             }
 
+            .logout-btn {
+                position: absolute;
+                top: 12px;
+                right: 12px;
+                margin-left: 0;
+                font-size: 11px;
+                padding: 8px 12px;
+                z-index: 100;
+            }
+
             /* Controls Summary - Hidden by default, shown after first analyze */
             .controls-summary {
                 display: none;
@@ -1257,6 +1293,7 @@
                         <div class="contract-change" id="contract-change">-</div>
                     </div>
                 </div>
+                <a href="/api/logout" class="logout-btn" title="Sign Out">⏻ Logout</a>
             </div>
             
             <!-- Controls Summary Bar (Mobile only, shown after first analyze) -->
@@ -1441,6 +1478,16 @@
             { symbol: 'META', name: 'Meta Platforms' },
             { symbol: 'GOOGL', name: 'Alphabet Inc' }
         ];
+
+        // ===== AUTH HELPER =====
+        async function authFetch(url, options) {
+            const res = await fetch(url, options);
+            if (res.status === 401) {
+                window.location.href = '/login';
+                throw new Error('Session expired');
+            }
+            return res;
+        }
 
         // ===== MOBILE FUNCTIONS =====
         function isMobile() {
@@ -1693,7 +1740,7 @@
         async function loadWatchlistPrices() {
             try {
                 const symbols = defaultWatchlist.map(w => w.symbol).join(',');
-                const res = await fetch(`/api/watchlist/prices?symbols=${symbols}`);
+                const res = await authFetch(`/api/watchlist/prices?symbols=${symbols}`);
                 if (!res.ok) throw new Error('Failed to fetch prices');
                 
                 const data = await res.json();
@@ -1781,7 +1828,7 @@
             const maxRetries = 3;
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    const res = await fetch(`/api/expirations/${symbol}`);
+                    const res = await authFetch(`/api/expirations/${symbol}`);
                     if (res.status === 429) {
                         select.innerHTML = '<option value="">Rate limited, retrying...</option>';
                         await new Promise(r => setTimeout(r, (attempt + 1) * 5000));
@@ -1841,7 +1888,7 @@
                 // If no cached price, try API as fallback
                 if (!underlyingPrice) {
                     try {
-                        const priceRes = await fetch(`/api/underlying/${symbol}`);
+                        const priceRes = await authFetch(`/api/underlying/${symbol}`);
                         const priceData = await priceRes.json();
                         underlyingPrice = priceData.price || 0;
                     } catch (e) {
@@ -1849,7 +1896,7 @@
                     }
                 }
                 
-                const res = await fetch(`/api/strikes/${symbol}/${expiration}`);
+                const res = await authFetch(`/api/strikes/${symbol}/${expiration}`);
                 if (!res.ok) throw new Error('Failed to load');
                 
                 const data = await res.json();
@@ -1975,7 +2022,7 @@
                 if (endDate) url += `&end_date=${endDate}`;
                 if (liveMode) url += `&nocache=true`;  // Bypass cache in live mode
                 
-                const res = await fetch(url);
+                const res = await authFetch(url);
                 if (!res.ok) {
                     const err = await res.json();
                     throw new Error(err.detail || 'Analysis failed');
