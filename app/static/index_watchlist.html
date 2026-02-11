@@ -986,10 +986,14 @@
                 priceScaleId: '',
             });
             
-            // Sync timescales (guard against null range)
+            // Sync timescales (guard against null range + skip during data loading)
+            window._chartDataLoading = false;
             priceChart.timeScale().subscribeVisibleTimeRangeChange(() => {
+                if (window._chartDataLoading) return;
                 const range = priceChart.timeScale().getVisibleRange();
-                if (range) volumeChart.timeScale().setVisibleRange(range);
+                if (range) {
+                    try { volumeChart.timeScale().setVisibleRange(range); } catch(_) {}
+                }
             });
             
             // Resize handler
@@ -1065,6 +1069,7 @@
         }
         
         function updateCharts(data) {
+          try {
             const candleData = data.bars.map(bar => ({
                 time: new Date(bar.datetime).getTime() / 1000,
                 open: bar.open,
@@ -1079,8 +1084,11 @@
                 color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
             }));
             
-            candlestickSeries.setData(candleData);
+            // Suppress timescale sync during bulk data load
+            window._chartDataLoading = true;
             volumeSeries.setData(volumeData);
+            candlestickSeries.setData(candleData);
+            window._chartDataLoading = false;
             
             // Markers for signals
             const markers = data.signals.map(signal => {
@@ -1108,6 +1116,7 @@
                     });
                 } catch (_) { /* chart not ready yet – fitContent already handled it */ }
             }
+          } catch(chartErr) { console.warn('Chart update warning:', chartErr.message); }
         }
         
         function updateAnalysis(data) {
