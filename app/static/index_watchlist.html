@@ -1324,6 +1324,11 @@
         // Signal peek state
         let latestSignalData = null;
         
+        // Mobile responsiveness breakpoints
+        const MOBILE_MAX_WIDTH = 768;
+        const LANDSCAPE_MAX_WIDTH = 1024;
+        const LANDSCAPE_MAX_HEIGHT = 500;
+        
         // Signal type constants
         const BULLISH_SIGNALS = [
             'strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 
@@ -1352,8 +1357,8 @@
         // ===== MOBILE FUNCTIONS =====
         function isMobile() {
             // Check for portrait mobile or landscape mobile
-            return window.innerWidth <= 768 || 
-                   (window.innerWidth <= 1024 && window.innerHeight <= 500);
+            return window.innerWidth <= MOBILE_MAX_WIDTH || 
+                   (window.innerWidth <= LANDSCAPE_MAX_WIDTH && window.innerHeight <= LANDSCAPE_MAX_HEIGHT);
         }
 
         function openWatchlist() {
@@ -1420,18 +1425,26 @@
         function handleResize() {
             // Handle mobile controls visibility and state
             if (isMobile()) {
+                // Cache DOM references
+                const controlsSummary = document.getElementById('controls-summary');
+                
                 // Ensure controls-summary is active on mobile
-                if (!document.getElementById('controls-summary').classList.contains('active')) {
-                    document.getElementById('controls-summary').classList.add('active');
+                if (!controlsSummary.classList.contains('active')) {
+                    controlsSummary.classList.add('active');
                     collapseControls();
                 }
             } else {
                 // Reset mobile panels when switching to desktop
                 closeAllMobilePanels();
+                
+                // Cache DOM references
+                const controlsSummary = document.getElementById('controls-summary');
+                const controlsBar = document.getElementById('controls-bar');
+                
                 // Reset controls state on desktop
-                if (document.getElementById('controls-summary').classList.contains('active')) {
-                    document.getElementById('controls-summary').classList.remove('active');
-                    document.getElementById('controls-bar').classList.remove('collapsed');
+                if (controlsSummary.classList.contains('active')) {
+                    controlsSummary.classList.remove('active');
+                    controlsBar.classList.remove('collapsed');
                     controlsCollapsed = false;
                 }
             }
