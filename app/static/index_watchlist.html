@@ -2474,6 +2474,14 @@
         let liveCountdownInterval = null;
         let mockMode = false;          // mock data for testing
         let lastBarDatetime = null;    // tracks the last bar for delta updates
+        let liveWs = null;             // WebSocket connection for live option feed
+        let liveWsTicker = null;       // currently subscribed option ticker
+        
+        // Watchlist / stocks WS state
+        let stocksWs = null;           // persistent WS for stock price streaming
+        let stocksWsSubscribed = new Set();  // stock tickers subscribed on stocksWs
+        let stocksWsReconnectTimer = null;
+        let liveUnderlyingTicker = null;  // underlying stock ticker subscribed for chart overlay
         
         // Controls collapse state
         let controlsCollapsed = false;
@@ -2824,10 +2832,11 @@
             
             if (liveMode) {
                 const prefix = mockMode ? '🟡 MOCK ' : '🔴 LIVE ';
-                const text = `${prefix}${liveCountdown}s`;
+                const dot = liveWs && liveWs.readyState === WebSocket.OPEN ? '●' : '○';
+                const text = `${prefix}${dot}`;
                 desktopBtn.textContent = text;
                 if (summaryBtn) {
-                    summaryBtn.textContent = `LIVE ${liveCountdown}s`;
+                    summaryBtn.textContent = `LIVE ${dot}`;
                     summaryBtn.classList.add('active');
                 }
             } else {
@@ -2839,7 +2848,371 @@
             }
         }
 
-        // Live-mode poll: fetches ONLY new bars/signals via /api/analyze/live
+        // Build OCC-format option ticker: O:SPY251219C00650000
+        function formatOptionTicker(symbol, expiration, strike, right) {
+            const d = new Date(expiration + 'T00:00:00');
+            const yy = String(d.getFullYear()).slice(2);
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            const strikeInt = Math.round(strike * 1000);
+            const strikePad = String(strikeInt).padStart(8, '0');
+            return `O:${symbol.toUpperCase()}${yy}${mm}${dd}${right.toUpperCase()}${strikePad}`;
+        }
+
+        // Connect to the live WebSocket feed
+        function connectLiveWs() {
+            if (liveWs && (liveWs.readyState === WebSocket.OPEN || liveWs.readyState === WebSocket.CONNECTING)) {
+                return;  // already connected
+            }
+
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${proto}//${location.host}/ws/live`;
+            console.log('[LiveWS] Connecting to', url);
+
+            liveWs = new WebSocket(url);
+
+            liveWs.onopen = () => {
+                console.log('[LiveWS] Connected');
+                updateLiveButton();
+
+                // If we already have a pending subscription, send it now
+                if (liveWsTicker) {
+                    liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveWsTicker }));
+                    console.log('[LiveWS] Subscribed to', liveWsTicker);
+                }
+            };
+
+            liveWs.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleLiveMessage(msg);
+                } catch (e) {
+                    console.warn('[LiveWS] Bad message:', e);
+                }
+            };
+
+            liveWs.onclose = (event) => {
+                console.log('[LiveWS] Disconnected, code:', event.code);
+                updateLiveButton();
+
+                // Auto-reconnect if still in live mode
+                if (liveMode) {
+                    setTimeout(() => {
+                        console.log('[LiveWS] Reconnecting...');
+                        connectLiveWs();
+                    }, 2000);
+                }
+            };
+
+            liveWs.onerror = (err) => {
+                console.error('[LiveWS] Error:', err);
+            };
+        }
+
+        // Handle incoming WebSocket messages
+        function handleLiveMessage(msg) {
+            const type = msg.type;
+
+            if (type === 'sow') {
+                // Snapshot of world — initial bars on subscribe
+                const bars = msg.bars || [];
+                if (bars.length > 0) {
+                    console.log(`[LiveWS] SOW: ${bars.length} bars for ${msg.ticker}`);
+
+                    // Update chart with SOW bars incrementally 
+                    window._chartDataLoading = true;
+                    for (const bar of bars) {
+                        const t = toEasternUnix(bar.datetime);
+                        candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                        volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                    }
+                    window._chartDataLoading = false;
+
+                    // Append to analysis data
+                    if (lastAnalysisData) {
+                        lastAnalysisData.bars = lastAnalysisData.bars.concat(bars);
+                    }
+
+                    // Update price header
+                    const lastBar = bars[bars.length - 1];
+                    document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
+                    document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : bars.length;
+                }
+
+            } else if (type === 'bar') {
+                // Real-time bar update
+                const bar = msg.bar;
+                const signals = msg.signals || [];
+
+                if (!bar) return;
+
+                const chartsContainer = document.querySelector('.charts-container');
+                chartsContainer.classList.add('live-refreshing');
+
+                // Update chart
+                const t = toEasternUnix(bar.datetime);
+                window._chartDataLoading = true;
+                candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                window._chartDataLoading = false;
+
+                // Track for delta state
+                lastBarDatetime = bar.datetime;
+
+                // Append to analysis data
+                if (lastAnalysisData) {
+                    lastAnalysisData.bars.push(bar);
+                    if (signals.length > 0) {
+                        lastAnalysisData.signals = (lastAnalysisData.signals || []).concat(signals);
+                    }
+                }
+
+                // Update contract header price
+                document.getElementById('contract-price').textContent = `$${bar.close.toFixed(2)}`;
+
+                // Update markers if new signals
+                if (signals.length > 0) {
+                    updateFilteredMarkers(lastAnalysisData ? lastAnalysisData.signals : signals);
+                    updateAnalysis(lastAnalysisData || { bars: [bar], signals: signals, bias: {} });
+                }
+
+                // Update stats
+                document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : 1;
+
+                setTimeout(() => chartsContainer.classList.remove('live-refreshing'), 200);
+
+            } else if (type === 'analysis') {
+                // Server-pushed full re-analysis (composite, greeks, bias, signals)
+                console.log('[LiveWS] Analysis update received');
+
+                // Update composite gauge + greeks panel
+                if (msg.composite) {
+                    updateComposite(msg.composite);
+                }
+
+                // Update bias indicator
+                if (msg.bias && msg.bias.bias) {
+                    const biasContainer = document.getElementById('bias-container');
+                    biasContainer.className = `bias-indicator ${msg.bias.bias}`;
+                    biasContainer.innerHTML = `
+                        <div class="bias-label">${msg.bias.bias}</div>
+                        <div class="bias-strength">Strength: ${Math.round((msg.bias.strength || 0) * 100)}%</div>
+                        <div class="bias-reason">${msg.bias.reason || ''}</div>
+                    `;
+                }
+
+                // Update signal stats from full history
+                if (msg.all_signals) {
+                    const allSig = msg.all_signals;
+                    const BULLISH = ['strong_bullish','accumulation','test_support','no_supply','pin_bar_bull'];
+                    const BEARISH = ['strong_bearish','distribution','test_resistance','no_demand','pin_bar_bear'];
+                    document.getElementById('stat-signals').textContent = allSig.length;
+                    document.getElementById('stat-bullish').textContent = allSig.filter(s => BULLISH.includes(s.signal)).length;
+                    document.getElementById('stat-bearish').textContent = allSig.filter(s => BEARISH.includes(s.signal)).length;
+
+                    // Also update markers on chart with full signal set
+                    if (lastAnalysisData) {
+                        lastAnalysisData.signals = allSig;
+                        updateFilteredMarkers(allSig);
+                    }
+                }
+
+                if (msg.total_bars) {
+                    document.getElementById('stat-bars').textContent = msg.total_bars;
+                }
+
+                // Update contract price from latest bar close
+                if (msg.last_price) {
+                    document.getElementById('contract-price').textContent = `$${msg.last_price.toFixed(2)}`;
+                }
+
+            } else if (type === 'subscribed') {
+                console.log('[LiveWS] Confirmed subscription:', msg.ticker);
+
+            } else if (type === 'unsubscribed') {
+                console.log('[LiveWS] Confirmed unsubscription:', msg.ticker);
+
+            } else if (type === 'status') {
+                console.log('[LiveWS] Feed status:', msg);
+
+            } else if (type === 'error') {
+                console.warn('[LiveWS] Error:', msg.message);
+            }
+        }
+
+        // ===== STOCKS WEBSOCKET (watchlist prices + underlying chart) =====
+
+        function connectStocksWs() {
+            if (stocksWs && (stocksWs.readyState === WebSocket.OPEN || stocksWs.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${proto}//${location.host}/ws/live`;
+            console.log('[StocksWS] Connecting to', url);
+
+            stocksWs = new WebSocket(url);
+
+            stocksWs.onopen = () => {
+                console.log('[StocksWS] Connected');
+                // Subscribe to all watchlist symbols
+                for (const item of defaultWatchlist) {
+                    stocksWs.send(JSON.stringify({ action: 'subscribe', ticker: item.symbol }));
+                    stocksWsSubscribed.add(item.symbol);
+                }
+                console.log('[StocksWS] Subscribed to', stocksWsSubscribed.size, 'stock tickers');
+
+                // If we have a pending underlying subscription, send it
+                if (liveUnderlyingTicker && !stocksWsSubscribed.has(liveUnderlyingTicker)) {
+                    stocksWs.send(JSON.stringify({ action: 'subscribe', ticker: liveUnderlyingTicker }));
+                    stocksWsSubscribed.add(liveUnderlyingTicker);
+                }
+            };
+
+            stocksWs.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleStocksMessage(msg);
+                } catch (e) {
+                    console.warn('[StocksWS] Bad message:', e);
+                }
+            };
+
+            stocksWs.onclose = (event) => {
+                console.log('[StocksWS] Disconnected, code:', event.code);
+                stocksWsSubscribed.clear();
+                // Auto-reconnect
+                if (stocksWsReconnectTimer) clearTimeout(stocksWsReconnectTimer);
+                stocksWsReconnectTimer = setTimeout(() => {
+                    console.log('[StocksWS] Reconnecting...');
+                    connectStocksWs();
+                }, 3000);
+            };
+
+            stocksWs.onerror = (err) => {
+                console.error('[StocksWS] Error:', err);
+            };
+        }
+
+        function handleStocksMessage(msg) {
+            const type = msg.type;
+
+            if (type === 'bar') {
+                const ticker = msg.ticker;
+                const bar = msg.bar;
+                if (!ticker || !bar) return;
+
+                // Update watchlist price data
+                const prev = watchlistData[ticker];
+                const prevPrice = prev?.price || bar.close;
+                const change = bar.close - (prev?.openPrice || bar.open);
+                const openPrice = prev?.openPrice || bar.open;
+
+                watchlistData[ticker] = {
+                    symbol: ticker,
+                    price: bar.close,
+                    openPrice: openPrice,
+                    prevPrice: prevPrice,
+                    change: Math.round(change * 100) / 100,
+                    changePct: openPrice > 0 ? Math.round((change / openPrice) * 10000) / 100 : 0,
+                    high: Math.max(bar.high, prev?.high || 0),
+                    low: prev?.low ? Math.min(bar.low, prev.low) : bar.low,
+                    volume: bar.accumulated_volume || (prev?.volume || 0) + bar.volume,
+                    direction: bar.close > prevPrice ? 'up' : bar.close < prevPrice ? 'down' : null,
+                    lastUpdate: bar.datetime,
+                };
+
+                renderWatchlist();
+
+                // If this is the underlying for the current option analysis, update overlay chart
+                if (ticker === liveUnderlyingTicker && liveMode && underlaySeries) {
+                    const t = toEasternUnix(bar.datetime);
+                    if (underlayMode === 'candle') {
+                        underlaySeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                    } else if (underlayMode === 'line') {
+                        underlaySeries.update({ time: t, value: bar.close });
+                    }
+                }
+
+            } else if (type === 'subscribed') {
+                console.log('[StocksWS] Confirmed subscription:', msg.ticker);
+            } else if (type === 'unsubscribed') {
+                console.log('[StocksWS] Confirmed unsubscription:', msg.ticker);
+            } else if (type === 'status') {
+                // ignore
+            } else if (type === 'sow') {
+                // SOW for stock — use the last bar to set initial price
+                const ticker = msg.ticker;
+                const bars = msg.bars || [];
+                if (bars.length > 0) {
+                    const lastBar = bars[bars.length - 1];
+                    const firstBar = bars[0];
+                    const prev = watchlistData[ticker];
+                    const change = lastBar.close - firstBar.open;
+                    watchlistData[ticker] = {
+                        symbol: ticker,
+                        price: lastBar.close,
+                        openPrice: firstBar.open,
+                        prevPrice: prev?.price || lastBar.close,
+                        change: Math.round(change * 100) / 100,
+                        changePct: firstBar.open > 0 ? Math.round((change / firstBar.open) * 10000) / 100 : 0,
+                        high: Math.max(...bars.map(b => b.high)),
+                        low: Math.min(...bars.map(b => b.low)),
+                        volume: lastBar.accumulated_volume || bars.reduce((s, b) => s + b.volume, 0),
+                        direction: null,
+                        lastUpdate: lastBar.datetime,
+                    };
+                    renderWatchlist();
+                    console.log(`[StocksWS] SOW for ${ticker}: ${bars.length} bars, last price=${lastBar.close}`);
+                }
+            }
+        }
+
+        /**
+         * Subscribe to the underlying stock for live chart overlay.
+         * Called when the user clicks LIVE on an option.
+         */
+        function subscribeUnderlyingLive(symbol) {
+            if (liveUnderlyingTicker === symbol) return;  // already subscribed
+
+            // Unsubscribe previous underlying if it's not in the watchlist
+            if (liveUnderlyingTicker && !defaultWatchlist.some(w => w.symbol === liveUnderlyingTicker)) {
+                if (stocksWs && stocksWs.readyState === WebSocket.OPEN) {
+                    stocksWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveUnderlyingTicker }));
+                    stocksWsSubscribed.delete(liveUnderlyingTicker);
+                }
+            }
+
+            liveUnderlyingTicker = symbol;
+
+            // If it's already subscribed (from watchlist), nothing to do
+            if (stocksWsSubscribed.has(symbol)) {
+                console.log(`[StocksWS] ${symbol} already subscribed via watchlist`);
+                return;
+            }
+
+            // Subscribe
+            if (stocksWs && stocksWs.readyState === WebSocket.OPEN) {
+                stocksWs.send(JSON.stringify({ action: 'subscribe', ticker: symbol }));
+                stocksWsSubscribed.add(symbol);
+                console.log(`[StocksWS] Subscribed to underlying: ${symbol}`);
+            }
+        }
+
+        function unsubscribeUnderlyingLive() {
+            if (!liveUnderlyingTicker) return;
+
+            // Only unsubscribe if not in the watchlist
+            if (!defaultWatchlist.some(w => w.symbol === liveUnderlyingTicker)) {
+                if (stocksWs && stocksWs.readyState === WebSocket.OPEN) {
+                    stocksWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveUnderlyingTicker }));
+                    stocksWsSubscribed.delete(liveUnderlyingTicker);
+                }
+            }
+            liveUnderlyingTicker = null;
+        }
+
+        // Live-mode poll: FALLBACK for mock mode (WebSocket not used for mock)
         async function livePoll() {
             const expiration = document.getElementById('expiration').value;
             const strike = document.getElementById('strike').value;
@@ -2862,12 +3235,10 @@
                 const newBars = data.bars || [];
                 const newSignals = data.signals || [];
 
-                if (newBars.length === 0) return;   // nothing new
+                if (newBars.length === 0) return;
 
-                // Track latest bar datetime for next delta request
                 lastBarDatetime = newBars[newBars.length - 1].datetime;
 
-                // Incrementally update chart with ONLY the new bars
                 window._chartDataLoading = true;
                 for (const bar of newBars) {
                     const t = toEasternUnix(bar.datetime);
@@ -2876,23 +3247,19 @@
                 }
                 window._chartDataLoading = false;
 
-                // Append new bars/signals to lastAnalysisData for marker rebuilding
                 if (lastAnalysisData) {
                     lastAnalysisData.bars = lastAnalysisData.bars.concat(newBars);
                     lastAnalysisData.signals = (lastAnalysisData.signals || []).concat(newSignals);
                 }
 
-                // Update contract header price
                 const lastBar = newBars[newBars.length - 1];
                 document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
 
-                // Rebuild markers with any new signals
                 if (newSignals.length > 0) {
                     updateFilteredMarkers(lastAnalysisData ? lastAnalysisData.signals : newSignals);
                     updateAnalysis(lastAnalysisData || { bars: newBars, signals: newSignals, bias: {} });
                 }
 
-                // Update stats
                 document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : newBars.length;
 
             } catch (e) {
@@ -2909,10 +3276,17 @@
             if (liveMode) {
                 stopLiveMode();
             } else {
+                const expiration = document.getElementById('expiration').value;
+                const strike = document.getElementById('strike').value;
+                const right = document.getElementById('right').value;
+
+                if (!currentSymbol || !expiration || !strike) {
+                    alert('Select a contract before going live');
+                    return;
+                }
+
                 // Start live mode
                 liveMode = true;
-                const interval = mockMode ? 1 : 10;
-                liveCountdown = interval;
                 
                 // Add active class to button
                 document.getElementById('live-btn').classList.add('active');
@@ -2926,20 +3300,35 @@
                     lastBarDatetime = null;
                 }
 
-                // Start countdown
-                updateLiveButton();
-                liveCountdownInterval = setInterval(() => {
-                    liveCountdown--;
-                    if (liveCountdown <= 0) {
-                        liveCountdown = interval;
-                    }
+                if (mockMode) {
+                    // Mock mode: keep using HTTP polling (no upstream WS needed)
+                    const interval = 1;
+                    liveCountdown = interval;
                     updateLiveButton();
-                }, 1000);
-                
-                // Start auto-refresh using the delta live poll
-                liveInterval = setInterval(() => {
-                    livePoll();
-                }, interval * 1000);
+                    liveCountdownInterval = setInterval(() => {
+                        liveCountdown--;
+                        if (liveCountdown <= 0) liveCountdown = interval;
+                        updateLiveButton();
+                    }, 1000);
+                    liveInterval = setInterval(() => livePoll(), interval * 1000);
+                } else {
+                    // Real mode: use WebSocket for live per-second agg feed
+                    liveWsTicker = formatOptionTicker(currentSymbol, expiration, parseFloat(strike), right);
+                    console.log('[LiveWS] Will subscribe to:', liveWsTicker);
+                    
+                    connectLiveWs();
+
+                    // If already connected, subscribe now
+                    if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+                        liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveWsTicker }));
+                    }
+                    // Otherwise, onopen handler will send the subscribe
+
+                    // Also subscribe to underlying stock for live overlay chart
+                    subscribeUnderlyingLive(currentSymbol);
+                    
+                    updateLiveButton();
+                }
             }
         }
         
@@ -2948,7 +3337,7 @@
                 liveMode = false;
                 lastBarDatetime = null;
                 
-                // Clear intervals
+                // Clear polling intervals (mock mode)
                 if (liveInterval) {
                     clearInterval(liveInterval);
                     liveInterval = null;
@@ -2957,13 +3346,30 @@
                     clearInterval(liveCountdownInterval);
                     liveCountdownInterval = null;
                 }
+                // Unsubscribe from WebSocket feed
+                if (liveWs && liveWs.readyState === WebSocket.OPEN && liveWsTicker) {
+                    liveWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveWsTicker }));
+                    console.log('[LiveWS] Unsubscribed from', liveWsTicker);
+                }
+                liveWsTicker = null;
+
+                // Unsubscribe from underlying stock overlay
+                unsubscribeUnderlyingLive();
+
+                // Close WebSocket after a short delay (let unsub message send)
+                if (liveWs) {
+                    const ws = liveWs;
+                    liveWs = null;
+                    setTimeout(() => {
+                        if (ws.readyState === WebSocket.OPEN) ws.close();
+                    }, 500);
+                }
                 
                 // Remove active class from button
                 document.getElementById('live-btn').classList.remove('active');
                 document.getElementById('summary-live-btn').classList.remove('active');
                 document.getElementById('summary-live-btn').textContent = 'LIVE';
                 
-                // Reset button text
                 updateLiveButton();
             }
         }
@@ -3908,14 +4314,21 @@
                 }
             }
             
-            // Load watchlist prices FIRST (needed for ATM calculation)
+            // Load watchlist prices FIRST via REST (needed for ATM calculation before WS connects)
             await loadWatchlistPrices();
             
             // Select default symbol (will now have price data for ATM)
             selectSymbol('SPY');
             
-            // Start price updates (every 15 seconds for real-time feel)
-            priceUpdateInterval = setInterval(loadWatchlistPrices, 15000);
+            // Start stocks WebSocket for real-time price streaming
+            if (!mockMode) {
+                connectStocksWs();
+                // Slower REST fallback – only every 60s as backup (WS handles real-time)
+                priceUpdateInterval = setInterval(loadWatchlistPrices, 60000);
+            } else {
+                // Mock mode: use REST polling at 15s
+                priceUpdateInterval = setInterval(loadWatchlistPrices, 15000);
+            }
         }
         
         init();

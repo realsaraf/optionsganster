@@ -403,6 +403,57 @@ class PolygonClient:
             print(f"Error fetching snapshot prices for {ticker_str}: {e}")
             return {}
 
+    async def get_prev_close_prices(self, symbols: list[str]) -> dict[str, dict]:
+        """
+        Fetch previous-day close for multiple symbols using grouped daily bars.
+        Uses a SINGLE API call (get_grouped_daily) instead of N individual calls
+        to avoid rate-limit (429) errors on basic plans.
+        Cached for 60 seconds.
+        """
+        from datetime import timedelta
+
+        if not hasattr(self, '_prev_grouped_cache'):
+            self._prev_grouped_cache = TTLCache(maxsize=1, ttl=60)
+
+        cache_key = "grouped_daily"
+        all_bars = self._prev_grouped_cache.get(cache_key)
+
+        if all_bars is None:
+            # Try today first, then walk back up to 5 calendar days
+            # (covers weekends / holidays)
+            today = date.today()
+            for offset in range(0, 6):
+                target = today - timedelta(days=offset)
+                try:
+                    all_bars = await self.get_grouped_daily(target)
+                    if all_bars:
+                        self._prev_grouped_cache[cache_key] = all_bars
+                        print(f"[PrevClose] Loaded grouped daily for {target} "
+                              f"({len(all_bars)} tickers)")
+                        break
+                except Exception as e:
+                    print(f"[PrevClose] Error fetching grouped daily for {target}: {e}")
+            else:
+                all_bars = {}
+
+        result = {}
+        for sym in symbols:
+            s = sym.upper()
+            bar = all_bars.get(s, {})
+            if bar:
+                result[s] = {
+                    "lastPrice": float(bar.get("c", 0)),
+                    "prevClose": float(bar.get("c", 0)),
+                    "dayOpen": float(bar.get("o", 0)),
+                    "dayHigh": float(bar.get("h", 0)),
+                    "dayLow": float(bar.get("l", 0)),
+                    "dayVolume": int(bar.get("v", 0)),
+                    "todaysChange": 0.0,
+                    "todaysChangePerc": 0.0,
+                }
+
+        return result
+
     # ── Options Snapshot (Greeks, IV, OI) ───────────────────
 
     async def get_option_contract_snapshot(

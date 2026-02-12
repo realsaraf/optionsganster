@@ -11,9 +11,10 @@ Changes from v1:
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Optional
-import hashlib, math, random, secrets, time
+import hashlib, json, logging, math, random, secrets, time
+import asyncio
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Cookie
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Cookie, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -26,6 +27,9 @@ from app.config import settings
 from app.polygon_client import PolygonClient, polygon_client
 from app.vpa_engine import VPAEngine, VPASignal, VPAResult, vpa_engine
 from app.greeks_engine import GreeksSignalEngine, greeks_engine
+from app.live_feed import LiveFeedManager, live_feed_manager
+
+logger = logging.getLogger("optionsganster")
 
 # ── Auth config ─────────────────────────────────────────────
 AUTH_EMAIL = "realsaraf@gmail.com"
@@ -151,9 +155,11 @@ def _get_mock_watchlist_prices(symbols: list[str]) -> list[dict]:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    # startup – nothing extra needed, lazy client init
+    # startup – start the live WebSocket feed manager
+    await live_feed_manager.start()
     yield
-    # shutdown – close the shared httpx client
+    # shutdown – stop live feed + close the shared httpx client
+    await live_feed_manager.stop()
     await polygon_client.close()
 
 
@@ -649,8 +655,12 @@ async def analyze_live(
     right: str = Query(..., description="C for Call, P for Put"),
     after: Optional[str] = Query(None, description="Return only bars with datetime > this value"),
     mock: bool = Query(False, description="Use mock data for testing"),
+    poly: PolygonClient = Depends(get_polygon),
+    engine: VPAEngine = Depends(get_vpa),
 ):
-    """Live mode endpoint – returns only NEW bars & signals since *after*."""
+    """Live mode endpoint – returns NEW bars & signals since *after*.
+    Full composite / greeks / bias refresh is now pushed by the WS
+    analysis loop (see /ws/live _analysis_loop)."""
 
     if mock:
         bars, signals = _mock_gen.get_bars(symbol, expiration, strike, right, after=after)
@@ -660,11 +670,7 @@ async def analyze_live(
             "is_mock": True,
         }
 
-    # Real live – delegate to full analyze with nocache, then filter
-    # We import the full endpoint logic inline so we can filter the result
-    from app.polygon_client import polygon_client as poly
-    from app.vpa_engine import vpa_engine as engine
-
+    # ── Fetch OHLCV ──────────────────────────────────────────
     exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
     end_dt = date.today()
     start_dt = end_dt - timedelta(days=5)
@@ -692,14 +698,13 @@ async def analyze_live(
     if df.empty:
         return {"bars": [], "signals": []}
 
-    # Filter to only bars after the given timestamp
+    # Run VPA on the FULL history
+    all_vpa = engine.analyze(df)
+
+    # ── Build delta bars (after filter) ──────────────────────
+    delta_df = df
     if after:
-        df = df[df["datetime"].astype(str) > after]
-
-    if df.empty:
-        return {"bars": [], "signals": []}
-
-    vpa_results = engine.analyze(df)
+        delta_df = df[df["datetime"].astype(str) > after]
 
     bars = [
         dict(
@@ -710,7 +715,7 @@ async def analyze_live(
             close=float(row["close"]),
             volume=int(row["volume"]),
         )
-        for _, row in df.iterrows()
+        for _, row in delta_df.iterrows()
     ]
 
     signals = [
@@ -723,7 +728,7 @@ async def analyze_live(
             volume=r.volume,
             volume_ratio=round(r.volume_ratio, 2),
         )
-        for r in vpa_results
+        for r in all_vpa
         if r.signal != VPASignal.NEUTRAL
     ]
 
@@ -1079,7 +1084,10 @@ async def get_watchlist_prices(
             return {"prices": _get_mock_watchlist_prices(symbol_list)}
 
         # Use snapshot API for real-time/15-min delayed prices
+        # Falls back to previous-day close if snapshot returns 403 (plan limitation)
         price_lookup = await poly.get_snapshot_prices(symbol_list)
+        if not price_lookup:
+            price_lookup = await poly.get_prev_close_prices(symbol_list)
 
         results = []
         for sym in symbol_list:
@@ -1110,6 +1118,292 @@ async def get_watchlist_prices(
         return {"prices": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── WebSocket live feed ─────────────────────────────────────
+
+@app.websocket("/ws/live")
+async def websocket_live(ws: WebSocket):
+    """
+    WebSocket endpoint for live option feed.
+
+    Client sends JSON messages:
+      {"action": "subscribe", "ticker": "O:SPY251219C00650000"}
+      {"action": "unsubscribe", "ticker": "O:SPY251219C00650000"}
+
+    Server pushes:
+      {"type": "bar", "ticker": "...", "bar": {...}, "signals": [...]}
+      {"type": "sow", "ticker": "...", "bars": [...]}   (snapshot on subscribe)
+      {"type": "analysis", ...}   (periodic full re-analysis for option tickers)
+      {"type": "status", "connected": true, "subscriptions": {...}}
+    """
+    await ws.accept()
+
+    # Per-client message queue
+    queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+    subscribed_tickers: set[str] = set()
+    analysis_task: asyncio.Task | None = None   # periodic analysis for option ticker
+
+    def _parse_occ_ticker(occ: str):
+        """Parse O:SPY260212C00650000 → (symbol, expiration, strike, right)."""
+        try:
+            raw = occ.replace("O:", "")
+            # Find where the date starts (6 digits after symbol)
+            import re
+            m = re.match(r'^([A-Z]+)(\d{6})([CP])(\d{8})$', raw)
+            if not m:
+                return None
+            sym = m.group(1)
+            dt_str = m.group(2)  # YYMMDD
+            right = m.group(3)
+            strike = int(m.group(4)) / 1000
+            exp = f"20{dt_str[:2]}-{dt_str[2:4]}-{dt_str[4:6]}"
+            return sym, exp, strike, right
+        except Exception:
+            return None
+
+    async def _analysis_loop(ticker: str, q: asyncio.Queue):
+        """Periodically run full VPA + greeks analysis and push to client."""
+        parsed = _parse_occ_ticker(ticker)
+        if not parsed:
+            return
+        symbol, expiration, strike, right = parsed
+        exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+        end_dt = date.today()
+        start_dt = end_dt - timedelta(days=5)
+
+        await asyncio.sleep(3)  # let WS settle before first analysis
+
+        while True:
+            try:
+                # Clear caches for fresh data
+                polygon_client.clear_ohlcv_cache(
+                    symbol=symbol, expiration=exp_date,
+                    strike=strike, right=right,
+                    start_date=start_dt, end_date=end_dt, interval_min=5,
+                )
+
+                # Fetch option OHLCV
+                df = await polygon_client.get_option_ohlcv(
+                    symbol=symbol, expiration=exp_date,
+                    strike=strike, right=right,
+                    start_date=start_dt, end_date=end_dt, interval_min=5,
+                )
+                if df.empty:
+                    await asyncio.sleep(10)
+                    continue
+
+                # Full VPA analysis
+                vpa_results = vpa_engine.analyze(df)
+                bias = vpa_engine.get_bias(vpa_results)
+
+                all_signals = [
+                    dict(
+                        signal=r.signal.value,
+                        confidence=r.confidence,
+                        description=r.description,
+                        datetime=r.datetime,
+                        price=r.price,
+                        volume=r.volume,
+                        volume_ratio=round(r.volume_ratio, 2),
+                    )
+                    for r in vpa_results
+                    if r.signal != VPASignal.NEUTRAL
+                ]
+
+                payload: dict = {
+                    "type": "analysis",
+                    "ticker": ticker,
+                    "bias": bias,
+                    "all_signals": all_signals,
+                    "total_bars": len(df),
+                    "last_price": float(df.iloc[-1]["close"]),
+                }
+
+                # Composite (greeks + chain)
+                try:
+                    contract_snap, chain_snap = await asyncio.gather(
+                        polygon_client.get_option_contract_snapshot(
+                            symbol, exp_date, strike, right
+                        ),
+                        polygon_client.get_options_chain_snapshot(
+                            symbol, exp_date
+                        ),
+                    )
+                    if contract_snap:
+                        comp = greeks_engine.analyze(
+                            contract_snapshot=contract_snap,
+                            chain_data=chain_snap,
+                            vpa_bias=bias,
+                            contract_type=right,
+                        )
+                        _call_action = {
+                            "strong_buy": "STRONG BUY", "buy": "BUY",
+                            "lean_bullish": "BUY", "neutral": "HOLD",
+                            "lean_bearish": "SELL", "sell": "SELL",
+                            "strong_sell": "STRONG SELL",
+                        }
+                        _put_action = {
+                            "strong_buy": "STRONG SELL", "buy": "SELL",
+                            "lean_bullish": "SELL", "neutral": "HOLD",
+                            "lean_bearish": "BUY", "sell": "BUY",
+                            "strong_sell": "STRONG BUY",
+                        }
+                        _action_map = _put_action if right == "P" else _call_action
+                        payload["composite"] = {
+                            "signal": comp.signal.value,
+                            "action": _action_map.get(comp.signal.value, "HOLD"),
+                            "score": comp.score,
+                            "confidence": comp.confidence,
+                            "trade_archetype": comp.trade_archetype.value,
+                            "archetype_description": comp.archetype_description,
+                            "factors": [
+                                {"name": f.name, "score": f.score,
+                                 "confidence": f.confidence, "weight": f.weight,
+                                 "detail": f.detail}
+                                for f in comp.factors
+                            ],
+                            "greeks": {
+                                "delta": comp.greeks.delta,
+                                "gamma": comp.greeks.gamma,
+                                "theta": comp.greeks.theta,
+                                "vega": comp.greeks.vega,
+                                "iv": comp.greeks.iv,
+                                "open_interest": comp.greeks.open_interest,
+                                "volume": comp.greeks.volume,
+                                "underlying_price": comp.greeks.underlying_price,
+                                "break_even": comp.greeks.break_even,
+                                "last_price": comp.greeks.last_price,
+                            },
+                            "chain_metrics": {
+                                "iv_rank": comp.chain_metrics.iv_rank,
+                                "iv_percentile": comp.chain_metrics.iv_percentile,
+                                "put_call_oi_ratio": comp.chain_metrics.put_call_oi_ratio,
+                                "put_call_volume_ratio": comp.chain_metrics.put_call_volume_ratio,
+                                "total_call_oi": comp.chain_metrics.total_call_oi,
+                                "total_put_oi": comp.chain_metrics.total_put_oi,
+                                "total_call_volume": comp.chain_metrics.total_call_volume,
+                                "total_put_volume": comp.chain_metrics.total_put_volume,
+                                "net_gex": comp.chain_metrics.net_gex,
+                                "gex_regime": comp.chain_metrics.gex_regime,
+                                "max_pain": comp.chain_metrics.max_pain,
+                                "uoa_detected": comp.chain_metrics.uoa_detected,
+                                "uoa_details": comp.chain_metrics.uoa_details,
+                                "weighted_iv": comp.chain_metrics.weighted_iv,
+                            },
+                            "recommendation": comp.recommendation,
+                        }
+                except Exception as comp_err:
+                    print(f"[WS-Analysis] Composite error (non-fatal): {comp_err}")
+
+                # Push to client queue (drop if full)
+                try:
+                    q.put_nowait(json.dumps(payload))
+                except asyncio.QueueFull:
+                    pass
+
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                print(f"[WS-Analysis] Error: {e}")
+
+            await asyncio.sleep(10)
+
+    async def _sender():
+        """Forward messages from the queue to the WebSocket client."""
+        try:
+            while True:
+                msg = await queue.get()
+                await ws.send_text(msg)
+        except (WebSocketDisconnect, Exception):
+            pass
+
+    sender_task = asyncio.create_task(_sender())
+
+    try:
+        # Send initial status
+        status = live_feed_manager.get_status()
+        await ws.send_text(json.dumps({"type": "status", **status}))
+
+        # Read client commands
+        while True:
+            raw = await ws.receive_text()
+            try:
+                cmd = json.loads(raw)
+            except json.JSONDecodeError:
+                await ws.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                continue
+
+            action = cmd.get("action", "")
+            ticker = cmd.get("ticker", "")
+
+            if action == "subscribe" and ticker:
+                # Subscribe – get SOW first, then live updates
+                sow_bars = await live_feed_manager.subscribe(ticker, queue)
+                subscribed_tickers.add(ticker)
+
+                # Send snapshot of accumulated bars
+                await ws.send_text(json.dumps({
+                    "type": "sow",
+                    "ticker": ticker,
+                    "bars": sow_bars,
+                }))
+
+                await ws.send_text(json.dumps({
+                    "type": "subscribed",
+                    "ticker": ticker,
+                    "message": f"Subscribed to {ticker}",
+                }))
+
+                # Start periodic analysis for option tickers
+                if ticker.startswith("O:") and analysis_task is None:
+                    analysis_task = asyncio.create_task(
+                        _analysis_loop(ticker, queue)
+                    )
+
+            elif action == "unsubscribe" and ticker:
+                if ticker in subscribed_tickers:
+                    await live_feed_manager.unsubscribe(ticker, queue)
+                    subscribed_tickers.discard(ticker)
+
+                    # Stop analysis task if unsubscribing the option ticker
+                    if ticker.startswith("O:") and analysis_task:
+                        analysis_task.cancel()
+                        analysis_task = None
+
+                    await ws.send_text(json.dumps({
+                        "type": "unsubscribed",
+                        "ticker": ticker,
+                    }))
+
+            elif action == "status":
+                status = live_feed_manager.get_status()
+                await ws.send_text(json.dumps({"type": "status", **status}))
+
+            else:
+                await ws.send_text(json.dumps({
+                    "type": "error",
+                    "message": f"Unknown action: {action}",
+                }))
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"[WS] WebSocket error: {e}")
+    finally:
+        # Clean up: cancel analysis task and unsubscribe from all tickers
+        if analysis_task:
+            analysis_task.cancel()
+        sender_task.cancel()
+        for ticker in subscribed_tickers:
+            await live_feed_manager.unsubscribe(ticker, queue)
+        print(f"[WS] Client disconnected, cleaned up {len(subscribed_tickers)} subscription(s)")
+
+
+@app.get("/api/feed/status")
+async def feed_status():
+    """Get the current status of the live feed manager."""
+    return live_feed_manager.get_status()
 
 
 # ── Static files (must be last so it doesn't shadow API routes) ─
