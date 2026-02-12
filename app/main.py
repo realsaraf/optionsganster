@@ -197,7 +197,9 @@ LOGIN_HTML = """
 <meta name="twitter:title" content="OptionsGanster – AI-Powered Options Signals">
 <meta name="twitter:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score.">
 <meta name="twitter:image" content="https://optionsganster.com/static/og-image.png">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📊</text></svg>">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{min-height:100vh;background:#0a0a1a;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#e0e0e0;overflow-x:hidden}
@@ -323,7 +325,7 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
     <div class="stats">
       <div class="stat"><div class="stat-value"><span class="green">AI</span></div><div class="stat-label">Driven</div></div>
       <div class="stat"><div class="stat-value"><span class="blue">Live</span></div><div class="stat-label">Signals</div></div>
-      <div class="stat"><div class="stat-value"><span class="green">$300</span></div><div class="stat-label">Free</div></div>
+      <div class="stat"><div class="stat-value"><span class="green">$300</span></div><div class="stat-label">Monthly</div></div>
     </div>
   </div>
 </section>
