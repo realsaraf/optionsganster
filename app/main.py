@@ -184,7 +184,20 @@ LOGIN_HTML = """
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>OptionsGanster – Smart Options Signals</title>
+<title>OptionsGanster – AI-Powered Options Signals</title>
+<meta name="description" content="AI-driven options signals that cut through the noise. One actionable verdict — BUY, SELL, or HOLD — with a confidence score. Free to use.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://optionsganster.com">
+<meta property="og:title" content="OptionsGanster – AI-Powered Options Signals">
+<meta property="og:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score. Free.">
+<meta property="og:image" content="https://optionsganster.com/static/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="OptionsGanster – AI-Powered Options Signals">
+<meta name="twitter:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score.">
+<meta name="twitter:image" content="https://optionsganster.com/static/og-image.png">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📊</text></svg>">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{min-height:100vh;background:#0a0a1a;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#e0e0e0;overflow-x:hidden}
@@ -300,18 +313,17 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
 <!-- HERO -->
 <section class="hero">
   <div class="hero-content">
-    <div class="hero-badge">Powered by 6-Factor Composite Engine</div>
+    <div class="hero-badge">AI-Powered Options Intelligence</div>
     <h1>Stop Guessing.<br><span class="accent">Start Trading Smarter.</span></h1>
-    <p>Real-time options signals combining Greeks, IV Rank, GEX, Volume Price Analysis, Unusual Activity &amp; Put/Call Skew into one actionable BUY / SELL / HOLD verdict.</p>
+    <p>Our proprietary AI analyzes multiple market dimensions in real time — volatility, flow, structure, momentum — and distills it into one actionable BUY / SELL / HOLD verdict you can trust.</p>
     <div class="hero-actions">
       <button class="btn-primary" onclick="openLogin()">Get Started Free</button>
       <button class="btn-secondary" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">See Features</button>
     </div>
     <div class="stats">
-      <div class="stat"><div class="stat-value"><span class="green">6</span></div><div class="stat-label">Signal Factors</div></div>
-      <div class="stat"><div class="stat-value"><span class="blue">Live</span></div><div class="stat-label">Auto-Refresh</div></div>
-      <div class="stat"><div class="stat-value">10s</div><div class="stat-label">Refresh Interval</div></div>
-      <div class="stat"><div class="stat-value"><span class="green">$0</span></div><div class="stat-label">Free to Use</div></div>
+      <div class="stat"><div class="stat-value"><span class="green">AI</span></div><div class="stat-label">Driven</div></div>
+      <div class="stat"><div class="stat-value"><span class="blue">Live</span></div><div class="stat-label">Signals</div></div>
+      <div class="stat"><div class="stat-value"><span class="green">$300</span></div><div class="stat-label">Free</div></div>
     </div>
   </div>
 </section>
@@ -319,37 +331,37 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
 <!-- FEATURES -->
 <section class="features" id="features">
   <div class="section-label">Features</div>
-  <h2 class="section-title">Everything You Need for Options Analysis</h2>
+  <h2 class="section-title">Your Unfair Advantage in Options</h2>
   <div class="features-grid">
     <div class="feature-card">
-      <div class="feature-icon fi-blue">&#916;</div>
-      <h3>Real-Time Greeks</h3>
-      <p>Delta, Gamma, Theta, Vega — live from Polygon.io. Instantly see how your option reacts to price movement, time decay, and volatility shifts.</p>
+      <div class="feature-icon fi-blue">&#x1F9E0;</div>
+      <h3>Multi-Dimensional AI</h3>
+      <p>Our engine doesn't look at one thing — it evaluates multiple market dimensions simultaneously to find signals humans miss.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon fi-green">&#9733;</div>
-      <h3>IV Rank &amp; Percentile</h3>
-      <p>Know if implied volatility is historically high or low. Identify premium selling opportunities when IV is elevated above the 75th percentile.</p>
+      <div class="feature-icon fi-green">&#9889;</div>
+      <h3>Real-Time Verdicts</h3>
+      <p>No lagging indicators. The AI processes live market data and delivers an actionable BUY, SELL, or HOLD signal in seconds.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon fi-purple">&#9881;</div>
-      <h3>GEX (Gamma Exposure)</h3>
-      <p>See where market makers are hedging. Positive GEX = pinning effect. Negative GEX = amplified moves. Know the regime before you trade.</p>
+      <div class="feature-icon fi-purple">&#x1F3AF;</div>
+      <h3>Confidence Scoring</h3>
+      <p>Every signal comes with a confidence percentage so you know when conditions are strong — and when to sit on your hands.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon fi-red">&#9650;</div>
-      <h3>Volume Price Analysis</h3>
-      <p>Wyckoff-based VPA engine detects accumulation, distribution, climax tops & bottoms, and supply/demand tests on option price bars.</p>
+      <div class="feature-icon fi-red">&#x1F4CA;</div>
+      <h3>Visual Chart Intel</h3>
+      <p>Signals aren't just text — they're plotted right on the chart with smart markers. See exactly where the AI sees opportunity.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon fi-yellow">&#9889;</div>
-      <h3>Unusual Options Activity</h3>
-      <p>Spot contracts with volume exceeding open interest by 10x+. See what the smart money is doing before the move happens.</p>
+      <div class="feature-icon fi-yellow">&#x1F50D;</div>
+      <h3>Smart Money Detection</h3>
+      <p>The AI detects unusual flow and institutional footprints that retail traders typically miss — before the move happens.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon fi-cyan">&#8982;</div>
-      <h3>Composite Signal Engine</h3>
-      <p>All 6 factors weighted and scored into a single actionable signal: BUY, SELL, or HOLD with a confidence percentage you can trust.</p>
+      <div class="feature-icon fi-cyan">&#x1F4E1;</div>
+      <h3>Live Auto-Refresh</h3>
+      <p>Enable LIVE mode and the AI re-scans every 10 seconds. Stay on top of rapidly changing conditions without lifting a finger.</p>
     </div>
   </div>
 </section>
@@ -362,17 +374,17 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
     <div class="how-step">
       <div class="step-num">1</div>
       <h3>Pick a Contract</h3>
-      <p>Select any symbol, expiration, and strike from 10+ watchlist tickers. Call or Put — we analyze both.</p>
+      <p>Choose any ticker, expiration, and strike. Calls or puts — the AI handles both.</p>
     </div>
     <div class="how-step">
       <div class="step-num">2</div>
       <h3>Hit Analyze</h3>
-      <p>Our 6-factor engine scores the contract in seconds. See the composite signal, Greeks, chain metrics, and VPA markers on the chart.</p>
+      <p>The AI scans the contract across multiple dimensions in seconds and delivers a clear signal on the chart.</p>
     </div>
     <div class="how-step">
       <div class="step-num">3</div>
       <h3>Trade with Confidence</h3>
-      <p>Get a clear BUY, SELL, or HOLD verdict with a confidence score. Enable LIVE mode for auto-refresh every 10 seconds.</p>
+      <p>Get a clear BUY, SELL, or HOLD verdict with a confidence score. Go LIVE for continuous updates.</p>
     </div>
   </div>
 </section>
@@ -381,7 +393,7 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
 <section class="cta">
   <div class="cta-box">
     <h2>Ready to Level Up Your Options Game?</h2>
-    <p>Join now. No credit card required. Full access to the 6-factor composite signal engine.</p>
+    <p>Join now. No credit card required. Full access to the AI signal engine.</p>
     <button class="btn-primary" onclick="openLogin()">Sign In &amp; Start Analyzing</button>
   </div>
 </section>
