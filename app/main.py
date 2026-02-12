@@ -419,7 +419,7 @@ async def analyze_option(
                     "sell": "BUY",
                     "strong_sell": "STRONG BUY",
                 }
-                _action_map = _put_action if right.upper() == "PUT" else _call_action
+                _action_map = _put_action if right.upper() == "P" else _call_action
                 composite_response = CompositeSignalResponse(
                     signal=comp_result.signal.value,
                     action=_action_map.get(comp_result.signal.value, "HOLD"),
