@@ -392,20 +392,20 @@
         /* ===== CONTROLS SUMMARY (Mobile only) ===== */
         .controls-summary {
             display: none;
-            background: #1e222d;
-            padding: 4px 8px;
+            background: #131722;
+            padding: 6px 12px;
             border-bottom: 1px solid #2a2e39;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             flex-wrap: nowrap;
-            height: 32px;
+            height: 40px;
             overflow: hidden;
         }
         
         .summary-text {
-            font-size: 11px;
+            font-size: 12px;
             color: #d1d4dc;
-            font-weight: 600;
+            font-weight: 700;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -414,7 +414,7 @@
         }
         
         .summary-intervals {
-            display: none; /* Hidden on mobile collapsed mode */
+            display: none;
         }
         
         .summary-interval-btn {
@@ -423,41 +423,44 @@
         }
         
         .summary-analyze-btn {
-            padding: 4px 8px;
-            font-size: 14px;
-            min-width: 28px;
-            background: transparent;
-            border: 1px solid #2a2e39;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 700;
+            min-width: 0;
+            background: #2962ff;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
         }
         
-        .summary-analyze-btn:hover {
-            background: rgba(41, 98, 255, 0.1);
-            border-color: #2962ff;
+        .summary-analyze-btn:active {
+            background: #1e4fd6;
         }
         
         .summary-live-btn {
-            display: none; /* Hidden on mobile collapsed mode */
-        }
-        
-        .summary-live-indicator {
-            font-size: 10px;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            background: #2a2e39;
             color: #787b86;
+            border: 1px solid #363a45;
+            border-radius: 6px;
+            cursor: pointer;
             white-space: nowrap;
-            padding: 2px 6px;
-            border-radius: 3px;
-            background: rgba(120, 123, 134, 0.1);
         }
         
-        .summary-live-indicator.active {
-            color: #ef5350;
+        .summary-live-btn.active {
             background: rgba(239, 83, 80, 0.15);
+            color: #ef5350;
+            border-color: #ef5350;
         }
         
         .controls-chevron {
             background: transparent;
             border: none;
             color: #787b86;
-            font-size: 14px;
+            font-size: 16px;
             cursor: pointer;
             padding: 4px 6px;
             border-radius: 4px;
@@ -1340,6 +1343,84 @@
             display: block;
         }
 
+        /* ===== MOBILE DATE RANGE BUTTONS ===== */
+        .mobile-date-range {
+            display: none; /* shown on mobile only */
+        }
+
+        .date-range-group {
+            display: flex;
+            gap: 4px;
+            width: 100%;
+        }
+
+        .date-range-btn {
+            flex: 1;
+            padding: 8px 4px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #2a2e39;
+            color: #787b86;
+            border: 1px solid #363a45;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+
+        .date-range-btn.active {
+            background: #2962ff;
+            color: #fff;
+            border-color: #2962ff;
+        }
+
+        .date-range-btn:not(.active):active {
+            background: #363a45;
+        }
+
+        /* ===== MOBILE CALL/PUT SWITCH ===== */
+        .mobile-cp-switch {
+            display: none; /* shown on mobile only */
+        }
+
+        .cp-toggle {
+            display: flex;
+            background: #1e222d;
+            border-radius: 8px;
+            border: 1px solid #363a45;
+            overflow: hidden;
+            height: 40px;
+        }
+
+        .cp-toggle-option {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            background: transparent;
+            color: #787b86;
+            padding: 0 12px;
+        }
+
+        .cp-toggle-option.active {
+            color: #fff;
+        }
+
+        .cp-toggle-option.call-active {
+            background: #26a69a;
+            color: #fff;
+        }
+
+        .cp-toggle-option.put-active {
+            background: #ef5350;
+            color: #fff;
+        }
+
         /* ===== MOBILE ACTION BANNER ===== */
         .mobile-action-banner {
             display: none;
@@ -1347,13 +1428,12 @@
             bottom: 56px;
             left: 0;
             right: 0;
-            padding: 8px 16px;
+            padding: 10px 16px;
             z-index: 1099;
             cursor: pointer;
             transition: transform 0.3s ease, opacity 0.3s ease;
             transform: translateY(100%);
             opacity: 0;
-            border-top: 2px solid;
         }
 
         .mobile-action-banner.visible {
@@ -1362,18 +1442,18 @@
         }
 
         .mobile-action-banner.buy {
-            background: linear-gradient(135deg, rgba(38,166,154,0.15), rgba(38,166,154,0.05));
-            border-top-color: #26a69a;
+            background: #0d2b26;
+            border-top: 3px solid #26a69a;
         }
 
         .mobile-action-banner.sell {
-            background: linear-gradient(135deg, rgba(239,83,80,0.15), rgba(239,83,80,0.05));
-            border-top-color: #ef5350;
+            background: #2b1215;
+            border-top: 3px solid #ef5350;
         }
 
         .mobile-action-banner.hold {
-            background: linear-gradient(135deg, rgba(120,123,134,0.1), rgba(120,123,134,0.05));
-            border-top-color: #787b86;
+            background: #1e222d;
+            border-top: 3px solid #787b86;
         }
 
         .mobile-action-banner-content {
@@ -1383,9 +1463,9 @@
         }
 
         .mobile-action-label {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 900;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
             text-transform: uppercase;
         }
 
@@ -1550,7 +1630,7 @@
             .controls-summary {
                 display: none;
                 padding: 6px 12px;
-                height: 36px;
+                height: 40px;
             }
 
             .controls-summary.active {
@@ -1567,6 +1647,22 @@
 
             .controls-bar.collapsed {
                 display: none;
+            }
+
+            /* Hide desktop From/To/Type on mobile */
+            #from-group, #to-group, #type-group {
+                display: none !important;
+            }
+
+            /* Show mobile replacements */
+            .mobile-cp-switch {
+                display: block !important;
+                grid-column: 1 / -1;
+            }
+
+            .mobile-date-range {
+                display: block !important;
+                grid-column: 1 / -1;
             }
 
             .control-group {
@@ -1899,10 +1995,10 @@
             
             <!-- Controls Summary Bar (Mobile only, shown after first analyze) -->
             <div class="controls-summary" id="controls-summary">
-                <button class="analyze-btn summary-analyze-btn" id="summary-analyze-btn">▶</button>
                 <span class="summary-text" id="summary-text">SPY $500C 5m</span>
-                <span class="summary-live-indicator" id="summary-live-indicator"></span>
-                <button class="controls-chevron" id="controls-chevron">▼</button>
+                <button class="summary-analyze-btn" id="summary-analyze-btn">Analyze</button>
+                <button class="summary-live-btn" id="summary-live-btn">LIVE</button>
+                <button class="controls-chevron" id="controls-chevron">⚙</button>
             </div>
             
             <div class="controls-bar" id="controls-bar">
@@ -1920,22 +2016,42 @@
                     </select>
                 </div>
                 
-                <div class="control-group">
+                <div class="control-group" id="type-group">
                     <label>Type</label>
                     <select id="right" style="min-width: 70px;">
                         <option value="C">Call</option>
                         <option value="P">Put</option>
                     </select>
                 </div>
+
+                <!-- Mobile Call/Put Switch (replaces dropdown on mobile) -->
+                <div class="mobile-cp-switch" id="mobile-cp-switch">
+                    <div class="cp-toggle">
+                        <button class="cp-toggle-option call-active" id="cp-call" data-value="C">CALL</button>
+                        <button class="cp-toggle-option" id="cp-put" data-value="P">PUT</button>
+                    </div>
+                </div>
                 
-                <div class="control-group">
+                <div class="control-group" id="from-group">
                     <label>From</label>
                     <input type="date" id="start-date" style="width: 130px;">
                 </div>
                 
-                <div class="control-group">
+                <div class="control-group" id="to-group">
                     <label>To</label>
                     <input type="date" id="end-date" style="width: 130px;">
+                </div>
+
+                <!-- Mobile Date Range Buttons (replaces From/To on mobile) -->
+                <div class="mobile-date-range" id="mobile-date-range">
+                    <div class="date-range-group">
+                        <button class="date-range-btn active" data-range="1">1D</button>
+                        <button class="date-range-btn" data-range="7">1W</button>
+                        <button class="date-range-btn" data-range="14">2W</button>
+                        <button class="date-range-btn" data-range="30">1M</button>
+                        <button class="date-range-btn" data-range="90">3M</button>
+                        <button class="date-range-btn" data-range="180">6M</button>
+                    </div>
                 </div>
                 
                 <div class="interval-buttons">
@@ -2473,7 +2589,6 @@
                 document.getElementById('controls-bar').classList.add('collapsed');
                 document.getElementById('controls-summary').classList.add('active');
                 document.getElementById('filter-bar').style.display = 'none';
-                document.getElementById('controls-chevron').textContent = '▲';
                 controlsCollapsed = true;
             }
         }
@@ -2481,8 +2596,8 @@
         function expandControls() {
             if (isMobile()) {
                 document.getElementById('controls-bar').classList.remove('collapsed');
+                document.getElementById('controls-summary').classList.remove('active');
                 document.getElementById('filter-bar').style.display = '';
-                document.getElementById('controls-chevron').textContent = '▼';
                 controlsCollapsed = false;
             }
         }
@@ -2567,6 +2682,8 @@
                 
                 // Add active class to button
                 document.getElementById('live-btn').classList.add('active');
+                document.getElementById('summary-live-btn').classList.add('active');
+                document.getElementById('summary-live-btn').textContent = 'LIVE ●';
                 
                 // Start countdown
                 updateLiveButton();
@@ -2601,6 +2718,8 @@
                 
                 // Remove active class from button
                 document.getElementById('live-btn').classList.remove('active');
+                document.getElementById('summary-live-btn').classList.remove('active');
+                document.getElementById('summary-live-btn').textContent = 'LIVE';
                 
                 // Reset button text
                 updateLiveButton();
@@ -3301,6 +3420,47 @@
                 document.querySelectorAll(`.interval-btn[data-interval="${currentInterval}"]`).forEach(b => b.classList.add('active'));
             });
         });
+
+        // ===== MOBILE DATE RANGE BUTTONS =====
+        document.querySelectorAll('.date-range-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.date-range-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const days = parseInt(btn.dataset.range);
+                const today = new Date();
+                const from = new Date(today);
+                from.setDate(today.getDate() - days);
+                document.getElementById('start-date').value = from.toISOString().split('T')[0];
+                document.getElementById('end-date').value = today.toISOString().split('T')[0];
+            });
+        });
+
+        // ===== MOBILE CALL/PUT SWITCH =====
+        document.getElementById('cp-call').addEventListener('click', () => {
+            document.getElementById('right').value = 'C';
+            document.getElementById('cp-call').className = 'cp-toggle-option call-active';
+            document.getElementById('cp-put').className = 'cp-toggle-option';
+            stopLiveMode();
+        });
+        document.getElementById('cp-put').addEventListener('click', () => {
+            document.getElementById('right').value = 'P';
+            document.getElementById('cp-put').className = 'cp-toggle-option put-active';
+            document.getElementById('cp-call').className = 'cp-toggle-option';
+            stopLiveMode();
+        });
+        // Sync desktop dropdown to mobile switch
+        document.getElementById('right').addEventListener('change', (e) => {
+            if (e.target.value === 'C') {
+                document.getElementById('cp-call').className = 'cp-toggle-option call-active';
+                document.getElementById('cp-put').className = 'cp-toggle-option';
+            } else {
+                document.getElementById('cp-put').className = 'cp-toggle-option put-active';
+                document.getElementById('cp-call').className = 'cp-toggle-option';
+            }
+        });
+
+        // ===== SUMMARY LIVE BUTTON =====
+        document.getElementById('summary-live-btn').addEventListener('click', toggleLiveMode);
         
         // Signal peek click handler
         document.getElementById('signal-peek').addEventListener('click', () => {
@@ -3380,12 +3540,16 @@
         
         // ===== INITIALIZATION =====
         async function init() {
-            // Set default dates
+            // Set default dates (1 day on mobile, 1 week on desktop)
             const today = new Date();
-            const weekAgo = new Date(today);
-            weekAgo.setDate(today.getDate() - 7);
+            const startFrom = new Date(today);
+            if (isMobile()) {
+                startFrom.setDate(today.getDate() - 1); // 1D default on mobile
+            } else {
+                startFrom.setDate(today.getDate() - 7); // 1W default on desktop
+            }
             
-            document.getElementById('start-date').value = weekAgo.toISOString().split('T')[0];
+            document.getElementById('start-date').value = startFrom.toISOString().split('T')[0];
             document.getElementById('end-date').value = today.toISOString().split('T')[0];
             
             // Init charts
