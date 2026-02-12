@@ -24,6 +24,7 @@ import httpx
 from app.config import settings
 from app.polygon_client import PolygonClient, polygon_client
 from app.vpa_engine import VPAEngine, VPASignal, vpa_engine
+from app.greeks_engine import GreeksSignalEngine, greeks_engine
 
 # ── Auth config ─────────────────────────────────────────────
 AUTH_EMAIL = "realsaraf@gmail.com"
@@ -77,6 +78,10 @@ def get_vpa() -> VPAEngine:
     return vpa_engine
 
 
+def get_greeks_engine() -> GreeksSignalEngine:
+    return greeks_engine
+
+
 # ── Response models ─────────────────────────────────────────
 
 class OHLCVBar(BaseModel):
@@ -98,6 +103,57 @@ class VPASignalResponse(BaseModel):
     volume_ratio: float
 
 
+class GreeksResponse(BaseModel):
+    delta: float
+    gamma: float
+    theta: float
+    vega: float
+    iv: float
+    open_interest: int
+    volume: int
+    underlying_price: float
+    break_even: float
+    last_price: float
+
+
+class ChainMetricsResponse(BaseModel):
+    iv_rank: float
+    iv_percentile: float
+    put_call_oi_ratio: float
+    put_call_volume_ratio: float
+    total_call_oi: int
+    total_put_oi: int
+    total_call_volume: int
+    total_put_volume: int
+    net_gex: float
+    gex_regime: str
+    max_pain: float
+    uoa_detected: bool
+    uoa_details: list
+    weighted_iv: float
+
+
+class FactorScoreResponse(BaseModel):
+    name: str
+    score: float
+    confidence: float
+    weight: float
+    detail: str
+
+
+class CompositeSignalResponse(BaseModel):
+    signal: str
+    action: str          # BUY / SELL / HOLD  (clear actionable label)
+    score: float
+    confidence: float
+    trade_archetype: str
+    archetype_description: str
+    factors: list[FactorScoreResponse]
+    greeks: GreeksResponse
+    chain_metrics: ChainMetricsResponse
+    recommendation: str
+
+
 class AnalysisResponse(BaseModel):
     symbol: str
     expiration: str
@@ -107,6 +163,7 @@ class AnalysisResponse(BaseModel):
     bars: list[OHLCVBar]
     signals: list[VPASignalResponse]
     bias: dict
+    composite: Optional[CompositeSignalResponse] = None
 
 
 class ExpirationResponse(BaseModel):
@@ -274,6 +331,7 @@ async def analyze_option(
     nocache: bool = Query(False, description="Bypass OHLCV cache for live updates"),
     poly: PolygonClient = Depends(get_polygon),
     engine: VPAEngine = Depends(get_vpa),
+    gengine: GreeksSignalEngine = Depends(get_greeks_engine),
 ) -> AnalysisResponse:
     """Fetch options data and run VPA analysis."""
     try:
@@ -321,6 +379,85 @@ async def analyze_option(
         vpa_results = engine.analyze(df)
         bias = engine.get_bias(vpa_results)
 
+        # ── Composite Greeks analysis ────────────────────
+        composite_response = None
+        try:
+            import asyncio
+            contract_snap, chain_snap = await asyncio.gather(
+                poly.get_option_contract_snapshot(
+                    symbol.upper(), exp_date, strike, right.upper()
+                ),
+                poly.get_options_chain_snapshot(
+                    symbol.upper(), exp_date
+                ),
+            )
+            if contract_snap:
+                comp_result = gengine.analyze(
+                    contract_snapshot=contract_snap,
+                    chain_data=chain_snap,
+                    vpa_bias=bias,
+                    contract_type=right.upper(),
+                )
+                # Map composite signal → actionable BUY / SELL / HOLD
+                _signal_to_action = {
+                    "strong_buy": "STRONG BUY",
+                    "buy": "BUY",
+                    "lean_bullish": "BUY",
+                    "neutral": "HOLD",
+                    "lean_bearish": "SELL",
+                    "sell": "SELL",
+                    "strong_sell": "STRONG SELL",
+                }
+                composite_response = CompositeSignalResponse(
+                    signal=comp_result.signal.value,
+                    action=_signal_to_action.get(comp_result.signal.value, "HOLD"),
+                    score=comp_result.score,
+                    confidence=comp_result.confidence,
+                    trade_archetype=comp_result.trade_archetype.value,
+                    archetype_description=comp_result.archetype_description,
+                    factors=[
+                        FactorScoreResponse(
+                            name=f.name,
+                            score=f.score,
+                            confidence=f.confidence,
+                            weight=f.weight,
+                            detail=f.detail,
+                        )
+                        for f in comp_result.factors
+                    ],
+                    greeks=GreeksResponse(
+                        delta=comp_result.greeks.delta,
+                        gamma=comp_result.greeks.gamma,
+                        theta=comp_result.greeks.theta,
+                        vega=comp_result.greeks.vega,
+                        iv=comp_result.greeks.iv,
+                        open_interest=comp_result.greeks.open_interest,
+                        volume=comp_result.greeks.volume,
+                        underlying_price=comp_result.greeks.underlying_price,
+                        break_even=comp_result.greeks.break_even,
+                        last_price=comp_result.greeks.last_price,
+                    ),
+                    chain_metrics=ChainMetricsResponse(
+                        iv_rank=comp_result.chain_metrics.iv_rank,
+                        iv_percentile=comp_result.chain_metrics.iv_percentile,
+                        put_call_oi_ratio=comp_result.chain_metrics.put_call_oi_ratio,
+                        put_call_volume_ratio=comp_result.chain_metrics.put_call_volume_ratio,
+                        total_call_oi=comp_result.chain_metrics.total_call_oi,
+                        total_put_oi=comp_result.chain_metrics.total_put_oi,
+                        total_call_volume=comp_result.chain_metrics.total_call_volume,
+                        total_put_volume=comp_result.chain_metrics.total_put_volume,
+                        net_gex=comp_result.chain_metrics.net_gex,
+                        gex_regime=comp_result.chain_metrics.gex_regime,
+                        max_pain=comp_result.chain_metrics.max_pain,
+                        uoa_detected=comp_result.chain_metrics.uoa_detected,
+                        uoa_details=comp_result.chain_metrics.uoa_details,
+                        weighted_iv=comp_result.chain_metrics.weighted_iv,
+                    ),
+                    recommendation=comp_result.recommendation,
+                )
+        except Exception as comp_err:
+            print(f"Composite analysis error (non-fatal): {comp_err}")
+
         bars = [
             OHLCVBar(
                 datetime=str(row["datetime"]),
@@ -356,6 +493,7 @@ async def analyze_option(
             bars=bars,
             signals=signals,
             bias=bias,
+            composite=composite_response,
         )
 
     except HTTPException:

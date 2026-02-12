@@ -850,6 +850,259 @@
             border-radius: 6px;
             font-size: 13px;
         }
+
+        /* ===== COMPOSITE SIGNAL PANEL ===== */
+        .composite-card {
+            background: #131722;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .composite-card h4 {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .composite-signal-gauge {
+            text-align: center;
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .composite-signal-gauge.strong_buy,
+        .composite-signal-gauge.buy { background: rgba(38,166,154,0.12); border: 1px solid #26a69a; }
+        .composite-signal-gauge.lean_bullish { background: rgba(38,166,154,0.06); border: 1px solid rgba(38,166,154,0.4); }
+        .composite-signal-gauge.neutral { background: rgba(120,123,134,0.08); border: 1px solid #787b86; }
+        .composite-signal-gauge.lean_bearish { background: rgba(239,83,80,0.06); border: 1px solid rgba(239,83,80,0.4); }
+        .composite-signal-gauge.sell,
+        .composite-signal-gauge.strong_sell { background: rgba(239,83,80,0.12); border: 1px solid #ef5350; }
+
+        .composite-action-label {
+            font-size: 28px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .composite-signal-gauge.strong_buy .composite-action-label,
+        .composite-signal-gauge.buy .composite-action-label,
+        .composite-signal-gauge.lean_bullish .composite-action-label { color: #26a69a; }
+        .composite-signal-gauge.neutral .composite-action-label { color: #787b86; }
+        .composite-signal-gauge.lean_bearish .composite-action-label,
+        .composite-signal-gauge.sell .composite-action-label,
+        .composite-signal-gauge.strong_sell .composite-action-label { color: #ef5350; }
+
+        .composite-signal-sub {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+
+        .composite-meta {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 6px;
+            font-size: 12px;
+            color: #787b86;
+        }
+
+        .composite-meta span strong {
+            color: #d1d4dc;
+        }
+
+        .archetype-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: rgba(41,98,255,0.15);
+            color: #5b8af5;
+            margin-top: 8px;
+        }
+
+        .archetype-desc {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+
+        .recommendation-box {
+            background: #0d1117;
+            border: 1px solid #2a2e39;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 12px;
+            color: #b0b3bc;
+            line-height: 1.6;
+            margin-top: 8px;
+        }
+
+        /* Greeks grid */
+        .greeks-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+
+        .greek-item {
+            background: #0d1117;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .greek-value {
+            font-size: 18px;
+            font-weight: 700;
+            font-family: 'SF Mono','Monaco',monospace;
+        }
+
+        .greek-value.positive { color: #26a69a; }
+        .greek-value.negative { color: #ef5350; }
+        .greek-value.neutral-val { color: #d1d4dc; }
+
+        .greek-label {
+            font-size: 10px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-top: 2px;
+            letter-spacing: 0.5px;
+        }
+
+        /* Factor bars */
+        .factor-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .factor-item {
+            background: #0d1117;
+            padding: 10px 12px;
+            border-radius: 6px;
+        }
+
+        .factor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .factor-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #d1d4dc;
+        }
+
+        .factor-score-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'SF Mono','Monaco',monospace;
+        }
+
+        .factor-score-badge.positive { background: rgba(38,166,154,0.15); color: #26a69a; }
+        .factor-score-badge.negative { background: rgba(239,83,80,0.15); color: #ef5350; }
+        .factor-score-badge.zero { background: rgba(120,123,134,0.15); color: #787b86; }
+
+        .factor-bar-bg {
+            height: 4px;
+            background: #1e222d;
+            border-radius: 2px;
+            position: relative;
+            margin: 6px 0 4px;
+        }
+
+        .factor-bar-fill {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
+        .factor-bar-fill.positive { background: #26a69a; }
+        .factor-bar-fill.negative { background: #ef5350; }
+
+        .factor-detail {
+            font-size: 11px;
+            color: #787b86;
+            line-height: 1.4;
+        }
+
+        /* Chain metrics mini-grid */
+        .chain-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+
+        .chain-item {
+            background: #0d1117;
+            padding: 8px 6px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .chain-value {
+            font-size: 14px;
+            font-weight: 700;
+            color: #d1d4dc;
+            font-family: 'SF Mono','Monaco',monospace;
+        }
+
+        .chain-label {
+            font-size: 9px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-top: 2px;
+            letter-spacing: 0.3px;
+        }
+
+        .uoa-alert {
+            background: rgba(255, 193, 7, 0.08);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-top: 8px;
+        }
+
+        .uoa-alert-header {
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffc107;
+            margin-bottom: 6px;
+        }
+
+        .uoa-strike {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #b0b3bc;
+            padding: 2px 0;
+        }
+
+        .uoa-strike .uoa-ratio {
+            font-weight: 600;
+            color: #ffc107;
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
         
         /* ===== SIGNAL FILTER TOGGLES ===== */
         .filter-bar {
@@ -1520,12 +1773,68 @@
                 <!-- RIGHT: Analysis Sidebar -->
                 <div class="analysis-sidebar" id="analysis-sidebar">
                     <div class="sidebar-tabs">
-                        <button class="sidebar-tab active" data-tab="analysis">Analysis</button>
+                        <button class="sidebar-tab active" data-tab="composite">Composite</button>
+                        <button class="sidebar-tab" data-tab="analysis">VPA</button>
                         <button class="sidebar-tab" data-tab="signals">Signals</button>
                         <button class="mobile-close-btn" id="analysis-close-btn" aria-label="Close Analysis">×</button>
                     </div>
                     
                     <div class="sidebar-content" id="sidebar-content">
+                        <!-- COMPOSITE TAB -->
+                        <div class="tab-content active" id="tab-composite">
+                            <div class="composite-card">
+                                <h4>Composite Signal</h4>
+                                <div id="composite-gauge" class="composite-signal-gauge neutral">
+                                    <div class="composite-action-label" id="comp-action">-</div>
+                                    <div class="composite-signal-sub" id="comp-signal-sub"></div>
+                                    <div class="composite-meta">
+                                        <span>Score: <strong id="comp-score">-</strong></span>
+                                        <span>Conf: <strong id="comp-conf">-</strong></span>
+                                    </div>
+                                </div>
+                                <div id="comp-archetype"></div>
+                            </div>
+
+                            <div class="composite-card">
+                                <h4>Greeks</h4>
+                                <div class="greeks-grid" id="greeks-grid">
+                                    <div class="greek-item"><div class="greek-value neutral-val" id="g-delta">-</div><div class="greek-label">Δ Delta</div></div>
+                                    <div class="greek-item"><div class="greek-value neutral-val" id="g-gamma">-</div><div class="greek-label">Γ Gamma</div></div>
+                                    <div class="greek-item"><div class="greek-value neutral-val" id="g-theta">-</div><div class="greek-label">Θ Theta</div></div>
+                                    <div class="greek-item"><div class="greek-value neutral-val" id="g-vega">-</div><div class="greek-label">ν Vega</div></div>
+                                    <div class="greek-item"><div class="greek-value neutral-val" id="g-iv">-</div><div class="greek-label">IV</div></div>
+                                    <div class="greek-item"><div class="greek-value neutral-val" id="g-oi">-</div><div class="greek-label">Open Int</div></div>
+                                </div>
+                            </div>
+
+                            <div class="composite-card">
+                                <h4>Chain Metrics</h4>
+                                <div class="chain-grid" id="chain-grid">
+                                    <div class="chain-item"><div class="chain-value" id="cm-ivr">-</div><div class="chain-label">IV Rank</div></div>
+                                    <div class="chain-item"><div class="chain-value" id="cm-gex">-</div><div class="chain-label">GEX</div></div>
+                                    <div class="chain-item"><div class="chain-value" id="cm-pcr">-</div><div class="chain-label">P/C Ratio</div></div>
+                                    <div class="chain-item"><div class="chain-value" id="cm-maxpain">-</div><div class="chain-label">Max Pain</div></div>
+                                    <div class="chain-item"><div class="chain-value" id="cm-calloi">-</div><div class="chain-label">Call OI</div></div>
+                                    <div class="chain-item"><div class="chain-value" id="cm-putoi">-</div><div class="chain-label">Put OI</div></div>
+                                </div>
+                                <div id="uoa-container"></div>
+                            </div>
+
+                            <div class="composite-card">
+                                <h4>Factor Breakdown</h4>
+                                <div class="factor-list" id="factor-list">
+                                    <div class="loading">Analyze to see factors</div>
+                                </div>
+                            </div>
+
+                            <div class="composite-card">
+                                <h4>Recommendation</h4>
+                                <div class="recommendation-box" id="comp-recommendation">Analyze an option to see composite signal</div>
+                            </div>
+                        </div>
+
+                        <!-- VPA TAB -->
+                        <div class="tab-content" id="tab-analysis">
                         <div class="bias-card">
                             <h4>Market Bias</h4>
                             <div id="bias-container" class="bias-indicator neutral">
@@ -1556,6 +1865,15 @@
                         <div class="signals-header">Recent Signals</div>
                         <div id="signals-container" class="signal-list">
                             <div class="loading">No signals yet</div>
+                        </div>
+                        </div><!-- end tab-analysis -->
+
+                        <!-- SIGNALS TAB -->
+                        <div class="tab-content" id="tab-signals">
+                            <div class="signals-header">All Signals (Chronological)</div>
+                            <div id="signals-container-full" class="signal-list">
+                                <div class="loading">No signals yet</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1640,19 +1958,8 @@
 
         function updateFilteredMarkers(signals) {
             if (!candlestickSeries) return;
-            const filtered = filterSignals(signals);
-            const markers = filtered.map(signal => {
-                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
-                return {
-                    time: toEasternUnix(signal.datetime),
-                    position: isBullish ? 'belowBar' : 'aboveBar',
-                    color: isBullish ? '#26a69a' : '#ef5350',
-                    shape: isBullish ? 'arrowUp' : 'arrowDown',
-                    text: signal.signal.replace('_', ' '),
-                };
-            });
-            markers.sort((a, b) => a.time - b.time);
-            candlestickSeries.setMarkers(markers);
+            // Use the unified marker builder so composite + VPA markers coexist
+            rebuildAllMarkers();
         }
         
         // Chart data tracking for incremental updates
@@ -2438,7 +2745,7 @@
                 signalsContainer.innerHTML = '<div class="loading">No signals match active filters</div>';
                 // still update stats with unfiltered counts
             } else {
-            signalsContainer.innerHTML = [...filteredSignals]
+            const signalHtml = [...filteredSignals]
                 .reverse()
                 .slice(0, 30)
                 .map(signal => {
@@ -2456,10 +2763,166 @@
                         </div>
                     `;
                 }).join('');
+            signalsContainer.innerHTML = signalHtml;
+            // Also update the full signals tab
+            const fullContainer = document.getElementById('signals-container-full');
+            if (fullContainer) fullContainer.innerHTML = signalHtml;
             }
             
             // Update signal peek
             updateSignalPeek(signals);
+            
+            // Composite signal
+            if (data.composite) {
+                updateComposite(data.composite);
+            }
+        }
+        
+        function updateComposite(comp) {
+            if (!comp) return;
+
+            // Gauge – show BUY / SELL / HOLD action prominently
+            const gauge = document.getElementById('composite-gauge');
+            gauge.className = 'composite-signal-gauge ' + comp.signal;
+            document.getElementById('comp-action').textContent = comp.action;
+            document.getElementById('comp-signal-sub').textContent = comp.signal.replace(/_/g, ' ');
+            document.getElementById('comp-score').textContent = (comp.score >= 0 ? '+' : '') + comp.score.toFixed(3);
+            document.getElementById('comp-conf').textContent = Math.round(comp.confidence * 100) + '%';
+
+            // Archetype
+            const archDiv = document.getElementById('comp-archetype');
+            archDiv.innerHTML = `
+                <span class="archetype-badge">${comp.trade_archetype.replace(/_/g, ' ')}</span>
+                <div class="archetype-desc">${comp.archetype_description}</div>
+            `;
+
+            // Greeks
+            const g = comp.greeks;
+            setGreek('g-delta', g.delta, true);
+            setGreek('g-gamma', g.gamma, false);
+            setGreek('g-theta', g.theta, true);
+            setGreek('g-vega', g.vega, false);
+            document.getElementById('g-iv').textContent = (g.iv * 100).toFixed(1) + '%';
+            document.getElementById('g-oi').textContent = g.open_interest.toLocaleString();
+
+            // Chain metrics
+            const cm = comp.chain_metrics;
+            document.getElementById('cm-ivr').textContent = cm.iv_rank.toFixed(0) + '%';
+            const gexEl = document.getElementById('cm-gex');
+            gexEl.textContent = cm.gex_regime.charAt(0).toUpperCase() + cm.gex_regime.slice(1);
+            gexEl.style.color = cm.gex_regime === 'positive' ? '#26a69a' : cm.gex_regime === 'negative' ? '#ef5350' : '#787b86';
+            document.getElementById('cm-pcr').textContent = cm.put_call_oi_ratio.toFixed(2);
+            document.getElementById('cm-maxpain').textContent = '$' + cm.max_pain.toFixed(0);
+            document.getElementById('cm-calloi').textContent = formatCompact(cm.total_call_oi);
+            document.getElementById('cm-putoi').textContent = formatCompact(cm.total_put_oi);
+
+            // UOA
+            const uoaDiv = document.getElementById('uoa-container');
+            if (cm.uoa_detected && cm.uoa_details.length > 0) {
+                uoaDiv.innerHTML = `
+                    <div class="uoa-alert">
+                        <div class="uoa-alert-header">⚡ Unusual Options Activity</div>
+                        ${cm.uoa_details.slice(0, 5).map(u => `
+                            <div class="uoa-strike">
+                                <span>$${u.strike} ${u.type}</span>
+                                <span>Vol: ${u.volume.toLocaleString()}</span>
+                                <span class="uoa-ratio">${u.vol_oi_ratio}x V/OI</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                uoaDiv.innerHTML = '';
+            }
+
+            // Factor breakdown
+            const factorList = document.getElementById('factor-list');
+            factorList.innerHTML = comp.factors.map(f => {
+                const cls = f.score > 0.05 ? 'positive' : f.score < -0.05 ? 'negative' : 'zero';
+                const barPct = Math.abs(f.score) * 50; // 0-50% from center
+                const barLeft = f.score >= 0 ? '50%' : (50 - barPct) + '%';
+                return `
+                    <div class="factor-item">
+                        <div class="factor-header">
+                            <span class="factor-name">${f.name}</span>
+                            <span class="factor-score-badge ${cls}">${f.score >= 0 ? '+' : ''}${f.score.toFixed(2)}</span>
+                        </div>
+                        <div class="factor-bar-bg">
+                            <div class="factor-bar-fill ${cls}" style="left:${barLeft};width:${barPct}%"></div>
+                        </div>
+                        <div class="factor-detail">${f.detail}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // Recommendation
+            document.getElementById('comp-recommendation').textContent = comp.recommendation;
+
+            // Add BUY/SELL/HOLD marker on the last bar of the chart
+            addCompositeMarker(comp);
+        }
+
+        // Store the composite result globally so markers can be combined with VPA signals
+        let lastCompositeResult = null;
+
+        function addCompositeMarker(comp) {
+            if (!candlestickSeries || !lastAnalysisData || !lastAnalysisData.bars.length) return;
+            lastCompositeResult = comp;
+            rebuildAllMarkers();
+        }
+
+        function rebuildAllMarkers() {
+            if (!candlestickSeries) return;
+
+            // Collect VPA signal markers
+            const vpaSignals = lastAnalysisData ? (lastAnalysisData.signals || []) : [];
+            const filtered = filterSignals(vpaSignals);
+            const markers = filtered.map(signal => {
+                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
+                return {
+                    time: toEasternUnix(signal.datetime),
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#26a69a' : '#ef5350',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+
+            // Add composite BUY/SELL/HOLD marker on the last bar
+            if (lastCompositeResult && lastAnalysisData && lastAnalysisData.bars.length > 0) {
+                const comp = lastCompositeResult;
+                const lastBar = lastAnalysisData.bars[lastAnalysisData.bars.length - 1];
+                const action = comp.action;
+                const isBuy = action.includes('BUY');
+                const isSell = action.includes('SELL');
+
+                if (isBuy || isSell) {
+                    const confPct = Math.round(comp.confidence * 100);
+                    markers.push({
+                        time: toEasternUnix(lastBar.datetime),
+                        position: isBuy ? 'belowBar' : 'aboveBar',
+                        color: isBuy ? '#00e676' : '#ff1744',
+                        shape: isBuy ? 'arrowUp' : 'arrowDown',
+                        text: `${action} (${confPct}%)`,
+                    });
+                }
+            }
+
+            markers.sort((a, b) => a.time - b.time);
+            candlestickSeries.setMarkers(markers);
+        }
+
+        function setGreek(id, value, showSign) {
+            const el = document.getElementById(id);
+            const formatted = showSign ? ((value >= 0 ? '+' : '') + value.toFixed(4)) : value.toFixed(4);
+            el.textContent = formatted;
+            el.className = 'greek-value ' + (value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral-val');
+        }
+
+        function formatCompact(n) {
+            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+            return n.toString();
         }
         
         // ===== EVENT LISTENERS =====
@@ -2507,6 +2970,11 @@
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
+                // Switch tab content
+                const tabName = tab.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+                const target = document.getElementById('tab-' + tabName);
+                if (target) target.classList.add('active');
             });
         });
         

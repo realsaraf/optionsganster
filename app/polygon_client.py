@@ -328,6 +328,124 @@ class PolygonClient:
             print(f"Error fetching snapshot prices for {ticker_str}: {e}")
             return {}
 
+    # ── Options Snapshot (Greeks, IV, OI) ───────────────────
+
+    async def get_option_contract_snapshot(
+        self,
+        symbol: str,
+        expiration: date,
+        strike: float,
+        right: str,
+    ) -> dict:
+        """
+        Fetch snapshot for a single option contract.
+        Returns Greeks (delta, gamma, theta, vega), IV, open_interest, volume, etc.
+        Polygon endpoint: GET /v3/snapshot/options/{underlyingAsset}/{optionContract}
+        """
+        cache_key = ("snapshot", symbol, expiration, strike, right)
+        if not hasattr(self, "_contract_snapshot_cache"):
+            self._contract_snapshot_cache = TTLCache(maxsize=256, ttl=15)
+        if cache_key in self._contract_snapshot_cache:
+            return self._contract_snapshot_cache[cache_key]
+
+        ticker = self._format_option_ticker(symbol, expiration, strike, right)
+
+        url = f"{self.BASE_URL}/v3/snapshot/options/{symbol.upper()}/{ticker}"
+        try:
+            data = await self._get_json(url)
+            result = data.get("results", {})
+
+            # Polygon snapshot underlying_asset only has ticker, not price.
+            # Get underlying price from our cache or prev-close API.
+            underlying_price = 0.0
+            cached_price = self._price_cache.get(symbol.upper())
+            if cached_price:
+                underlying_price = cached_price
+            else:
+                try:
+                    underlying_price = await self.get_underlying_price(symbol)
+                except Exception:
+                    pass
+
+            day = result.get("day", {})
+            parsed = {
+                "greeks": result.get("greeks", {}),
+                "iv": result.get("implied_volatility", 0),
+                "open_interest": result.get("open_interest", 0),
+                "volume": day.get("volume", 0),
+                "last_price": day.get("close", 0) or day.get("vwap", 0) or 0,
+                "break_even": result.get("break_even_price", 0) or 0,
+                "underlying_price": underlying_price,
+                "change_to_break_even": 0,
+            }
+            self._contract_snapshot_cache[cache_key] = parsed
+            return parsed
+        except Exception as e:
+            print(f"Error fetching contract snapshot: {e}")
+            return {}
+
+    async def get_options_chain_snapshot(
+        self,
+        symbol: str,
+        expiration: date | None = None,
+        page_size: int = 250,
+        max_contracts: int = 5000,
+    ) -> list[dict]:
+        """
+        Fetch snapshot for ALL option contracts of an underlying (for a given expiration).
+        Paginates through all pages to get the complete chain.
+        Used for: IV Rank calculation, GEX, Put/Call ratio, Max Pain, UOA detection.
+        Polygon endpoint: GET /v3/snapshot/options/{underlyingAsset}
+        """
+        cache_key = ("chain", symbol, expiration)
+        if not hasattr(self, "_chain_snapshot_cache"):
+            self._chain_snapshot_cache = TTLCache(maxsize=32, ttl=30)
+        if cache_key in self._chain_snapshot_cache:
+            return self._chain_snapshot_cache[cache_key]
+
+        url = f"{self.BASE_URL}/v3/snapshot/options/{symbol.upper()}"
+        params: dict = {"limit": page_size, "order": "asc", "sort": "strike_price"}
+        if expiration:
+            params["expiration_date"] = expiration.strftime("%Y-%m-%d")
+
+        try:
+            all_results: list[dict] = []
+            current_url = url
+            current_params: dict | None = params
+            page_count = 0
+
+            while current_url and len(all_results) < max_contracts:
+                data = await self._get_json(current_url, current_params)
+                results_batch = data.get("results", [])
+                if not results_batch:
+                    break
+                for r in results_batch:
+                    all_results.append({
+                        "ticker": r.get("details", {}).get("ticker", ""),
+                        "strike": r.get("details", {}).get("strike_price", 0),
+                        "expiration": r.get("details", {}).get("expiration_date", ""),
+                        "contract_type": r.get("details", {}).get("contract_type", ""),
+                        "greeks": r.get("greeks", {}),
+                        "iv": r.get("implied_volatility", 0),
+                        "open_interest": r.get("open_interest", 0),
+                        "volume": r.get("day", {}).get("volume", 0),
+                        "last_price": r.get("day", {}).get("close", 0),
+                    })
+                page_count += 1
+                next_url = data.get("next_url")
+                if next_url:
+                    current_url = next_url
+                    current_params = None  # next_url includes params
+                else:
+                    break
+
+            print(f"Chain snapshot: {len(all_results)} contracts in {page_count} pages for {symbol} exp={expiration}")
+            self._chain_snapshot_cache[cache_key] = all_results
+            return all_results
+        except Exception as e:
+            print(f"Error fetching chain snapshot: {e}")
+            return []
+
     # ── Cache management ─────────────────────────────────────
 
     def clear_ohlcv_cache(
