@@ -1142,6 +1142,48 @@
             margin-right: 2px;
         }
 
+        /* ── Underlay toggle ── */
+        .underlay-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+            padding-left: 12px;
+            border-left: 1px solid #2a2e39;
+        }
+        .underlay-toggle .underlay-label {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .underlay-btn-group {
+            display: flex;
+            gap: 2px;
+        }
+        .underlay-btn {
+            background: transparent;
+            border: 1px solid #2a2e39;
+            color: #5d606b;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+        .underlay-btn:hover {
+            color: #9ca3af;
+            border-color: #3a3e49;
+        }
+        .underlay-btn.active {
+            background: rgba(255,255,255,0.06);
+            color: #d1d4dc;
+            border-color: #4a4e59;
+        }
+
         .toggle-group {
             display: flex;
             align-items: center;
@@ -2143,6 +2185,15 @@
                     <label class="toggle-switch"><input type="checkbox" id="filter-neutral"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-neutral">Neutral</span>
                 </div>
+
+                <div class="underlay-toggle">
+                    <span class="underlay-label" id="underlay-label">Stock:</span>
+                    <div class="underlay-btn-group">
+                        <button class="underlay-btn" data-underlay="off" id="underlay-off">OFF</button>
+                        <button class="underlay-btn active" data-underlay="line" id="underlay-line">LINE</button>
+                        <button class="underlay-btn" data-underlay="candle" id="underlay-candle">CANDLE</button>
+                    </div>
+                </div>
             </div>
             
             <div class="chart-area">
@@ -2338,6 +2389,11 @@
 
         // Last analysis data for re-filtering
         let lastAnalysisData = null;
+
+        // Underlying underlay state
+        let underlayMode = 'line';  // 'off', 'line', 'candle'
+        let underlaySeries = null;
+        let underlayBarsData = [];   // raw underlying bars from API
 
         // ===== TIMEZONE HELPER =====
         // Convert a UTC datetime string to a Unix timestamp in US/Eastern
@@ -2952,6 +3008,16 @@
                 wickUpColor: '#26a69a',
                 wickDownColor: '#ef5350',
             });
+
+            // ── Underlay toggle buttons ──
+            document.querySelectorAll('.underlay-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.underlay-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    underlayMode = btn.dataset.underlay;
+                    applyUnderlay();
+                });
+            });
             
             volumeChart = LightweightCharts.createChart(volumeContainer, {
                 layout: {
@@ -3115,6 +3181,17 @@
             window._chartDataLoading = true;
             volumeSeries.setData(volumeData);
             candlestickSeries.setData(candleData);
+
+            // ── Underlying underlay ──
+            underlayBarsData = (data.underlying_bars || []).map(bar => ({
+                time: toEasternUnix(bar.datetime),
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+            }));
+            applyUnderlay();
+
             window._chartDataLoading = false;
             
             // Store for re-filtering and update markers
@@ -3164,6 +3241,15 @@
                 candlestickSeries.update(candleData[i]);
                 volumeSeries.update(volumeData[i]);
             }
+
+            // Update underlying underlay in live mode
+            if (data.underlying_bars && data.underlying_bars.length) {
+                underlayBarsData = data.underlying_bars.map(bar => ({
+                    time: toEasternUnix(bar.datetime),
+                    open: bar.open, high: bar.high, low: bar.low, close: bar.close,
+                }));
+                applyUnderlay();
+            }
             
             window._chartDataLoading = false;
             
@@ -3176,7 +3262,52 @@
             
           } catch(chartErr) { console.warn('Chart incremental update warning:', chartErr.message); }
         }
-        
+
+        // ===== UNDERLAY MANAGEMENT =====
+        function removeUnderlay() {
+            if (underlaySeries) {
+                try { priceChart.removeSeries(underlaySeries); } catch(_) {}
+                underlaySeries = null;
+            }
+        }
+
+        function applyUnderlay() {
+            removeUnderlay();
+            if (underlayMode === 'off' || !underlayBarsData.length || !priceChart) return;
+
+            if (underlayMode === 'line') {
+                underlaySeries = priceChart.addLineSeries({
+                    color: 'rgba(100, 130, 180, 0.25)',
+                    lineWidth: 1,
+                    lineStyle: 0,
+                    priceScaleId: 'underlay',
+                    lastValueVisible: false,
+                    priceLineVisible: false,
+                    crosshairMarkerVisible: false,
+                });
+                underlaySeries.setData(underlayBarsData.map(b => ({ time: b.time, value: b.close })));
+            } else if (underlayMode === 'candle') {
+                underlaySeries = priceChart.addCandlestickSeries({
+                    upColor: 'rgba(38, 166, 154, 0.12)',
+                    downColor: 'rgba(239, 83, 80, 0.12)',
+                    borderUpColor: 'rgba(38, 166, 154, 0.20)',
+                    borderDownColor: 'rgba(239, 83, 80, 0.20)',
+                    wickUpColor: 'rgba(38, 166, 154, 0.15)',
+                    wickDownColor: 'rgba(239, 83, 80, 0.15)',
+                    priceScaleId: 'underlay',
+                    lastValueVisible: false,
+                    priceLineVisible: false,
+                });
+                underlaySeries.setData(underlayBarsData);
+            }
+
+            // Configure the underlay price scale (right side, hidden)
+            priceChart.priceScale('underlay').applyOptions({
+                scaleMargins: { top: 0.05, bottom: 0.05 },
+                visible: false,
+            });
+        }
+
         function updateAnalysis(data) {
             // Bias - with null check
             const biasContainer = document.getElementById('bias-container');

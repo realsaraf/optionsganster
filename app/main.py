@@ -164,6 +164,7 @@ class AnalysisResponse(BaseModel):
     signals: list[VPASignalResponse]
     bias: dict
     composite: Optional[CompositeSignalResponse] = None
+    underlying_bars: list[OHLCVBar] = []
 
 
 class ExpirationResponse(BaseModel):
@@ -564,16 +565,31 @@ async def analyze_option(
                 end_date=end_dt,
                 interval_min=interval,
             )
+            poly.clear_stock_ohlcv_cache(
+                symbol=symbol.upper(),
+                start_date=start_dt,
+                end_date=end_dt,
+                interval_min=interval,
+            )
 
-        # Fetch OHLCV data (async + cached)
-        df = await poly.get_option_ohlcv(
-            symbol=symbol.upper(),
-            expiration=exp_date,
-            strike=strike,
-            right=right.upper(),
-            start_date=start_dt,
-            end_date=end_dt,
-            interval_min=interval,
+        # Fetch OHLCV data (async + cached) — options + underlying in parallel
+        import asyncio as _aio
+        df, stock_df = await _aio.gather(
+            poly.get_option_ohlcv(
+                symbol=symbol.upper(),
+                expiration=exp_date,
+                strike=strike,
+                right=right.upper(),
+                start_date=start_dt,
+                end_date=end_dt,
+                interval_min=interval,
+            ),
+            poly.get_stock_ohlcv(
+                symbol=symbol.upper(),
+                start_date=start_dt,
+                end_date=end_dt,
+                interval_min=interval,
+            ),
         )
 
         if df.empty:
@@ -702,6 +718,19 @@ async def analyze_option(
             if r.signal != VPASignal.NEUTRAL
         ]
 
+        # Build underlying bars
+        underlying_bars = [
+            OHLCVBar(
+                datetime=str(row["datetime"]),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=int(row["volume"]),
+            )
+            for _, row in stock_df.iterrows()
+        ] if not stock_df.empty else []
+
         return AnalysisResponse(
             symbol=symbol.upper(),
             expiration=expiration,
@@ -712,6 +741,7 @@ async def analyze_option(
             signals=signals,
             bias=bias,
             composite=composite_response,
+            underlying_bars=underlying_bars,
         )
 
     except HTTPException:

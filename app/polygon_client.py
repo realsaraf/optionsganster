@@ -164,6 +164,68 @@ class PolygonClient:
                 )
             raise Exception(f"Polygon API error ({code}): {e.response.text}")
 
+    # ── Underlying (stock) OHLCV ─────────────────────────────
+
+    _stock_ohlcv_cache: dict = {}
+
+    async def get_stock_ohlcv(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_min: int = 5,
+    ) -> pd.DataFrame:
+        """Fetch OHLCV bars for the underlying stock/ETF (cached)."""
+        cache_key = (symbol, start_date, end_date, interval_min)
+        if cache_key in self._stock_ohlcv_cache:
+            return self._stock_ohlcv_cache[cache_key]
+
+        url = (
+            f"{self.BASE_URL}/v2/aggs/ticker/{symbol}"
+            f"/range/{interval_min}/minute/{start_date}/{end_date}"
+        )
+        params = {"limit": 50000, "sort": "asc"}
+
+        try:
+            data = await self._get_json(url, params)
+            bars = data.get("results", [])
+
+            if not bars:
+                return pd.DataFrame(
+                    columns=["datetime", "open", "high", "low", "close", "volume"]
+                )
+
+            records = []
+            for bar in bars:
+                dt = datetime.fromtimestamp(bar["t"] / 1000)
+                records.append(
+                    {
+                        "datetime": dt,
+                        "open": bar["o"],
+                        "high": bar["h"],
+                        "low": bar["l"],
+                        "close": bar["c"],
+                        "volume": bar.get("v", 0),
+                    }
+                )
+
+            df = pd.DataFrame(records).sort_values("datetime").reset_index(drop=True)
+            self._stock_ohlcv_cache[cache_key] = df
+            return df
+
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            raise Exception(f"Polygon stock OHLCV error ({code}): {e.response.text}")
+
+    def clear_stock_ohlcv_cache(self, **kwargs):
+        """Clear the stock OHLCV cache (for live mode)."""
+        if kwargs:
+            key = (kwargs.get("symbol"), kwargs.get("start_date"),
+                   kwargs.get("end_date"), kwargs.get("interval_min"))
+            self._stock_ohlcv_cache.pop(key, None)
+        else:
+            self._stock_ohlcv_cache.clear()
+
     # ── Expirations ──────────────────────────────────────────
 
     async def get_expirations(self, symbol: str) -> list[date]:
