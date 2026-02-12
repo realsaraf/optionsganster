@@ -100,7 +100,7 @@
         
         .main-content {
             display: flex;
-            height: calc(100vh - 140px);
+            height: calc(100vh - 180px);
         }
         
         .chart-container {
@@ -278,6 +278,98 @@
             border-radius: 6px;
             margin: 16px;
         }
+
+        /* Signal filter toggles */
+        .filter-bar {
+            background: #161b22;
+            padding: 10px 24px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-bar .filter-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-right: 4px;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .toggle-group .toggle-text {
+            font-size: 12px;
+            color: #8b949e;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .toggle-group .toggle-text.active {
+            color: #e6edf3;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 34px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #30363d;
+            border-radius: 18px;
+            transition: background 0.2s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            height: 12px;
+            width: 12px;
+            left: 3px;
+            bottom: 3px;
+            background: #8b949e;
+            border-radius: 50%;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: #238636;
+        }
+
+        .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(16px);
+            background: #fff;
+        }
+
+        .toggle-group.bullish-color .toggle-switch input:checked + .toggle-slider {
+            background: #238636;
+        }
+
+        .toggle-group.bearish-color .toggle-switch input:checked + .toggle-slider {
+            background: #da3633;
+        }
+
+        .toggle-group.neutral-color .toggle-switch input:checked + .toggle-slider {
+            background: #6e7681;
+        }
     </style>
 </head>
 <body>
@@ -327,6 +419,98 @@
         
         <button id="analyze-btn">Analyze</button>
     </div>
+
+    <div class="filter-bar">
+        <span class="filter-label">Signals:</span>
+
+        <div class="toggle-group bullish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-strong_bullish" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text active" data-for="filter-strong_bullish">Strong Bullish</span>
+        </div>
+
+        <div class="toggle-group bearish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-strong_bearish" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text active" data-for="filter-strong_bearish">Strong Bearish</span>
+        </div>
+
+        <div class="toggle-group bullish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-accumulation">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-accumulation">Accumulation</span>
+        </div>
+
+        <div class="toggle-group bearish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-distribution">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-distribution">Distribution</span>
+        </div>
+
+        <div class="toggle-group bullish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-test_support">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-test_support">Test Support</span>
+        </div>
+
+        <div class="toggle-group bearish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-test_resistance">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-test_resistance">Test Resistance</span>
+        </div>
+
+        <div class="toggle-group bullish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-climax_bottom">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-climax_bottom">Climax Bottom</span>
+        </div>
+
+        <div class="toggle-group bearish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-climax_top">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-climax_top">Climax Top</span>
+        </div>
+
+        <div class="toggle-group bullish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-weak_down">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-weak_down">Weak Down</span>
+        </div>
+
+        <div class="toggle-group bearish-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-weak_up">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-weak_up">Weak Up</span>
+        </div>
+
+        <div class="toggle-group neutral-color">
+            <label class="toggle-switch">
+                <input type="checkbox" id="filter-neutral">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text" data-for="filter-neutral">Neutral</span>
+        </div>
+    </div>
     
     <div class="main-content">
         <div class="chart-container">
@@ -359,6 +543,45 @@
         let candlestickSeries = null;
         let volumeSeries = null;
         let currentInterval = 1;
+        let lastData = null; // store last analysis data for re-filtering
+
+        // Get enabled signal filters
+        function getEnabledSignals() {
+            const enabled = new Set();
+            document.querySelectorAll('.filter-bar input[type=checkbox]').forEach(cb => {
+                if (cb.checked) {
+                    enabled.add(cb.id.replace('filter-', ''));
+                }
+            });
+            return enabled;
+        }
+
+        function filterSignals(signals) {
+            const enabled = getEnabledSignals();
+            return signals.filter(s => enabled.has(s.signal));
+        }
+
+        // Wire up filter toggles
+        document.querySelectorAll('.filter-bar input[type=checkbox]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                // Update label style
+                const label = document.querySelector(`[data-for="${cb.id}"]`);
+                if (label) label.classList.toggle('active', cb.checked);
+                // Re-render if we have data
+                if (lastData) {
+                    updateMarkers(lastData.signals);
+                    updateSignals(lastData.signals);
+                }
+            });
+        });
+
+        // Clicking the text label toggles the switch
+        document.querySelectorAll('.filter-bar .toggle-text').forEach(label => {
+            label.addEventListener('click', () => {
+                const cb = document.getElementById(label.dataset.for);
+                if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+            });
+        });
         
         // Initialize charts
         function initCharts() {
@@ -487,6 +710,7 @@
                 }
                 
                 const data = await res.json();
+                lastData = data;
                 updateCharts(data);
                 updateBias(data.bias);
                 updateSignals(data.signals);
@@ -519,19 +743,8 @@
             candlestickSeries.setData(candleData);
             volumeSeries.setData(volumeData);
             
-            // Add markers for signals
-            const markers = data.signals.map(signal => {
-                const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down'].includes(signal.signal);
-                return {
-                    time: new Date(signal.datetime).getTime() / 1000,
-                    position: isBullish ? 'belowBar' : 'aboveBar',
-                    color: isBullish ? '#3fb950' : '#f85149',
-                    shape: isBullish ? 'arrowUp' : 'arrowDown',
-                    text: signal.signal.replace('_', ' '),
-                };
-            });
-            
-            candlestickSeries.setMarkers(markers);
+            // Add markers for filtered signals
+            updateMarkers(data.signals);
             
             // Scroll to show the most recent data (last 100 bars visible)
             if (candleData.length > 0) {
@@ -555,16 +768,34 @@
             `;
         }
         
+        // Update chart markers based on filter
+        function updateMarkers(signals) {
+            const filtered = filterSignals(signals);
+            const markers = filtered.map(signal => {
+                const isBullish = ['strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 'weak_down'].includes(signal.signal);
+                return {
+                    time: new Date(signal.datetime).getTime() / 1000,
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#3fb950' : '#f85149',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+            markers.sort((a, b) => a.time - b.time);
+            candlestickSeries.setMarkers(markers);
+        }
+
         // Update signals list
         function updateSignals(signals) {
+            const filtered = filterSignals(signals);
             const container = document.getElementById('signals-container');
             
-            if (signals.length === 0) {
-                container.innerHTML = '<div class="loading">No significant signals</div>';
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="loading">No signals match active filters</div>';
                 return;
             }
             
-            container.innerHTML = signals
+            container.innerHTML = [...filtered]
                 .reverse()  // Most recent first
                 .slice(0, 50)  // Limit to 50
                 .map(signal => `

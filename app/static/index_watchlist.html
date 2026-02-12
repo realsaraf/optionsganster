@@ -851,6 +851,100 @@
             font-size: 13px;
         }
         
+        /* ===== SIGNAL FILTER TOGGLES ===== */
+        .filter-bar {
+            background: #1e222d;
+            padding: 6px 16px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            border-bottom: 1px solid #2a2e39;
+        }
+
+        .filter-bar .filter-label {
+            font-size: 11px;
+            color: #787b86;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-right: 2px;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .toggle-group .toggle-text {
+            font-size: 11px;
+            color: #5d606b;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            transition: color 0.2s;
+        }
+
+        .toggle-group .toggle-text.active {
+            color: #d1d4dc;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 30px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #363a45;
+            border-radius: 16px;
+            transition: background 0.2s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            height: 10px;
+            width: 10px;
+            left: 3px;
+            bottom: 3px;
+            background: #787b86;
+            border-radius: 50%;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: #2962ff;
+        }
+
+        .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(14px);
+            background: #fff;
+        }
+
+        .toggle-group.bullish-color .toggle-switch input:checked + .toggle-slider {
+            background: #26a69a;
+        }
+
+        .toggle-group.bearish-color .toggle-switch input:checked + .toggle-slider {
+            background: #ef5350;
+        }
+
+        .toggle-group.neutral-color .toggle-switch input:checked + .toggle-slider {
+            background: #5d606b;
+        }
+
         /* Scrollbar Styling */
         ::-webkit-scrollbar {
             width: 8px;
@@ -1347,6 +1441,75 @@
                 <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
                 <button class="live-btn" id="live-btn">⚪ LIVE</button>
             </div>
+
+            <div class="filter-bar" id="filter-bar">
+                <span class="filter-label">Signals:</span>
+
+                <div class="toggle-group bullish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-strong_bullish" checked><span class="toggle-slider"></span></label>
+                    <span class="toggle-text active" data-for="filter-strong_bullish">Strong Bullish</span>
+                </div>
+
+                <div class="toggle-group bearish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-strong_bearish" checked><span class="toggle-slider"></span></label>
+                    <span class="toggle-text active" data-for="filter-strong_bearish">Strong Bearish</span>
+                </div>
+
+                <div class="toggle-group bullish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-accumulation"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-accumulation">Accumulation</span>
+                </div>
+
+                <div class="toggle-group bearish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-distribution"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-distribution">Distribution</span>
+                </div>
+
+                <div class="toggle-group bullish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-test_support"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-test_support">Test Support</span>
+                </div>
+
+                <div class="toggle-group bearish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-test_resistance"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-test_resistance">Test Resistance</span>
+                </div>
+
+                <div class="toggle-group bullish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-climax_bottom"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-climax_bottom">Climax Bottom</span>
+                </div>
+
+                <div class="toggle-group bearish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-climax_top"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-climax_top">Climax Top</span>
+                </div>
+
+                <div class="toggle-group bullish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-weak_down"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-weak_down">Weak Down</span>
+                </div>
+
+                <div class="toggle-group bearish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-weak_up"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-weak_up">Weak Up</span>
+                </div>
+
+                <div class="toggle-group bullish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-no_supply"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-no_supply">No Supply</span>
+                </div>
+
+                <div class="toggle-group bearish-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-no_demand"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-no_demand">No Demand</span>
+                </div>
+
+                <div class="toggle-group neutral-color">
+                    <label class="toggle-switch"><input type="checkbox" id="filter-neutral"><span class="toggle-slider"></span></label>
+                    <span class="toggle-text" data-for="filter-neutral">Neutral</span>
+                </div>
+            </div>
             
             <div class="chart-area">
                 <div class="charts-container">
@@ -1441,6 +1604,56 @@
         
         // Signal peek state
         let latestSignalData = null;
+
+        // Last analysis data for re-filtering
+        let lastAnalysisData = null;
+
+        // ===== TIMEZONE HELPER =====
+        // Convert a UTC datetime string to a Unix timestamp in US/Eastern
+        // lightweight-charts treats timestamps as UTC, so we shift by the ET offset
+        function toEasternUnix(datetimeStr) {
+            const d = new Date(datetimeStr);
+            // Format in America/New_York to get the ET offset
+            const eastern = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+            // Difference = how far ET is from UTC (in seconds)
+            // We return eastern time as if it were UTC so the chart axis shows ET
+            return Math.floor(eastern.getTime() / 1000);
+        }
+
+        function toEasternString(datetimeStr) {
+            return new Date(datetimeStr).toLocaleString('en-US', { timeZone: 'America/New_York' });
+        }
+
+        // ===== SIGNAL FILTER HELPERS =====
+        function getEnabledSignals() {
+            const enabled = new Set();
+            document.querySelectorAll('.filter-bar input[type=checkbox]').forEach(cb => {
+                if (cb.checked) enabled.add(cb.id.replace('filter-', ''));
+            });
+            return enabled;
+        }
+
+        function filterSignals(signals) {
+            const enabled = getEnabledSignals();
+            return signals.filter(s => enabled.has(s.signal));
+        }
+
+        function updateFilteredMarkers(signals) {
+            if (!candlestickSeries) return;
+            const filtered = filterSignals(signals);
+            const markers = filtered.map(signal => {
+                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
+                return {
+                    time: toEasternUnix(signal.datetime),
+                    position: isBullish ? 'belowBar' : 'aboveBar',
+                    color: isBullish ? '#26a69a' : '#ef5350',
+                    shape: isBullish ? 'arrowUp' : 'arrowDown',
+                    text: signal.signal.replace('_', ' '),
+                };
+            });
+            markers.sort((a, b) => a.time - b.time);
+            candlestickSeries.setMarkers(markers);
+        }
         
         // Chart data tracking for incremental updates
         let currentBarTimestamps = new Set();
@@ -1454,6 +1667,24 @@
         const LANDSCAPE_MAX_WIDTH = 1024;
         const LANDSCAPE_MAX_HEIGHT = 500;
         
+        // Wire up filter toggle events
+        document.querySelectorAll('.filter-bar input[type=checkbox]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const label = document.querySelector(`[data-for="${cb.id}"]`);
+                if (label) label.classList.toggle('active', cb.checked);
+                if (lastAnalysisData) {
+                    updateFilteredMarkers(lastAnalysisData.signals || []);
+                    updateAnalysis(lastAnalysisData);
+                }
+            });
+        });
+        document.querySelectorAll('.filter-bar .toggle-text').forEach(label => {
+            label.addEventListener('click', () => {
+                const cb = document.getElementById(label.dataset.for);
+                if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+            });
+        });
+
         // Signal type constants
         const BULLISH_SIGNALS = [
             'strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 
@@ -1966,13 +2197,23 @@
                 priceScaleId: '',
             });
             
-            // Sync timescales (guard against null range + skip during data loading)
+            // Sync timescales using logical range (bar-index based) for pixel-perfect alignment
             window._chartDataLoading = false;
-            priceChart.timeScale().subscribeVisibleTimeRangeChange(() => {
-                if (window._chartDataLoading) return;
-                const range = priceChart.timeScale().getVisibleRange();
+            let _syncingChart = false;
+            priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+                if (window._chartDataLoading || _syncingChart) return;
                 if (range) {
-                    try { volumeChart.timeScale().setVisibleRange(range); } catch(_) {}
+                    _syncingChart = true;
+                    try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch(_) {}
+                    _syncingChart = false;
+                }
+            });
+            volumeChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+                if (window._chartDataLoading || _syncingChart) return;
+                if (range) {
+                    _syncingChart = true;
+                    try { priceChart.timeScale().setVisibleLogicalRange(range); } catch(_) {}
+                    _syncingChart = false;
                 }
             });
             
@@ -2078,7 +2319,7 @@
         function updateCharts(data) {
           try {
             const candleData = data.bars.map(bar => ({
-                time: new Date(bar.datetime).getTime() / 1000,
+                time: toEasternUnix(bar.datetime),
                 open: bar.open,
                 high: bar.high,
                 low: bar.low,
@@ -2086,7 +2327,7 @@
             }));
             
             const volumeData = data.bars.map(bar => ({
-                time: new Date(bar.datetime).getTime() / 1000,
+                time: toEasternUnix(bar.datetime),
                 value: bar.volume,
                 color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
             }));
@@ -2097,18 +2338,9 @@
             candlestickSeries.setData(candleData);
             window._chartDataLoading = false;
             
-            // Markers for signals
-            const markers = data.signals.map(signal => {
-                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
-                return {
-                    time: new Date(signal.datetime).getTime() / 1000,
-                    position: isBullish ? 'belowBar' : 'aboveBar',
-                    color: isBullish ? '#26a69a' : '#ef5350',
-                    shape: isBullish ? 'arrowUp' : 'arrowDown',
-                    text: signal.signal.replace('_', ' '),
-                };
-            });
-            candlestickSeries.setMarkers(markers);
+            // Store for re-filtering and update markers
+            lastAnalysisData = data;
+            updateFilteredMarkers(data.signals || []);
             
             // Scroll to recent – use fitContent first, then try setVisibleRange
             if (candleData.length > 0) {
@@ -2129,7 +2361,7 @@
         function updateChartsIncremental(data) {
           try {
             const candleData = data.bars.map(bar => ({
-                time: new Date(bar.datetime).getTime() / 1000,
+                time: toEasternUnix(bar.datetime),
                 open: bar.open,
                 high: bar.high,
                 low: bar.low,
@@ -2137,7 +2369,7 @@
             }));
             
             const volumeData = data.bars.map(bar => ({
-                time: new Date(bar.datetime).getTime() / 1000,
+                time: toEasternUnix(bar.datetime),
                 value: bar.volume,
                 color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
             }));
@@ -2159,18 +2391,9 @@
             // Update tracked timestamps
             currentBarTimestamps = newTimestamps;
             
-            // Update markers for signals
-            const markers = data.signals.map(signal => {
-                const isBullish = BULLISH_SIGNALS.includes(signal.signal);
-                return {
-                    time: new Date(signal.datetime).getTime() / 1000,
-                    position: isBullish ? 'belowBar' : 'aboveBar',
-                    color: isBullish ? '#26a69a' : '#ef5350',
-                    shape: isBullish ? 'arrowUp' : 'arrowDown',
-                    text: signal.signal.replace('_', ' '),
-                };
-            });
-            candlestickSeries.setMarkers(markers);
+            // Store for re-filtering and update markers
+            lastAnalysisData = data;
+            updateFilteredMarkers(data.signals || []);
             
           } catch(chartErr) { console.warn('Chart incremental update warning:', chartErr.message); }
         }
@@ -2210,14 +2433,19 @@
                 return;
             }
             
-            signalsContainer.innerHTML = [...signals]
+            const filteredSignals = filterSignals(signals);
+            if (filteredSignals.length === 0) {
+                signalsContainer.innerHTML = '<div class="loading">No signals match active filters</div>';
+                // still update stats with unfiltered counts
+            } else {
+            signalsContainer.innerHTML = [...filteredSignals]
                 .reverse()
                 .slice(0, 30)
                 .map(signal => {
                     const isBullish = BULLISH_SIGNALS.includes(signal.signal);
                     return `
                         <div class="signal-item ${isBullish ? 'bullish' : 'bearish'}">
-                            <div class="signal-time">${new Date(signal.datetime).toLocaleString()}</div>
+                            <div class="signal-time">${toEasternString(signal.datetime)} ET</div>
                             <div class="signal-name">${signal.signal.replace(/_/g, ' ').toUpperCase()}</div>
                             <div class="signal-desc">${signal.description}</div>
                             <div class="signal-meta">
@@ -2228,6 +2456,7 @@
                         </div>
                     `;
                 }).join('');
+            }
             
             // Update signal peek
             updateSignalPeek(signals);
