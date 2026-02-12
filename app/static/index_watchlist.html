@@ -2658,17 +2658,21 @@
         // ===== LIVE MODE FUNCTIONS =====
         function updateLiveButton() {
             const desktopBtn = document.getElementById('live-btn');
-            const summaryIndicator = document.getElementById('summary-live-indicator');
+            const summaryBtn = document.getElementById('summary-live-btn');
             
             if (liveMode) {
                 const text = `🔴 LIVE ${liveCountdown}s`;
                 desktopBtn.textContent = text;
-                summaryIndicator.textContent = `🔴 ${liveCountdown}s`;
-                summaryIndicator.classList.add('active');
+                if (summaryBtn) {
+                    summaryBtn.textContent = `LIVE ${liveCountdown}s`;
+                    summaryBtn.classList.add('active');
+                }
             } else {
                 desktopBtn.textContent = '⚪ LIVE';
-                summaryIndicator.textContent = '';
-                summaryIndicator.classList.remove('active');
+                if (summaryBtn) {
+                    summaryBtn.textContent = 'LIVE';
+                    summaryBtn.classList.remove('active');
+                }
             }
         }
         
