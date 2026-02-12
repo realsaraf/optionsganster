@@ -184,38 +184,230 @@ LOGIN_HTML = """
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>OptionsGanster – Login</title>
+<title>OptionsGanster – Smart Options Signals</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{height:100vh;display:flex;align-items:center;justify-content:center;
-  background:#0a0a1a;font-family:'Segoe UI',sans-serif;color:#e0e0e0}
-.card{background:#111827;border:1px solid #1e293b;border-radius:12px;padding:40px;
-  width:380px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
-h1{text-align:center;margin-bottom:8px;font-size:1.5rem}
-.sub{text-align:center;color:#6b7280;font-size:.85rem;margin-bottom:28px}
+body{min-height:100vh;background:#0a0a1a;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#e0e0e0;overflow-x:hidden}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:16px 32px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,26,.85);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,.06)}
+.nav-logo{font-size:1.3rem;font-weight:800;letter-spacing:-.5px}
+.nav-logo span{color:#ef5350}
+.nav-links{display:flex;gap:24px;align-items:center}
+.nav-links a{color:#9ca3af;text-decoration:none;font-size:.9rem;transition:color .2s}
+.nav-links a:hover{color:#fff}
+.nav-cta{background:#3b82f6;color:#fff !important;padding:8px 20px;border-radius:6px;font-weight:600;font-size:.9rem;border:none;cursor:pointer;transition:all .2s}
+.nav-cta:hover{background:#2563eb;transform:translateY(-1px)}
+
+/* ── HERO ── */
+.hero{min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:120px 24px 80px;position:relative}
+.hero::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle,rgba(59,130,246,.08) 0%,transparent 70%);pointer-events:none}
+.hero-content{max-width:720px;position:relative;z-index:1}
+.hero-badge{display:inline-block;padding:6px 16px;border-radius:20px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.25);color:#60a5fa;font-size:.8rem;font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:24px}
+.hero h1{font-size:3.5rem;font-weight:800;line-height:1.1;margin-bottom:20px;letter-spacing:-1px}
+.hero h1 .accent{background:linear-gradient(135deg,#3b82f6,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:1.15rem;color:#9ca3af;line-height:1.7;margin-bottom:40px;max-width:560px;margin-left:auto;margin-right:auto}
+.hero-actions{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.btn-primary{padding:14px 32px;border-radius:8px;background:#3b82f6;color:#fff;font-size:1rem;font-weight:700;border:none;cursor:pointer;transition:all .25s;letter-spacing:.3px}
+.btn-primary:hover{background:#2563eb;transform:translateY(-2px);box-shadow:0 8px 24px rgba(59,130,246,.3)}
+.btn-secondary{padding:14px 32px;border-radius:8px;background:transparent;color:#d1d4dc;font-size:1rem;font-weight:600;border:1px solid #374151;cursor:pointer;transition:all .25s}
+.btn-secondary:hover{border-color:#6b7280;background:rgba(255,255,255,.03)}
+
+/* ── STATS ── */
+.stats{display:flex;gap:48px;justify-content:center;margin-top:64px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat-value{font-size:2rem;font-weight:800;color:#fff}
+.stat-value .green{color:#26a69a}
+.stat-value .blue{color:#3b82f6}
+.stat-label{font-size:.8rem;color:#6b7280;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+
+/* ── FEATURES ── */
+.features{padding:80px 24px;max-width:1100px;margin:0 auto}
+.section-label{text-align:center;color:#3b82f6;font-size:.8rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px}
+.section-title{text-align:center;font-size:2.2rem;font-weight:800;margin-bottom:48px;letter-spacing:-.5px}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.feature-card{background:#111827;border:1px solid #1e293b;border-radius:12px;padding:32px;transition:all .25s}
+.feature-card:hover{border-color:#374151;transform:translateY(-4px);box-shadow:0 12px 36px rgba(0,0,0,.3)}
+.feature-icon{width:48px;height:48px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;margin-bottom:16px}
+.fi-blue{background:rgba(59,130,246,.12);color:#60a5fa}
+.fi-green{background:rgba(38,166,154,.12);color:#26a69a}
+.fi-purple{background:rgba(139,92,246,.12);color:#a78bfa}
+.fi-red{background:rgba(239,83,80,.12);color:#ef5350}
+.fi-yellow{background:rgba(250,204,21,.12);color:#facc15}
+.fi-cyan{background:rgba(34,211,238,.12);color:#22d3ee}
+.feature-card h3{font-size:1.1rem;font-weight:700;margin-bottom:8px}
+.feature-card p{font-size:.9rem;color:#9ca3af;line-height:1.6}
+
+/* ── HOW IT WORKS ── */
+.how{padding:80px 24px;background:#0d0d20}
+.how-grid{max-width:900px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:32px}
+.how-step{text-align:center;padding:24px}
+.step-num{width:40px;height:40px;border-radius:50%;background:rgba(59,130,246,.15);color:#60a5fa;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;margin:0 auto 16px}
+.how-step h3{font-size:1rem;font-weight:700;margin-bottom:8px}
+.how-step p{font-size:.85rem;color:#9ca3af;line-height:1.5}
+
+/* ── CTA ── */
+.cta{padding:80px 24px;text-align:center}
+.cta-box{max-width:640px;margin:0 auto;background:linear-gradient(135deg,#111827,#0f172a);border:1px solid #1e293b;border-radius:16px;padding:48px 40px}
+.cta-box h2{font-size:1.8rem;font-weight:800;margin-bottom:12px}
+.cta-box p{color:#9ca3af;margin-bottom:28px;font-size:1rem}
+
+/* ── FOOTER ── */
+footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-top:1px solid #1e293b}
+
+/* ── MODAL ── */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#111827;border:1px solid #1e293b;border-radius:14px;padding:40px;width:400px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.6);position:relative;animation:modalIn .25s ease}
+@keyframes modalIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:#6b7280;font-size:1.3rem;cursor:pointer;transition:color .2s;line-height:1}
+.modal-close:hover{color:#fff}
+.modal h2{font-size:1.4rem;font-weight:800;margin-bottom:4px}
+.modal .sub{color:#6b7280;font-size:.85rem;margin-bottom:24px}
 .field{margin-bottom:16px}
-label{display:block;font-size:.8rem;color:#9ca3af;margin-bottom:4px}
-input{width:100%;padding:10px 12px;border-radius:6px;border:1px solid #374151;
-  background:#1a1a2e;color:#e0e0e0;font-size:.95rem;outline:none}
-input:focus{border-color:#3b82f6}
-btn,.btn{display:block;width:100%;padding:12px;border:none;border-radius:6px;
-  background:#3b82f6;color:#fff;font-size:1rem;cursor:pointer;margin-top:20px;font-weight:600}
-.btn:hover{background:#2563eb}
+.field label{display:block;font-size:.8rem;color:#9ca3af;margin-bottom:4px;font-weight:500}
+.field input{width:100%;padding:11px 14px;border-radius:8px;border:1px solid #374151;background:#1a1a2e;color:#e0e0e0;font-size:.95rem;outline:none;transition:border-color .2s}
+.field input:focus{border-color:#3b82f6}
+.modal .btn-primary{width:100%;margin-top:20px}
 .err{color:#ef4444;font-size:.85rem;text-align:center;margin-top:12px;min-height:20px}
+
+/* ── RESPONSIVE ── */
+@media(max-width:768px){
+  nav{padding:12px 16px}
+  .nav-links a:not(.nav-cta){display:none}
+  .hero h1{font-size:2.2rem}
+  .hero p{font-size:1rem}
+  .stats{gap:24px}
+  .stat-value{font-size:1.5rem}
+  .features-grid{grid-template-columns:1fr}
+  .how-grid{grid-template-columns:1fr;gap:16px}
+  .cta-box{padding:32px 20px}
+}
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>OptionsGanster</h1>
-  <p class="sub">Volume Price Analysis for Options</p>
-  <form id="lf">
-    <div class="field"><label>Email</label><input type="email" id="em" required autofocus></div>
-    <div class="field"><label>Password</label><input type="password" id="pw" required></div>
-    <button class="btn" type="submit">Sign In</button>
-    <p class="err" id="err"></p>
-  </form>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Options<span>Ganster</span></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how">How It Works</a>
+    <button class="nav-cta" onclick="openLogin()">Sign In</button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="hero-badge">Powered by 6-Factor Composite Engine</div>
+    <h1>Stop Guessing.<br><span class="accent">Start Trading Smarter.</span></h1>
+    <p>Real-time options signals combining Greeks, IV Rank, GEX, Volume Price Analysis, Unusual Activity &amp; Put/Call Skew into one actionable BUY / SELL / HOLD verdict.</p>
+    <div class="hero-actions">
+      <button class="btn-primary" onclick="openLogin()">Get Started Free</button>
+      <button class="btn-secondary" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">See Features</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-value"><span class="green">6</span></div><div class="stat-label">Signal Factors</div></div>
+      <div class="stat"><div class="stat-value"><span class="blue">Live</span></div><div class="stat-label">Auto-Refresh</div></div>
+      <div class="stat"><div class="stat-value">10s</div><div class="stat-label">Refresh Interval</div></div>
+      <div class="stat"><div class="stat-value"><span class="green">$0</span></div><div class="stat-label">Free to Use</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Everything You Need for Options Analysis</h2>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon fi-blue">&#916;</div>
+      <h3>Real-Time Greeks</h3>
+      <p>Delta, Gamma, Theta, Vega — live from Polygon.io. Instantly see how your option reacts to price movement, time decay, and volatility shifts.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-green">&#9733;</div>
+      <h3>IV Rank &amp; Percentile</h3>
+      <p>Know if implied volatility is historically high or low. Identify premium selling opportunities when IV is elevated above the 75th percentile.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-purple">&#9881;</div>
+      <h3>GEX (Gamma Exposure)</h3>
+      <p>See where market makers are hedging. Positive GEX = pinning effect. Negative GEX = amplified moves. Know the regime before you trade.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-red">&#9650;</div>
+      <h3>Volume Price Analysis</h3>
+      <p>Wyckoff-based VPA engine detects accumulation, distribution, climax tops & bottoms, and supply/demand tests on option price bars.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-yellow">&#9889;</div>
+      <h3>Unusual Options Activity</h3>
+      <p>Spot contracts with volume exceeding open interest by 10x+. See what the smart money is doing before the move happens.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fi-cyan">&#8982;</div>
+      <h3>Composite Signal Engine</h3>
+      <p>All 6 factors weighted and scored into a single actionable signal: BUY, SELL, or HOLD with a confidence percentage you can trust.</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <div class="section-label">How It Works</div>
+  <h2 class="section-title">Three Steps to Better Trades</h2>
+  <div class="how-grid">
+    <div class="how-step">
+      <div class="step-num">1</div>
+      <h3>Pick a Contract</h3>
+      <p>Select any symbol, expiration, and strike from 10+ watchlist tickers. Call or Put — we analyze both.</p>
+    </div>
+    <div class="how-step">
+      <div class="step-num">2</div>
+      <h3>Hit Analyze</h3>
+      <p>Our 6-factor engine scores the contract in seconds. See the composite signal, Greeks, chain metrics, and VPA markers on the chart.</p>
+    </div>
+    <div class="how-step">
+      <div class="step-num">3</div>
+      <h3>Trade with Confidence</h3>
+      <p>Get a clear BUY, SELL, or HOLD verdict with a confidence score. Enable LIVE mode for auto-refresh every 10 seconds.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="cta-box">
+    <h2>Ready to Level Up Your Options Game?</h2>
+    <p>Join now. No credit card required. Full access to the 6-factor composite signal engine.</p>
+    <button class="btn-primary" onclick="openLogin()">Sign In &amp; Start Analyzing</button>
+  </div>
+</section>
+
+<footer>&copy; 2026 OptionsGanster. Built for traders who want an edge.</footer>
+
+<!-- LOGIN MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeLogin()">&times;</button>
+    <h2>Welcome Back</h2>
+    <p class="sub">Sign in to access your dashboard</p>
+    <form id="lf">
+      <div class="field"><label>Email</label><input type="email" id="em" required autofocus></div>
+      <div class="field"><label>Password</label><input type="password" id="pw" required></div>
+      <button class="btn-primary" type="submit">Sign In</button>
+      <p class="err" id="err"></p>
+    </form>
+  </div>
 </div>
+
 <script>
+function openLogin(){document.getElementById('modal').classList.add('open');document.getElementById('em').focus()}
+function closeLogin(){document.getElementById('modal').classList.remove('open');document.getElementById('err').textContent=''}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeLogin()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeLogin()});
 document.getElementById('lf').addEventListener('submit',async e=>{
   e.preventDefault();
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
