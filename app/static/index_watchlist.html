@@ -3625,7 +3625,7 @@
                     vertLine: { color: '#758696', width: 1, style: 2 },
                     horzLine: { color: '#758696', width: 1, style: 2 },
                 },
-                rightPriceScale: { borderColor: '#2a2e39' },
+                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80 },
                 timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
             });
             
@@ -3657,7 +3657,7 @@
                     vertLines: { color: '#1e222d' },
                     horzLines: { color: '#1e222d' },
                 },
-                rightPriceScale: { borderColor: '#2a2e39' },
+                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80 },
                 timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
             });
             
@@ -3666,7 +3666,8 @@
                 priceScaleId: '',
             });
             
-            // Sync timescales using logical range (bar-index based) for pixel-perfect alignment
+            // Sync timescales using logical range (bar-index based) for pixel-perfect alignment.
+            // Volume chart is padded with zero-volume bars to match any extra underlay timestamps.
             window._chartDataLoading = false;
             let _syncingChart = false;
             priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
@@ -3818,13 +3819,15 @@
             }));
             applyUnderlay();
 
-            window._chartDataLoading = false;
-            
+            // Pad volume chart with zero-volume entries for any underlay timestamps
+            // not in the options data so both charts share identical bar indices.
+            padVolumeForUnderlay(volumeData);
+
             // Store for re-filtering and update markers
             lastAnalysisData = data;
             updateFilteredMarkers(data.signals || []);
             
-            // Scroll to recent – use fitContent first, then try setVisibleRange
+            // Scroll to recent
             if (candleData.length > 0) {
                 priceChart.timeScale().fitContent();
                 volumeChart.timeScale().fitContent();
@@ -3833,10 +3836,14 @@
                     const fromIndex = Math.max(0, candleData.length - barsToShow);
                     priceChart.timeScale().setVisibleRange({
                         from: candleData[fromIndex].time,
-                        to: candleData[candleData.length - 1].time
+                        to: candleData[candleData.length - 1].time,
                     });
-                } catch (_) { /* chart not ready yet – fitContent already handled it */ }
+                } catch (_) { /* fitContent already handled it */ }
+            } else {
+                priceChart.timeScale().fitContent();
+                volumeChart.timeScale().fitContent();
             }
+            window._chartDataLoading = false;
           } catch(chartErr) { console.warn('Chart update warning:', chartErr.message); }
         }
         
@@ -3875,6 +3882,7 @@
                     open: bar.open, high: bar.high, low: bar.low, close: bar.close,
                 }));
                 applyUnderlay();
+                padVolumeForUnderlay(volumeData);
             }
             
             window._chartDataLoading = false;
@@ -3887,6 +3895,20 @@
             updateFilteredMarkers(data.signals || []);
             
           } catch(chartErr) { console.warn('Chart incremental update warning:', chartErr.message); }
+        }
+
+        // Pad volume chart with zero-volume bars for underlay timestamps
+        // so logical-range sync stays pixel-perfect.
+        function padVolumeForUnderlay(existingVolumeData) {
+            if (!underlayBarsData.length || !volumeSeries) return;
+            const existing = new Set(existingVolumeData.map(d => d.time));
+            const padBars = underlayBarsData
+                .filter(b => !existing.has(b.time))
+                .map(b => ({ time: b.time, value: 0, color: 'rgba(0,0,0,0)' }));
+            if (!padBars.length) return;
+            // Merge and sort
+            const merged = existingVolumeData.concat(padBars).sort((a, b) => a.time - b.time);
+            volumeSeries.setData(merged);
         }
 
         // ===== UNDERLAY MANAGEMENT =====
