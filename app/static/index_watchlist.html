@@ -218,8 +218,8 @@
         
         .header-contract {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            align-items: baseline;
+            gap: 10px;
             padding: 6px 12px;
             background: #131722;
             border-radius: 6px;
@@ -237,13 +237,13 @@
         }
         
         .contract-price {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 700;
             font-family: 'SF Mono', 'Monaco', monospace;
         }
         
         .contract-change {
-            font-size: 13px;
+            font-size: 12px;
             font-family: 'SF Mono', 'Monaco', monospace;
         }
         
@@ -1594,15 +1594,15 @@
             .header-contract {
                 flex: 1;
                 flex-direction: row;
-                align-items: center;
-                gap: 10px;
+                align-items: baseline;
+                gap: 8px;
                 padding: 4px 0;
                 background: transparent;
                 border-radius: 0;
             }
 
             .contract-symbol {
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: 800;
             }
 
@@ -1611,11 +1611,11 @@
             }
 
             .contract-price {
-                font-size: 16px;
+                font-size: 14px;
             }
 
             .contract-change {
-                font-size: 12px;
+                font-size: 11px;
             }
 
             .logout-btn {
@@ -1981,14 +1981,10 @@
                     <h1>Options<span>Ganster</span></h1>
                 </div>
                 <div class="header-contract" id="contract-info">
-                    <div>
-                        <div class="contract-symbol" id="contract-symbol">-</div>
-                        <div class="contract-details" id="contract-details">Select a symbol</div>
-                    </div>
-                    <div>
-                        <div class="contract-price" id="contract-price">-</div>
-                        <div class="contract-change" id="contract-change">-</div>
-                    </div>
+                    <div class="contract-symbol" id="contract-symbol">-</div>
+                    <div class="contract-price" id="contract-price">-</div>
+                    <div class="contract-change" id="contract-change">-</div>
+                    <div class="contract-details" id="contract-details">Select a symbol</div>
                 </div>
                 <a href="/api/logout" class="logout-btn" title="Sign Out">⏻ Logout</a>
             </div>
