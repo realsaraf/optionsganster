@@ -2074,10 +2074,51 @@
                 min-height: 400px;
             }
         }
+
+        /* ── Toast notifications ── */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 4px 20px rgba(0,0,0,.5);
+            animation: toastIn .35s ease-out;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,.12);
+            cursor: pointer;
+            max-width: 360px;
+        }
+        .toast.fade-out { animation: toastOut .3s ease-in forwards; }
+        .toast.buy   { background: linear-gradient(135deg, #1b5e20cc, #2e7d32cc); }
+        .toast.sell  { background: linear-gradient(135deg, #b71c1ccc, #c62828cc); }
+        .toast.hold  { background: linear-gradient(135deg, #37474fcc, #455a64cc); }
+        .toast-icon  { font-size: 20px; flex-shrink: 0; }
+        .toast-body  { display: flex; flex-direction: column; gap: 2px; }
+        .toast-title  { font-size: 14px; font-weight: 700; letter-spacing: .3px; }
+        .toast-detail { font-size: 12px; opacity: .85; font-weight: 400; }
+        @keyframes toastIn  { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes toastOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
     </style>
 </head>
 <body>
     <!-- Mobile Menu Toggle Button -->
+    <div class="toast-container" id="toast-container"></div>
+
     <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle Watchlist">
         ☰ <span>Watchlist</span>
     </button>
@@ -2492,6 +2533,9 @@
 
         // Last analysis data for re-filtering
         let lastAnalysisData = null;
+
+        // Track last composite action for change-detection toasts
+        let lastCompositeAction = null;
 
         // Underlying underlay state
         let underlayMode = 'line';  // 'off', 'line', 'candle'
@@ -2987,6 +3031,11 @@
 
                 // Update composite gauge + greeks panel
                 if (msg.composite) {
+                    const newAction = msg.composite.action;
+                    if (lastCompositeAction !== null && newAction !== lastCompositeAction) {
+                        showSignalToast(lastCompositeAction, newAction, msg.composite);
+                    }
+                    lastCompositeAction = newAction;
                     updateComposite(msg.composite);
                 }
 
@@ -3336,6 +3385,7 @@
             if (liveMode) {
                 liveMode = false;
                 lastBarDatetime = null;
+                lastCompositeAction = null;
                 
                 // Clear polling intervals (mock mode)
                 if (liveInterval) {
@@ -3957,6 +4007,35 @@
             }
         }
         
+        // ===== TOAST NOTIFICATIONS =====
+        function showToast(html, cssClass, duration = 5000) {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            el.className = 'toast ' + cssClass;
+            el.innerHTML = html;
+            el.onclick = () => { el.classList.add('fade-out'); setTimeout(() => el.remove(), 300); };
+            container.appendChild(el);
+            setTimeout(() => {
+                if (el.parentNode) { el.classList.add('fade-out'); setTimeout(() => el.remove(), 300); }
+            }, duration);
+        }
+
+        function showSignalToast(oldAction, newAction, comp) {
+            const icons = { 'STRONG BUY': '🟢', 'BUY': '🟢', 'HOLD': '⚪', 'SELL': '🔴', 'STRONG SELL': '🔴' };
+            const cls = newAction.includes('BUY') ? 'buy' : newAction.includes('SELL') ? 'sell' : 'hold';
+            const icon = icons[newAction] || '⚪';
+            const score = (comp.score >= 0 ? '+' : '') + comp.score.toFixed(3);
+            const conf = Math.round(comp.confidence * 100) + '%';
+            showToast(
+                `<span class="toast-icon">${icon}</span>` +
+                `<div class="toast-body">` +
+                `<span class="toast-title">Signal Changed: ${oldAction} → ${newAction}</span>` +
+                `<span class="toast-detail">Score ${score} · Conf ${conf} · ${comp.trade_archetype.replace(/_/g, ' ')}</span>` +
+                `</div>`,
+                cls, 6000
+            );
+        }
+
         function updateComposite(comp) {
             if (!comp) return;
 
