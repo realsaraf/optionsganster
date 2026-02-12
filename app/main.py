@@ -1085,6 +1085,10 @@ async def get_watchlist_prices(
         for sym in symbol_list:
             snapshot = price_lookup.get(sym, {})
             last_price = float(snapshot.get("lastPrice", 0))
+            prev_close = float(snapshot.get("prevClose", 0))
+            # Fallback to previous close when no trade in current session
+            if last_price == 0 and prev_close > 0:
+                last_price = prev_close
             change = float(snapshot.get("todaysChange", 0))
             change_pct = float(snapshot.get("todaysChangePerc", 0))
             high = float(snapshot.get("dayHigh", 0))

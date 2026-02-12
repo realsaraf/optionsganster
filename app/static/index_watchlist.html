@@ -3017,8 +3017,8 @@
                             <div class="watchlist-name">${item.name}</div>
                         </div>
                         <div class="watchlist-price-info">
-                            <div class="watchlist-price ${priceClass} ${flashClass}">${data.price ? data.price.toFixed(2) : '-'}</div>
-                            <div class="watchlist-change ${changeClass}">${data.changePct ? `${changeSign}${data.changePct.toFixed(2)}%` : '-'}</div>
+                            <div class="watchlist-price ${priceClass} ${flashClass}">${data.price != null ? data.price.toFixed(2) : '-'}</div>
+                            <div class="watchlist-change ${changeClass}">${data.changePct != null ? `${changeSign}${data.changePct.toFixed(2)}%` : '-'}</div>
                         </div>
                     </div>
                 `;
