@@ -3554,9 +3554,15 @@
         function updateComposite(comp) {
             if (!comp) return;
 
-            // Gauge – show BUY / SELL / HOLD action prominently
+            // Gauge – color based on ACTION (BUY=green, SELL=red) not underlying direction
+            // This way buying a put still shows green because the action is BUY
+            const actionClass = {
+                'STRONG BUY': 'strong_buy', 'BUY': 'buy',
+                'HOLD': 'neutral',
+                'SELL': 'sell', 'STRONG SELL': 'strong_sell',
+            }[comp.action] || 'neutral';
             const gauge = document.getElementById('composite-gauge');
-            gauge.className = 'composite-signal-gauge ' + comp.signal;
+            gauge.className = 'composite-signal-gauge ' + actionClass;
             document.getElementById('comp-action').textContent = comp.action;
             document.getElementById('comp-signal-sub').textContent = comp.signal.replace(/_/g, ' ');
             document.getElementById('comp-score').textContent = (comp.score >= 0 ? '+' : '') + comp.score.toFixed(3);
