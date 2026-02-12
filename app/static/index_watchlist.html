@@ -1282,115 +1282,291 @@
             display: block;
         }
 
+        /* ===== MOBILE BOTTOM NAV ===== */
+        .mobile-bottom-nav {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 56px;
+            background: #1e222d;
+            border-top: 1px solid #2a2e39;
+            z-index: 1100;
+            justify-content: space-around;
+            align-items: center;
+            padding: 0 4px;
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
+
+        .mobile-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 6px 12px;
+            background: none;
+            border: none;
+            color: #787b86;
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.15s;
+            min-width: 56px;
+            position: relative;
+        }
+
+        .mobile-nav-item .nav-icon {
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .mobile-nav-item.active {
+            color: #2962ff;
+        }
+
+        .mobile-nav-item .nav-badge {
+            position: absolute;
+            top: 2px;
+            right: 6px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: none;
+        }
+
+        .mobile-nav-item .nav-badge.visible {
+            display: block;
+        }
+
+        /* ===== MOBILE ACTION BANNER ===== */
+        .mobile-action-banner {
+            display: none;
+            position: fixed;
+            bottom: 56px;
+            left: 0;
+            right: 0;
+            padding: 8px 16px;
+            z-index: 1099;
+            cursor: pointer;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            transform: translateY(100%);
+            opacity: 0;
+            border-top: 2px solid;
+        }
+
+        .mobile-action-banner.visible {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .mobile-action-banner.buy {
+            background: linear-gradient(135deg, rgba(38,166,154,0.15), rgba(38,166,154,0.05));
+            border-top-color: #26a69a;
+        }
+
+        .mobile-action-banner.sell {
+            background: linear-gradient(135deg, rgba(239,83,80,0.15), rgba(239,83,80,0.05));
+            border-top-color: #ef5350;
+        }
+
+        .mobile-action-banner.hold {
+            background: linear-gradient(135deg, rgba(120,123,134,0.1), rgba(120,123,134,0.05));
+            border-top-color: #787b86;
+        }
+
+        .mobile-action-banner-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .mobile-action-label {
+            font-size: 18px;
+            font-weight: 900;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .mobile-action-banner.buy .mobile-action-label { color: #26a69a; }
+        .mobile-action-banner.sell .mobile-action-label { color: #ef5350; }
+        .mobile-action-banner.hold .mobile-action-label { color: #787b86; }
+
+        .mobile-action-meta {
+            text-align: right;
+            font-size: 11px;
+            color: #787b86;
+        }
+
+        .mobile-action-meta strong {
+            color: #d1d4dc;
+        }
+
         /* ===== MOBILE RESPONSIVE (≤768px) ===== */
         @media (max-width: 768px) {
-            /* Allow scrolling on mobile */
             html, body {
-                overflow: auto;
+                overflow: hidden;
+                height: 100%;
+                height: -webkit-fill-available;
+            }
+
+            .app-container {
+                height: 100%;
+                height: -webkit-fill-available;
             }
 
             .main-panel {
-                overflow: visible;
+                overflow: hidden;
+                padding-bottom: 56px; /* space for bottom nav */
             }
 
-            /* Show mobile toggle buttons */
+            /* Show bottom nav + action banner */
+            .mobile-bottom-nav {
+                display: flex;
+            }
+
+            .mobile-action-banner {
+                display: block;
+            }
+
+            /* Hide old floating toggle buttons */
             .mobile-menu-toggle,
             .mobile-analysis-toggle {
-                display: flex;
-                align-items: center;
-                gap: 8px;
+                display: none !important;
             }
 
-            /* Watchlist Sidebar - Hidden by default, overlay when open */
+            /* Hide old signal-peek (replaced by action banner) */
+            .signal-peek {
+                display: none !important;
+            }
+
+            /* ---- Watchlist sidebar overlay ---- */
             .watchlist-sidebar {
                 position: fixed;
                 top: 0;
                 left: 0;
                 bottom: 0;
-                width: 280px;
+                width: 300px;
                 max-width: 85vw;
                 transform: translateX(-100%);
-                transition: transform 0.3s ease-in-out;
-                z-index: 1000;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                z-index: 1002;
             }
 
             .watchlist-sidebar.mobile-open {
                 transform: translateX(0);
             }
 
-            /* Show close button in watchlist header on mobile */
             .watchlist-sidebar .mobile-close-btn {
                 display: block;
             }
 
-            /* Analysis Sidebar - Hidden by default, overlay when open */
+            /* ---- Analysis sidebar: bottom sheet ---- */
             .analysis-sidebar {
                 position: fixed;
-                top: 0;
+                top: 10vh;
+                left: 0;
                 right: 0;
                 bottom: 0;
-                width: 90vw;
-                max-width: 400px;
-                transform: translateX(100%);
-                transition: transform 0.3s ease-in-out;
-                z-index: 1000;
+                width: 100%;
+                max-width: 100%;
+                border-radius: 16px 16px 0 0;
+                transform: translateY(100%);
+                transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+                z-index: 1002;
+                border-left: none;
+                border-top: 1px solid #2a2e39;
             }
 
             .analysis-sidebar.mobile-open {
-                transform: translateX(0);
+                transform: translateY(0);
             }
 
-            /* Header - Stack vertically */
+            .analysis-sidebar .mobile-close-btn {
+                display: block;
+            }
+
+            /* Bottom sheet drag handle */
+            .analysis-sidebar::before {
+                content: '';
+                display: block;
+                width: 36px;
+                height: 4px;
+                background: #4a4e59;
+                border-radius: 2px;
+                margin: 8px auto 4px;
+            }
+
+            /* ---- Compact header ---- */
             .header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 12px;
-                padding: 60px 16px 12px 16px; /* Extra top padding for mobile menu button */
+                flex-direction: row;
+                align-items: center;
+                gap: 10px;
+                padding: 8px 12px;
+                min-height: 48px;
             }
 
-            .header-logo h1 {
-                font-size: 16px;
+            .header-logo {
+                display: none;
             }
 
             .header-contract {
-                width: 100%;
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 8px;
+                flex: 1;
+                flex-direction: row;
+                align-items: center;
+                gap: 10px;
+                padding: 4px 0;
+                background: transparent;
+                border-radius: 0;
             }
 
             .contract-symbol {
-                font-size: 14px;
+                font-size: 16px;
+                font-weight: 800;
             }
 
             .contract-details {
-                font-size: 11px;
+                display: none;
             }
 
             .contract-price {
                 font-size: 16px;
             }
 
-            .logout-btn {
-                position: absolute;
-                top: 12px;
-                right: 12px;
-                margin-left: 0;
-                font-size: 11px;
-                padding: 8px 12px;
-                z-index: 100;
-            }
-
             .contract-change {
                 font-size: 12px;
             }
 
-            /* Controls Bar - Responsive layout */
+            .logout-btn {
+                position: static;
+                margin-left: auto;
+                font-size: 11px;
+                padding: 6px 8px;
+                z-index: auto;
+            }
+
+            /* ---- Controls Summary ---- */
+            .controls-summary {
+                display: none;
+                padding: 6px 12px;
+                height: 36px;
+            }
+
+            .controls-summary.active {
+                display: flex;
+            }
+
+            /* ---- Controls Bar: 2-column grid ---- */
             .controls-bar {
-                flex-direction: column;
-                align-items: stretch;
+                padding: 10px 12px;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
                 gap: 8px;
-                padding: 12px;
+            }
+
+            .controls-bar.collapsed {
+                display: none;
             }
 
             .control-group {
@@ -1402,76 +1578,95 @@
                 flex: 1;
                 width: 100%;
                 min-width: 0;
-                padding: 10px 12px; /* Larger for touch */
+                padding: 10px 8px;
+                font-size: 13px;
             }
 
             .control-group label {
-                min-width: 50px;
+                min-width: 36px;
+                font-size: 10px;
             }
 
-            /* Interval buttons - Make touch-friendly */
             .interval-buttons {
+                grid-column: 1 / -1;
                 width: 100%;
                 justify-content: space-between;
             }
 
             .interval-btn {
                 flex: 1;
-                padding: 12px 8px; /* Larger for touch */
-                min-height: 44px; /* Touch-friendly */
+                padding: 10px 6px;
+                min-height: 40px;
+                font-size: 13px;
             }
 
             .analyze-btn {
-                width: 100%;
-                padding: 14px 20px; /* Larger for touch */
-                min-height: 44px; /* Touch-friendly */
-                font-size: 14px;
-            }
-            
-            .live-btn {
+                grid-column: 1 / -1;
                 width: 100%;
                 padding: 12px 20px;
                 min-height: 44px;
-                font-size: 13px;
-            }
-            
-            /* Controls Summary - Hidden by default, shown after first analyze */
-            .controls-summary {
-                display: none;
-            }
-            
-            .controls-summary.active {
-                display: flex;
-            }
-            
-            /* Signal Peek - Show on mobile only */
-            .signal-peek {
-                display: block;
-            }
-            
-            /* Adjust mobile-analysis-toggle to not overlap peek */
-            .mobile-analysis-toggle {
-                bottom: 80px;
+                font-size: 14px;
             }
 
-            /* Chart Area - Allow scrolling */
+            .live-btn {
+                grid-column: 1 / -1;
+                width: 100%;
+                padding: 10px 16px;
+                min-height: 40px;
+                font-size: 13px;
+            }
+
+            /* ---- Filter bar: horizontal scroll ---- */
+            .filter-bar {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                padding: 6px 12px;
+                gap: 8px;
+                scrollbar-width: none;
+            }
+
+            .filter-bar::-webkit-scrollbar {
+                display: none;
+            }
+
+            .filter-bar .filter-label {
+                display: none;
+            }
+
+            .toggle-group {
+                flex-shrink: 0;
+            }
+
+            /* ---- Chart: fill available space ---- */
             .chart-area {
+                flex: 1;
                 flex-direction: column;
-                overflow: visible;
-                min-height: 500px;
+                overflow: hidden;
+                min-height: 0;
             }
 
             .charts-container {
-                min-height: 400px;
+                flex: 1;
+                min-height: 0;
             }
 
-            /* Watchlist search - Larger for mobile */
+            #price-chart {
+                flex: 3;
+                min-height: 0;
+            }
+
+            #volume-chart {
+                flex: 1;
+                min-height: 0;
+            }
+
+            /* ---- Watchlist mobile styling ---- */
             .watchlist-search input {
                 padding: 12px 14px;
                 font-size: 14px;
             }
 
-            /* Watchlist items - Larger tap targets */
             .watchlist-item {
                 padding: 14px 16px;
             }
@@ -1480,14 +1675,79 @@
                 font-size: 15px;
             }
 
-            .watchlist-name {
+            /* ---- Analysis sidebar content mobile ---- */
+            .sidebar-content {
+                padding: 12px;
+            }
+
+            .composite-card {
+                padding: 12px;
+                margin-bottom: 10px;
+            }
+
+            .composite-action-label {
+                font-size: 24px;
+            }
+
+            .greeks-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 4px;
+            }
+
+            .greek-item {
+                padding: 8px 4px;
+            }
+
+            .greek-value {
+                font-size: 14px;
+            }
+
+            .greek-label {
+                font-size: 9px;
+            }
+
+            .chain-grid {
+                gap: 4px;
+            }
+
+            .chain-item {
+                padding: 6px 4px;
+            }
+
+            .chain-value {
                 font-size: 12px;
+            }
+
+            .chain-label {
+                font-size: 8px;
+            }
+
+            .recommendation-box {
+                font-size: 12px;
+                padding: 10px;
+            }
+
+            /* Stats grid mobile */
+            .stats-grid {
+                grid-template-columns: repeat(4, 1fr);
+                gap: 4px;
+            }
+
+            .stat-item {
+                padding: 8px 4px;
+            }
+
+            .stat-value {
+                font-size: 16px;
+            }
+
+            .stat-label {
+                font-size: 9px;
             }
         }
 
         /* ===== LANDSCAPE MOBILE RESPONSIVE (≤1024px width AND ≤500px height) ===== */
         @media (max-width: 1024px) and (max-height: 500px) {
-            /* Allow scrolling on mobile */
             html, body {
                 overflow: auto;
             }
@@ -1496,7 +1756,6 @@
                 overflow: visible;
             }
 
-            /* Show mobile toggle buttons */
             .mobile-menu-toggle,
             .mobile-analysis-toggle {
                 display: flex;
@@ -1504,7 +1763,10 @@
                 gap: 8px;
             }
 
-            /* Watchlist as overlay */
+            .mobile-bottom-nav {
+                display: none;
+            }
+
             .watchlist-sidebar {
                 position: fixed;
                 left: -250px;
@@ -1519,7 +1781,6 @@
                 left: 0;
             }
 
-            /* Analysis sidebar as overlay */
             .analysis-sidebar {
                 position: fixed;
                 right: -280px;
@@ -1535,18 +1796,15 @@
                 right: 0;
             }
 
-            /* Show mobile close buttons */
             .mobile-close-btn {
                 display: block;
             }
 
-            /* Main panel takes full width */
             .main-panel {
                 flex: 1;
                 width: 100%;
             }
 
-            /* Header adjustments for mobile buttons */
             .header {
                 padding-top: 60px;
             }
@@ -1561,26 +1819,22 @@
                 z-index: 100;
             }
 
-            /* Controls Summary - Hidden by default, shown after first analyze */
             .controls-summary {
                 display: none;
             }
-            
+
             .controls-summary.active {
                 display: flex;
             }
-            
-            /* Signal Peek - Show on mobile only */
+
             .signal-peek {
                 display: block;
             }
-            
-            /* Adjust mobile-analysis-toggle to not overlap peek */
+
             .mobile-analysis-toggle {
                 bottom: 80px;
             }
 
-            /* Chart Area - Allow scrolling */
             .chart-area {
                 flex-direction: column;
                 overflow: visible;
@@ -1898,6 +2152,38 @@
             </div>
         </div>
     </div>
+
+    <!-- Mobile Action Banner (above bottom nav) -->
+    <div class="mobile-action-banner" id="mobile-action-banner">
+        <div class="mobile-action-banner-content">
+            <span class="mobile-action-label" id="mob-action-label">-</span>
+            <div class="mobile-action-meta">
+                <div>Score: <strong id="mob-action-score">-</strong></div>
+                <div id="mob-action-signal">-</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+        <button class="mobile-nav-item" id="nav-watchlist" aria-label="Watchlist">
+            <span class="nav-icon">☰</span>
+            <span>Watchlist</span>
+        </button>
+        <button class="mobile-nav-item active" id="nav-chart" aria-label="Chart">
+            <span class="nav-icon">📈</span>
+            <span>Chart</span>
+        </button>
+        <button class="mobile-nav-item" id="nav-settings" aria-label="Settings">
+            <span class="nav-icon">⚙</span>
+            <span>Settings</span>
+        </button>
+        <button class="mobile-nav-item" id="nav-analysis" aria-label="Analysis">
+            <span class="nav-icon">📊</span>
+            <span>Analysis</span>
+            <span class="nav-badge" id="nav-analysis-badge"></span>
+        </button>
+    </nav>
     
     <script>
         // ===== STATE =====
@@ -2038,6 +2324,8 @@
             if (isMobile()) {
                 document.getElementById('watchlist-sidebar').classList.add('mobile-open');
                 document.getElementById('backdrop').classList.add('active');
+                document.getElementById('mobile-action-banner').classList.remove('visible');
+                setActiveNav('nav-watchlist');
             }
         }
 
@@ -2045,6 +2333,41 @@
             if (isMobile()) {
                 document.getElementById('watchlist-sidebar').classList.remove('mobile-open');
                 document.getElementById('backdrop').classList.remove('active');
+                if (lastCompositeResult) {
+                    document.getElementById('mobile-action-banner').classList.add('visible');
+                }
+                setActiveNav('nav-chart');
+            }
+        }
+
+        // ===== MOBILE NAV HELPERS =====
+        function setActiveNav(id) {
+            document.querySelectorAll('.mobile-nav-item').forEach(btn => btn.classList.remove('active'));
+            const el = document.getElementById(id);
+            if (el) el.classList.add('active');
+        }
+
+        function updateMobileActionBanner(comp) {
+            if (!comp || !comp.action) return;
+            const banner = document.getElementById('mobile-action-banner');
+            const action = comp.action.toUpperCase();
+            let cls = 'hold';
+            if (action.includes('BUY')) cls = 'buy';
+            else if (action.includes('SELL')) cls = 'sell';
+            banner.className = `mobile-action-banner ${cls}`;
+            document.getElementById('mob-action-label').textContent = action;
+            const pct = Math.round(comp.confidence * 100);
+            document.getElementById('mob-action-score').textContent = `${comp.score > 0 ? '+' : ''}${comp.score.toFixed(3)} (${pct}%)`;
+            document.getElementById('mob-action-signal').textContent = comp.signal.replace(/_/g, ' ');
+            // Show banner if analysis panel is not open
+            if (!document.getElementById('analysis-sidebar').classList.contains('mobile-open')) {
+                banner.classList.add('visible');
+            }
+            // Light up nav badge
+            const badge = document.getElementById('nav-analysis-badge');
+            if (badge) {
+                badge.style.background = cls === 'buy' ? '#26a69a' : cls === 'sell' ? '#ef5350' : '#787b86';
+                badge.classList.add('visible');
             }
         }
 
@@ -2063,8 +2386,11 @@
             if (isMobile()) {
                 document.getElementById('analysis-sidebar').classList.add('mobile-open');
                 document.getElementById('backdrop').classList.add('active');
-                // Hide signal peek when analysis is open
+                // Hide signal peek and action banner when analysis is open
                 document.getElementById('signal-peek').classList.remove('visible');
+                document.getElementById('mobile-action-banner').classList.remove('visible');
+                // Update nav highlight
+                setActiveNav('nav-analysis');
             }
         }
 
@@ -2076,6 +2402,11 @@
                 if (latestSignalData) {
                     document.getElementById('signal-peek').classList.add('visible');
                 }
+                // Show action banner if we have composite data
+                if (lastCompositeResult) {
+                    document.getElementById('mobile-action-banner').classList.add('visible');
+                }
+                setActiveNav('nav-chart');
             }
         }
 
@@ -2141,6 +2472,7 @@
             if (isMobile()) {
                 document.getElementById('controls-bar').classList.add('collapsed');
                 document.getElementById('controls-summary').classList.add('active');
+                document.getElementById('filter-bar').style.display = 'none';
                 document.getElementById('controls-chevron').textContent = '▲';
                 controlsCollapsed = true;
             }
@@ -2149,6 +2481,7 @@
         function expandControls() {
             if (isMobile()) {
                 document.getElementById('controls-bar').classList.remove('collapsed');
+                document.getElementById('filter-bar').style.display = '';
                 document.getElementById('controls-chevron').textContent = '▼';
                 controlsCollapsed = false;
             }
@@ -2606,6 +2939,11 @@
                 if (isMobile() && !hasAnalyzed) {
                     hasAnalyzed = true;
                 }
+                // Auto-collapse controls on mobile after analyze
+                if (isMobile()) {
+                    collapseControls();
+                    setActiveNav('nav-chart');
+                }
                 
             } catch (e) {
                 document.getElementById('signals-container').innerHTML = `<div class="error-message">${e.message}</div>`;
@@ -2860,6 +3198,11 @@
 
             // Add BUY/SELL/HOLD marker on the last bar of the chart
             addCompositeMarker(comp);
+
+            // Update mobile action banner
+            if (isMobile()) {
+                updateMobileActionBanner(comp);
+            }
         }
 
         // Store the composite result globally so markers can be combined with VPA signals
@@ -2981,7 +3324,7 @@
         document.getElementById('watchlist-search').addEventListener('input', renderWatchlist);
 
         // ===== MOBILE EVENT LISTENERS =====
-        // Mobile toggle buttons
+        // Mobile toggle buttons (old, kept for landscape)
         document.getElementById('mobile-menu-toggle').addEventListener('click', toggleWatchlist);
         document.getElementById('mobile-analysis-toggle').addEventListener('click', toggleAnalysis);
 
@@ -2994,6 +3337,46 @@
 
         // Window resize handler
         window.addEventListener('resize', handleResize);
+
+        // ===== MOBILE BOTTOM NAV =====
+        document.getElementById('nav-watchlist').addEventListener('click', () => {
+            const sidebar = document.getElementById('watchlist-sidebar');
+            if (sidebar.classList.contains('mobile-open')) {
+                closeWatchlist();
+            } else {
+                closeAnalysis();
+                openWatchlist();
+            }
+        });
+
+        document.getElementById('nav-chart').addEventListener('click', () => {
+            closeAllMobilePanels();
+            setActiveNav('nav-chart');
+            // Collapse controls to maximize chart view
+            collapseControls();
+        });
+
+        document.getElementById('nav-settings').addEventListener('click', () => {
+            closeAllMobilePanels();
+            setActiveNav('nav-settings');
+            // Expand controls for editing
+            expandControls();
+        });
+
+        document.getElementById('nav-analysis').addEventListener('click', () => {
+            const sidebar = document.getElementById('analysis-sidebar');
+            if (sidebar.classList.contains('mobile-open')) {
+                closeAnalysis();
+            } else {
+                closeWatchlist();
+                openAnalysis();
+            }
+        });
+
+        // Mobile action banner tap opens analysis
+        document.getElementById('mobile-action-banner').addEventListener('click', () => {
+            openAnalysis();
+        });
         
         // ===== INITIALIZATION =====
         async function init() {
