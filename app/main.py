@@ -399,7 +399,9 @@ async def analyze_option(
                     contract_type=right.upper(),
                 )
                 # Map composite signal → actionable BUY / SELL / HOLD
-                _signal_to_action = {
+                # For calls: bullish underlying = BUY (the call)
+                # For puts:  bearish underlying = BUY (the put), so invert
+                _call_action = {
                     "strong_buy": "STRONG BUY",
                     "buy": "BUY",
                     "lean_bullish": "BUY",
@@ -408,9 +410,19 @@ async def analyze_option(
                     "sell": "SELL",
                     "strong_sell": "STRONG SELL",
                 }
+                _put_action = {
+                    "strong_buy": "STRONG SELL",
+                    "buy": "SELL",
+                    "lean_bullish": "SELL",
+                    "neutral": "HOLD",
+                    "lean_bearish": "BUY",
+                    "sell": "BUY",
+                    "strong_sell": "STRONG BUY",
+                }
+                _action_map = _put_action if right.upper() == "PUT" else _call_action
                 composite_response = CompositeSignalResponse(
                     signal=comp_result.signal.value,
-                    action=_signal_to_action.get(comp_result.signal.value, "HOLD"),
+                    action=_action_map.get(comp_result.signal.value, "HOLD"),
                     score=comp_result.score,
                     confidence=comp_result.confidence,
                     trade_archetype=comp_result.trade_archetype.value,
