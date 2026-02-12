@@ -5,10 +5,13 @@ Docs: https://polygon.io/docs/options
 """
 from datetime import datetime, date
 from typing import Optional
+from zoneinfo import ZoneInfo
 import asyncio
 import httpx
 import pandas as pd
 from cachetools import TTLCache
+
+_ET = ZoneInfo("America/New_York")
 
 from app.config import settings
 
@@ -139,7 +142,9 @@ class PolygonClient:
 
             records = []
             for bar in bars:
-                dt = datetime.fromtimestamp(bar["t"] / 1000)
+                # Convert UTC millis → Eastern Time (naive) for chart display
+                dt_utc = datetime.fromtimestamp(bar["t"] / 1000, tz=ZoneInfo("UTC"))
+                dt = dt_utc.astimezone(_ET).replace(tzinfo=None)
                 records.append(
                     {
                         "datetime": dt,
@@ -201,7 +206,9 @@ class PolygonClient:
 
             records = []
             for bar in bars:
-                dt = datetime.fromtimestamp(bar["t"] / 1000)
+                # Convert UTC millis → Eastern Time (naive) for chart display
+                dt_utc = datetime.fromtimestamp(bar["t"] / 1000, tz=ZoneInfo("UTC"))
+                dt = dt_utc.astimezone(_ET).replace(tzinfo=None)
                 records.append(
                     {
                         "datetime": dt,

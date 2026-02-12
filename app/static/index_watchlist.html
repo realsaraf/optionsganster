@@ -2487,19 +2487,19 @@
         let underlayBarsData = [];   // raw underlying bars from API
 
         // ===== TIMEZONE HELPER =====
-        // Convert a UTC datetime string to a Unix timestamp in US/Eastern
-        // lightweight-charts treats timestamps as UTC, so we shift by the ET offset
+        // Backend sends datetimes already in US/Eastern.
+        // We parse them as-is into a Unix timestamp so the chart axis shows ET.
+        // Append 'Z' to force UTC parse, so the numeric value IS the Eastern wall-clock.
         function toEasternUnix(datetimeStr) {
-            const d = new Date(datetimeStr);
-            // Format in America/New_York to get the ET offset
-            const eastern = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-            // Difference = how far ET is from UTC (in seconds)
-            // We return eastern time as if it were UTC so the chart axis shows ET
-            return Math.floor(eastern.getTime() / 1000);
+            // "2026-02-06 09:30:00" → treat digits as Eastern wall-clock
+            const iso = datetimeStr.replace(' ', 'T') + 'Z';   // force UTC parse
+            return Math.floor(new Date(iso).getTime() / 1000);
         }
 
         function toEasternString(datetimeStr) {
-            return new Date(datetimeStr).toLocaleString('en-US', { timeZone: 'America/New_York' });
+            // Already in Eastern – just reformat
+            const d = new Date(datetimeStr.replace(' ', 'T') + 'Z');
+            return d.toISOString().replace('T', ' ').replace('Z', '');
         }
 
         // ===== SIGNAL FILTER HELPERS =====
