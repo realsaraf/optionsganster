@@ -574,6 +574,22 @@ async def analyze_option(
 
         # Fetch OHLCV data (async + cached) — options + underlying in parallel
         import asyncio as _aio
+
+        async def _safe_stock_fetch():
+            try:
+                return await poly.get_stock_ohlcv(
+                    symbol=symbol.upper(),
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    interval_min=interval,
+                )
+            except Exception as exc:
+                print(f"[ANALYZE] Stock fetch failed: {exc}")
+                import pandas as _pd
+                return _pd.DataFrame(
+                    columns=["datetime", "open", "high", "low", "close", "volume"]
+                )
+
         df, stock_df = await _aio.gather(
             poly.get_option_ohlcv(
                 symbol=symbol.upper(),
@@ -584,12 +600,7 @@ async def analyze_option(
                 end_date=end_dt,
                 interval_min=interval,
             ),
-            poly.get_stock_ohlcv(
-                symbol=symbol.upper(),
-                start_date=start_dt,
-                end_date=end_dt,
-                interval_min=interval,
-            ),
+            _safe_stock_fetch(),
         )
 
         if df.empty:

@@ -187,13 +187,17 @@ class PolygonClient:
         params = {"limit": 50000, "sort": "asc"}
 
         try:
+            print(f"[STOCK] Fetching {url}")
             data = await self._get_json(url, params)
             bars = data.get("results", [])
+            print(f"[STOCK] Got {len(bars)} bars for {symbol}")
 
             if not bars:
-                return pd.DataFrame(
+                empty_df = pd.DataFrame(
                     columns=["datetime", "open", "high", "low", "close", "volume"]
                 )
+                self._stock_ohlcv_cache[cache_key] = empty_df
+                return empty_df
 
             records = []
             for bar in bars:
@@ -213,9 +217,11 @@ class PolygonClient:
             self._stock_ohlcv_cache[cache_key] = df
             return df
 
-        except httpx.HTTPStatusError as e:
-            code = e.response.status_code
-            raise Exception(f"Polygon stock OHLCV error ({code}): {e.response.text}")
+        except Exception as e:
+            print(f"[STOCK] Error fetching {symbol}: {e}")
+            return pd.DataFrame(
+                columns=["datetime", "open", "high", "low", "close", "volume"]
+            )
 
     def clear_stock_ohlcv_cache(self, **kwargs):
         """Clear the stock OHLCV cache (for live mode)."""

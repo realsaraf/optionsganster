@@ -282,6 +282,11 @@
         }
         
         /* ===== CONTROLS BAR ===== */
+        /* Hide old dropdowns replaced by toggle buttons */
+        #type-group, #from-group, #to-group {
+            display: none;
+        }
+
         .controls-bar {
             background: #1e222d;
             padding: 8px 16px;
@@ -1142,17 +1147,17 @@
             margin-right: 2px;
         }
 
-        /* ── Underlay toggle ── */
+        /* ── Stock Underlay Toggle (compact, inline in filter bar) ── */
         .underlay-toggle {
             display: flex;
             align-items: center;
             gap: 6px;
-            margin-left: auto;
-            padding-left: 12px;
-            border-left: 1px solid #2a2e39;
+            padding-right: 10px;
+            border-right: 1px solid #2a2e39;
+            margin-right: 2px;
         }
         .underlay-toggle .underlay-label {
-            font-size: 11px;
+            font-size: 10px;
             color: #787b86;
             text-transform: uppercase;
             font-weight: 600;
@@ -1161,27 +1166,29 @@
         }
         .underlay-btn-group {
             display: flex;
-            gap: 2px;
+            gap: 1px;
+            background: #131722;
+            padding: 2px;
+            border-radius: 4px;
         }
         .underlay-btn {
             background: transparent;
-            border: 1px solid #2a2e39;
-            color: #5d606b;
+            border: none;
+            color: #787b86;
             font-size: 10px;
-            padding: 2px 8px;
+            padding: 3px 10px;
             border-radius: 3px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.15s;
             font-weight: 600;
+            line-height: 1;
         }
         .underlay-btn:hover {
-            color: #9ca3af;
-            border-color: #3a3e49;
+            color: #d1d4dc;
         }
         .underlay-btn.active {
-            background: rgba(255,255,255,0.06);
-            color: #d1d4dc;
-            border-color: #4a4e59;
+            background: #2962ff;
+            color: #fff;
         }
 
         .toggle-group {
@@ -1400,9 +1407,37 @@
             display: block;
         }
 
-        /* ===== MOBILE DATE RANGE BUTTONS ===== */
+        /* ===== DATE RANGE BUTTONS ===== */
         .mobile-date-range {
-            display: none; /* shown on mobile only */
+            display: none; /* shown on mobile via controls-bar grid */
+        }
+
+        /* Desktop date range (always visible) */
+        .desktop-date-range {
+            display: flex;
+            gap: 2px;
+            background: #131722;
+            padding: 2px;
+            border-radius: 4px;
+        }
+        .desktop-date-range .date-range-btn {
+            flex: none;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            background: transparent;
+            color: #787b86;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .desktop-date-range .date-range-btn:hover {
+            color: #d1d4dc;
+        }
+        .desktop-date-range .date-range-btn.active {
+            background: #2962ff;
+            color: white;
         }
 
         .date-range-group {
@@ -1435,9 +1470,41 @@
             background: #363a45;
         }
 
-        /* ===== MOBILE CALL/PUT SWITCH ===== */
+        /* ===== CALL/PUT SWITCH ===== */
         .mobile-cp-switch {
-            display: none; /* shown on mobile only */
+            display: none; /* shown on mobile via controls-bar grid */
+        }
+
+        /* Desktop Call/Put Toggle (always visible) */
+        .desktop-cp-toggle {
+            display: flex;
+            background: #131722;
+            border-radius: 4px;
+            overflow: hidden;
+            padding: 2px;
+            gap: 2px;
+        }
+        .desktop-cp-toggle .cp-opt {
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            border-radius: 3px;
+            background: transparent;
+            color: #787b86;
+            transition: all 0.15s;
+        }
+        .desktop-cp-toggle .cp-opt:hover {
+            color: #d1d4dc;
+        }
+        .desktop-cp-toggle .cp-opt.call-active {
+            background: #26a69a;
+            color: #fff;
+        }
+        .desktop-cp-toggle .cp-opt.put-active {
+            background: #ef5350;
+            color: #fff;
         }
 
         .cp-toggle {
@@ -1706,8 +1773,9 @@
                 display: none;
             }
 
-            /* Hide desktop From/To/Type on mobile */
-            #from-group, #to-group, #type-group {
+            /* Hide desktop From/To/Type/desktop toggles on mobile */
+            #from-group, #to-group, #type-group,
+            .desktop-cp-toggle, .desktop-date-range {
                 display: none !important;
             }
 
@@ -1788,6 +1856,14 @@
             }
 
             .toggle-group {
+                flex-shrink: 0;
+            }
+
+            /* ---- Stock toggle: hide with collapsed controls on mobile ---- */
+            .underlay-toggle {
+                border-right: none;
+                padding-right: 0;
+                margin-right: 0;
                 flex-shrink: 0;
             }
 
@@ -2077,6 +2153,12 @@
                     </select>
                 </div>
 
+                <!-- Desktop Call/Put Toggle (shown on desktop) -->
+                <div class="desktop-cp-toggle" id="desktop-cp-toggle">
+                    <button class="cp-opt call-active" id="dcp-call" data-value="C">CALL</button>
+                    <button class="cp-opt" id="dcp-put" data-value="P">PUT</button>
+                </div>
+
                 <!-- Mobile Call/Put Switch (replaces dropdown on mobile) -->
                 <div class="mobile-cp-switch" id="mobile-cp-switch">
                     <div class="cp-toggle">
@@ -2093,6 +2175,15 @@
                 <div class="control-group" id="to-group">
                     <label>To</label>
                     <input type="date" id="end-date" style="width: 130px;">
+                </div>
+
+                <!-- Desktop Date Range Buttons -->
+                <div class="desktop-date-range" id="desktop-date-range">
+                    <button class="date-range-btn active" data-range="5">5D</button>
+                    <button class="date-range-btn" data-range="7">1W</button>
+                    <button class="date-range-btn" data-range="14">2W</button>
+                    <button class="date-range-btn" data-range="30">1M</button>
+                    <button class="date-range-btn" data-range="90">3M</button>
                 </div>
 
                 <!-- Mobile Date Range Buttons (replaces From/To on mobile) -->
@@ -2119,6 +2210,15 @@
             </div>
 
             <div class="filter-bar" id="filter-bar">
+                <div class="underlay-toggle">
+                    <span class="underlay-label" id="underlay-label">Stock:</span>
+                    <div class="underlay-btn-group">
+                        <button class="underlay-btn" data-underlay="off" id="underlay-off">OFF</button>
+                        <button class="underlay-btn active" data-underlay="line" id="underlay-line">LINE</button>
+                        <button class="underlay-btn" data-underlay="candle" id="underlay-candle">CANDLE</button>
+                    </div>
+                </div>
+
                 <span class="filter-label">Signals:</span>
 
                 <div class="toggle-group bullish-color">
@@ -2184,15 +2284,6 @@
                 <div class="toggle-group neutral-color">
                     <label class="toggle-switch"><input type="checkbox" id="filter-neutral"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-neutral">Neutral</span>
-                </div>
-
-                <div class="underlay-toggle">
-                    <span class="underlay-label" id="underlay-label">Stock:</span>
-                    <div class="underlay-btn-group">
-                        <button class="underlay-btn" data-underlay="off" id="underlay-off">OFF</button>
-                        <button class="underlay-btn active" data-underlay="line" id="underlay-line">LINE</button>
-                        <button class="underlay-btn" data-underlay="candle" id="underlay-candle">CANDLE</button>
-                    </div>
                 </div>
             </div>
             
@@ -3570,9 +3661,12 @@
         // ===== MOBILE DATE RANGE BUTTONS =====
         document.querySelectorAll('.date-range-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                // Sync all date-range-btn across mobile and desktop
                 document.querySelectorAll('.date-range-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                const days = parseInt(btn.dataset.range);
+                // Activate all buttons with the same range value
+                const rangeVal = btn.dataset.range;
+                document.querySelectorAll(`.date-range-btn[data-range="${rangeVal}"]`).forEach(b => b.classList.add('active'));
+                const days = parseInt(rangeVal);
                 const today = new Date();
                 const from = new Date(today);
                 from.setDate(today.getDate() - days);
@@ -3581,29 +3675,30 @@
             });
         });
 
-        // ===== MOBILE CALL/PUT SWITCH =====
-        document.getElementById('cp-call').addEventListener('click', () => {
-            document.getElementById('right').value = 'C';
-            document.getElementById('cp-call').className = 'cp-toggle-option call-active';
-            document.getElementById('cp-put').className = 'cp-toggle-option';
-            stopLiveMode();
-        });
-        document.getElementById('cp-put').addEventListener('click', () => {
-            document.getElementById('right').value = 'P';
-            document.getElementById('cp-put').className = 'cp-toggle-option put-active';
-            document.getElementById('cp-call').className = 'cp-toggle-option';
-            stopLiveMode();
-        });
-        // Sync desktop dropdown to mobile switch
-        document.getElementById('right').addEventListener('change', (e) => {
-            if (e.target.value === 'C') {
+        // ===== CALL/PUT SWITCH (syncs desktop + mobile + hidden select) =====
+        function syncCallPut(value) {
+            document.getElementById('right').value = value;
+            if (value === 'C') {
                 document.getElementById('cp-call').className = 'cp-toggle-option call-active';
                 document.getElementById('cp-put').className = 'cp-toggle-option';
+                document.getElementById('dcp-call').className = 'cp-opt call-active';
+                document.getElementById('dcp-put').className = 'cp-opt';
             } else {
                 document.getElementById('cp-put').className = 'cp-toggle-option put-active';
                 document.getElementById('cp-call').className = 'cp-toggle-option';
+                document.getElementById('dcp-put').className = 'cp-opt put-active';
+                document.getElementById('dcp-call').className = 'cp-opt';
             }
-        });
+            stopLiveMode();
+        }
+        // Mobile
+        document.getElementById('cp-call').addEventListener('click', () => syncCallPut('C'));
+        document.getElementById('cp-put').addEventListener('click', () => syncCallPut('P'));
+        // Desktop
+        document.getElementById('dcp-call').addEventListener('click', () => syncCallPut('C'));
+        document.getElementById('dcp-put').addEventListener('click', () => syncCallPut('P'));
+        // Hidden select change (fallback)
+        document.getElementById('right').addEventListener('change', (e) => syncCallPut(e.target.value));
 
         // ===== SUMMARY LIVE BUTTON =====
         document.getElementById('summary-live-btn').addEventListener('click', toggleLiveMode);
