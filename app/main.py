@@ -11,7 +11,7 @@ Changes from v1:
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Optional
-import hashlib, secrets
+import hashlib, math, random, secrets, time
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Cookie
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -20,16 +20,131 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import httpx
+import pandas as pd
 
 from app.config import settings
 from app.polygon_client import PolygonClient, polygon_client
-from app.vpa_engine import VPAEngine, VPASignal, vpa_engine
+from app.vpa_engine import VPAEngine, VPASignal, VPAResult, vpa_engine
 from app.greeks_engine import GreeksSignalEngine, greeks_engine
 
 # ── Auth config ─────────────────────────────────────────────
 AUTH_EMAIL = "realsaraf@gmail.com"
 AUTH_PASS_HASH = hashlib.sha256("saraf1236".encode()).hexdigest()
 _sessions: set[str] = set()  # in-memory session tokens
+
+
+# ── Mock data generator for live-mode testing ───────────────
+class MockDataGenerator:
+    """Generates fake OHLCV bars that tick every second for testing live mode."""
+
+    def __init__(self):
+        self._streams: dict[str, dict] = {}  # keyed by contract signature
+
+    def _key(self, symbol: str, expiration: str, strike: float, right: str) -> str:
+        return f"{symbol}|{expiration}|{strike}|{right}"
+
+    def get_bars(self, symbol: str, expiration: str, strike: float, right: str,
+                 after: Optional[str] = None) -> tuple[list[dict], list[dict]]:
+        """Return (bars, signals).  If *after* is set, only return bars newer than it."""
+        key = self._key(symbol, expiration, strike, right)
+        now = datetime.utcnow()
+
+        if key not in self._streams:
+            # Seed with 30 historical bars, each 1 second apart
+            base_price = round(random.uniform(2.0, 10.0), 2)
+            bars: list[dict] = []
+            start = now - timedelta(seconds=30)
+            price = base_price
+            for i in range(30):
+                dt = start + timedelta(seconds=i)
+                change = round(random.gauss(0, 0.05), 2)
+                o = round(price, 2)
+                c = round(price + change, 2)
+                h = round(max(o, c) + abs(random.gauss(0, 0.02)), 2)
+                l = round(min(o, c) - abs(random.gauss(0, 0.02)), 2)
+                vol = random.randint(50, 500)
+                bars.append(dict(datetime=dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                 open=o, high=h, low=l, close=c, volume=vol))
+                price = c
+            self._streams[key] = dict(bars=bars, last_price=price)
+        else:
+            stream = self._streams[key]
+            # Append a new bar for the current second
+            last_bar_dt = datetime.strptime(stream["bars"][-1]["datetime"], "%Y-%m-%d %H:%M:%S")
+            seconds_since = max(1, int((now - last_bar_dt).total_seconds()))
+            price = stream["last_price"]
+            for s in range(seconds_since):
+                dt = last_bar_dt + timedelta(seconds=s + 1)
+                change = round(random.gauss(0, 0.05), 2)
+                o = round(price, 2)
+                c = round(price + change, 2)
+                h = round(max(o, c) + abs(random.gauss(0, 0.02)), 2)
+                l = round(min(o, c) - abs(random.gauss(0, 0.02)), 2)
+                vol = random.randint(50, 500)
+                stream["bars"].append(dict(datetime=dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                           open=o, high=h, low=l, close=c, volume=vol))
+                price = c
+            stream["last_price"] = price
+
+        all_bars = self._streams[key]["bars"]
+
+        # Filter by *after* to return only new bars
+        if after:
+            all_bars = [b for b in all_bars if b["datetime"] > after]
+
+        # Generate mock signals for any new bar with |change| > 0.06
+        signals: list[dict] = []
+        for b in all_bars:
+            change = b["close"] - b["open"]
+            vol_ratio = round(random.uniform(0.5, 3.0), 2)
+            if abs(change) > 0.06:
+                sig_type = "strong_bullish" if change > 0 else "strong_bearish"
+                signals.append(dict(
+                    signal=sig_type,
+                    confidence=round(min(abs(change) * 5, 1.0), 2),
+                    description=f"Mock {sig_type.replace('_', ' ')} signal",
+                    datetime=b["datetime"],
+                    price=b["close"],
+                    volume=b["volume"],
+                    volume_ratio=vol_ratio,
+                ))
+
+        return all_bars, signals
+
+
+_mock_gen = MockDataGenerator()
+
+
+# ── Mock watchlist price generator ──────────────────────────
+_mock_stock_prices: dict[str, float] = {}
+
+def _get_mock_watchlist_prices(symbols: list[str]) -> list[dict]:
+    """Return fake stock prices that drift randomly each call."""
+    BASE_PRICES = {
+        "SPY": 600, "QQQ": 520, "IWM": 225, "AAPL": 245,
+        "MSFT": 425, "NVDA": 135, "TSLA": 350, "AMD": 120,
+        "AMZN": 230, "META": 680, "GOOGL": 195,
+    }
+    results = []
+    for sym in symbols:
+        if sym not in _mock_stock_prices:
+            _mock_stock_prices[sym] = BASE_PRICES.get(sym, round(random.uniform(50, 500), 2))
+        # Random walk
+        _mock_stock_prices[sym] = round(
+            _mock_stock_prices[sym] * (1 + random.gauss(0, 0.001)), 2
+        )
+        price = _mock_stock_prices[sym]
+        change = round(random.uniform(-2, 2), 2)
+        results.append({
+            "symbol": sym,
+            "price": price,
+            "change": change,
+            "changePct": round(change / price * 100, 2),
+            "high": round(price + abs(random.gauss(0, 1)), 2),
+            "low": round(price - abs(random.gauss(0, 1)), 2),
+            "volume": random.randint(1_000_000, 80_000_000),
+        })
+    return results
 
 
 # ── Lifespan (startup / shutdown) ───────────────────────────
@@ -526,6 +641,99 @@ async def get_underlying_price(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/analyze/live")
+async def analyze_live(
+    symbol: str = Query(..., description="Underlying symbol"),
+    expiration: str = Query(..., description="Expiration date (YYYY-MM-DD)"),
+    strike: float = Query(..., description="Strike price"),
+    right: str = Query(..., description="C for Call, P for Put"),
+    after: Optional[str] = Query(None, description="Return only bars with datetime > this value"),
+    mock: bool = Query(False, description="Use mock data for testing"),
+):
+    """Live mode endpoint – returns only NEW bars & signals since *after*."""
+
+    if mock:
+        bars, signals = _mock_gen.get_bars(symbol, expiration, strike, right, after=after)
+        return {
+            "bars": bars,
+            "signals": signals,
+            "is_mock": True,
+        }
+
+    # Real live – delegate to full analyze with nocache, then filter
+    # We import the full endpoint logic inline so we can filter the result
+    from app.polygon_client import polygon_client as poly
+    from app.vpa_engine import vpa_engine as engine
+
+    exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+    end_dt = date.today()
+    start_dt = end_dt - timedelta(days=5)
+
+    # Always clear cache for live
+    poly.clear_ohlcv_cache(
+        symbol=symbol.upper(), expiration=exp_date,
+        strike=strike, right=right.upper(),
+        start_date=start_dt, end_date=end_dt, interval_min=5,
+    )
+    poly.clear_stock_ohlcv_cache(
+        symbol=symbol.upper(), start_date=start_dt,
+        end_date=end_dt, interval_min=5,
+    )
+
+    try:
+        df = await poly.get_option_ohlcv(
+            symbol=symbol.upper(), expiration=exp_date,
+            strike=strike, right=right.upper(),
+            start_date=start_dt, end_date=end_dt, interval_min=5,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if df.empty:
+        return {"bars": [], "signals": []}
+
+    # Filter to only bars after the given timestamp
+    if after:
+        df = df[df["datetime"].astype(str) > after]
+
+    if df.empty:
+        return {"bars": [], "signals": []}
+
+    vpa_results = engine.analyze(df)
+
+    bars = [
+        dict(
+            datetime=str(row["datetime"]),
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=int(row["volume"]),
+        )
+        for _, row in df.iterrows()
+    ]
+
+    signals = [
+        dict(
+            signal=r.signal.value,
+            confidence=r.confidence,
+            description=r.description,
+            datetime=r.datetime,
+            price=r.price,
+            volume=r.volume,
+            volume_ratio=round(r.volume_ratio, 2),
+        )
+        for r in vpa_results
+        if r.signal != VPASignal.NEUTRAL
+    ]
+
+    # Filter signals to only those in the new bars time range
+    if after:
+        signals = [s for s in signals if s["datetime"] > after]
+
+    return {"bars": bars, "signals": signals}
+
+
 @app.get("/api/analyze")
 async def analyze_option(
     symbol: str = Query(..., description="Underlying symbol (e.g., QQQ, SPY)"),
@@ -536,12 +744,108 @@ async def analyze_option(
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     interval: int = Query(1, description="Interval in minutes (1, 5, 15, etc.)"),
     nocache: bool = Query(False, description="Bypass OHLCV cache for live updates"),
+    mock: bool = Query(False, description="Use mock data for testing"),
     poly: PolygonClient = Depends(get_polygon),
     engine: VPAEngine = Depends(get_vpa),
     gengine: GreeksSignalEngine = Depends(get_greeks_engine),
 ) -> AnalysisResponse:
     """Fetch options data and run VPA analysis."""
     try:
+        # ── Mock mode: return fake data immediately ───────────
+        if mock:
+            mock_bars, mock_signals = _mock_gen.get_bars(symbol, expiration, strike, right)
+            last_price = mock_bars[-1]["close"] if mock_bars else 5.0
+
+            # Mock bias based on recent price action
+            if len(mock_bars) >= 2:
+                direction = mock_bars[-1]["close"] - mock_bars[0]["open"]
+                bias_label = "bullish" if direction > 0 else "bearish" if direction < 0 else "neutral"
+            else:
+                bias_label = "neutral"
+
+            # Mock underlying bars (parallel to option bars)
+            mock_underlying = []
+            underlying_price = _mock_stock_prices.get(symbol.upper(), 500.0)
+            for b in mock_bars:
+                chg = round(random.gauss(0, 0.3), 2)
+                o = round(underlying_price, 2)
+                c = round(underlying_price + chg, 2)
+                mock_underlying.append(dict(
+                    datetime=b["datetime"],
+                    open=o, high=round(max(o, c) + 0.1, 2),
+                    low=round(min(o, c) - 0.1, 2), close=c,
+                    volume=random.randint(100000, 2000000),
+                ))
+                underlying_price = c
+
+            # Mock composite signal
+            score = round(random.uniform(-0.5, 0.5), 3)
+            action_map = {True: "BUY", False: "SELL"} if abs(score) > 0.1 else {True: "HOLD", False: "HOLD"}
+            action = action_map.get(score > 0, "HOLD")
+            if abs(score) > 0.3:
+                action = f"STRONG {action}"
+            mock_composite = CompositeSignalResponse(
+                signal="lean_bullish" if score > 0 else "lean_bearish",
+                action=action,
+                score=score,
+                confidence=round(random.uniform(0.4, 0.9), 2),
+                trade_archetype="momentum_play",
+                archetype_description="Mock archetype – testing live mode",
+                factors=[
+                    FactorScoreResponse(name="VPA", score=round(random.uniform(-0.3, 0.3), 2),
+                                        confidence=0.7, weight=0.25, detail="Mock VPA factor"),
+                    FactorScoreResponse(name="Greeks", score=round(random.uniform(-0.2, 0.2), 2),
+                                        confidence=0.6, weight=0.25, detail="Mock Greeks factor"),
+                    FactorScoreResponse(name="Flow", score=round(random.uniform(-0.2, 0.2), 2),
+                                        confidence=0.65, weight=0.25, detail="Mock Flow factor"),
+                    FactorScoreResponse(name="Structure", score=round(random.uniform(-0.2, 0.2), 2),
+                                        confidence=0.55, weight=0.25, detail="Mock Structure factor"),
+                ],
+                greeks=GreeksResponse(
+                    delta=round(random.uniform(0.2, 0.8), 4),
+                    gamma=round(random.uniform(0.01, 0.05), 4),
+                    theta=round(random.uniform(-0.1, -0.01), 4),
+                    vega=round(random.uniform(0.05, 0.3), 4),
+                    iv=round(random.uniform(0.2, 0.6), 4),
+                    open_interest=random.randint(500, 50000),
+                    volume=random.randint(100, 10000),
+                    underlying_price=round(underlying_price, 2),
+                    break_even=round(strike + last_price, 2),
+                    last_price=round(last_price, 2),
+                ),
+                chain_metrics=ChainMetricsResponse(
+                    iv_rank=round(random.uniform(20, 80), 1),
+                    iv_percentile=round(random.uniform(20, 80), 1),
+                    put_call_oi_ratio=round(random.uniform(0.5, 2.0), 2),
+                    put_call_volume_ratio=round(random.uniform(0.5, 2.0), 2),
+                    total_call_oi=random.randint(100000, 500000),
+                    total_put_oi=random.randint(100000, 500000),
+                    total_call_volume=random.randint(50000, 200000),
+                    total_put_volume=random.randint(50000, 200000),
+                    net_gex=round(random.uniform(-1e9, 1e9), 0),
+                    gex_regime="positive" if random.random() > 0.5 else "negative",
+                    max_pain=round(strike + random.uniform(-10, 10), 0),
+                    uoa_detected=random.random() > 0.7,
+                    uoa_details=[],
+                    weighted_iv=round(random.uniform(0.2, 0.5), 4),
+                ),
+                recommendation=f"Mock {action} recommendation – confidence {round(random.uniform(40, 90))}%",
+            )
+
+            return AnalysisResponse(
+                symbol=symbol.upper(),
+                expiration=expiration,
+                strike=strike,
+                right=right.upper(),
+                interval=interval,
+                bars=[OHLCVBar(**b) for b in mock_bars],
+                signals=[VPASignalResponse(**s) for s in mock_signals],
+                bias={"bias": bias_label, "strength": round(random.uniform(0.3, 0.9), 2),
+                      "reason": f"Mock {bias_label} bias"},
+                composite=mock_composite,
+                underlying_bars=[OHLCVBar(**u) for u in mock_underlying],
+            )
+
         exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
         end_dt = (
             datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -764,11 +1068,15 @@ async def analyze_option(
 @app.get("/api/watchlist/prices")
 async def get_watchlist_prices(
     symbols: str = Query("SPY,QQQ,IWM,AAPL,MSFT,NVDA,TSLA,AMD"),
+    mock: bool = Query(False, description="Use mock data for testing"),
     poly: PolygonClient = Depends(get_polygon),
 ):
     """Get real-time/delayed prices for watchlist symbols using snapshot API."""
     try:
         symbol_list = [s.strip().upper() for s in symbols.split(",")]
+
+        if mock:
+            return {"prices": _get_mock_watchlist_prices(symbol_list)}
 
         # Use snapshot API for real-time/15-min delayed prices
         price_lookup = await poly.get_snapshot_prices(symbol_list)

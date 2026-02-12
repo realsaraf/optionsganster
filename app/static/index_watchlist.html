@@ -2179,7 +2179,8 @@
 
                 <!-- Desktop Date Range Buttons -->
                 <div class="desktop-date-range" id="desktop-date-range">
-                    <button class="date-range-btn active" data-range="5">5D</button>
+                    <button class="date-range-btn active" data-range="1">1D</button>
+                    <button class="date-range-btn" data-range="5">5D</button>
                     <button class="date-range-btn" data-range="7">1W</button>
                     <button class="date-range-btn" data-range="14">2W</button>
                     <button class="date-range-btn" data-range="30">1M</button>
@@ -2207,6 +2208,7 @@
                 
                 <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
                 <button class="live-btn" id="live-btn">⚪ LIVE</button>
+                <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 12px;min-width:auto">MOCK</button>
             </div>
 
             <div class="filter-bar" id="filter-bar">
@@ -2470,6 +2472,8 @@
         let liveInterval = null;
         let liveCountdown = 10;
         let liveCountdownInterval = null;
+        let mockMode = false;          // mock data for testing
+        let lastBarDatetime = null;    // tracks the last bar for delta updates
         
         // Controls collapse state
         let controlsCollapsed = false;
@@ -2819,7 +2823,8 @@
             const summaryBtn = document.getElementById('summary-live-btn');
             
             if (liveMode) {
-                const text = `🔴 LIVE ${liveCountdown}s`;
+                const prefix = mockMode ? '🟡 MOCK ' : '🔴 LIVE ';
+                const text = `${prefix}${liveCountdown}s`;
                 desktopBtn.textContent = text;
                 if (summaryBtn) {
                     summaryBtn.textContent = `LIVE ${liveCountdown}s`;
@@ -2833,6 +2838,72 @@
                 }
             }
         }
+
+        // Live-mode poll: fetches ONLY new bars/signals via /api/analyze/live
+        async function livePoll() {
+            const expiration = document.getElementById('expiration').value;
+            const strike = document.getElementById('strike').value;
+            const right = document.getElementById('right').value;
+
+            if (!currentSymbol || !expiration || !strike) return;
+
+            const chartsContainer = document.querySelector('.charts-container');
+            chartsContainer.classList.add('live-refreshing');
+
+            try {
+                let url = `/api/analyze/live?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}`;
+                if (mockMode) url += '&mock=true';
+                if (lastBarDatetime) url += `&after=${encodeURIComponent(lastBarDatetime)}`;
+
+                const res = await authFetch(url);
+                if (!res.ok) return;
+                const data = await res.json();
+
+                const newBars = data.bars || [];
+                const newSignals = data.signals || [];
+
+                if (newBars.length === 0) return;   // nothing new
+
+                // Track latest bar datetime for next delta request
+                lastBarDatetime = newBars[newBars.length - 1].datetime;
+
+                // Incrementally update chart with ONLY the new bars
+                window._chartDataLoading = true;
+                for (const bar of newBars) {
+                    const t = toEasternUnix(bar.datetime);
+                    candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                    volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                }
+                window._chartDataLoading = false;
+
+                // Append new bars/signals to lastAnalysisData for marker rebuilding
+                if (lastAnalysisData) {
+                    lastAnalysisData.bars = lastAnalysisData.bars.concat(newBars);
+                    lastAnalysisData.signals = (lastAnalysisData.signals || []).concat(newSignals);
+                }
+
+                // Update contract header price
+                const lastBar = newBars[newBars.length - 1];
+                document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
+
+                // Rebuild markers with any new signals
+                if (newSignals.length > 0) {
+                    updateFilteredMarkers(lastAnalysisData ? lastAnalysisData.signals : newSignals);
+                    updateAnalysis(lastAnalysisData || { bars: newBars, signals: newSignals, bias: {} });
+                }
+
+                // Update stats
+                document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : newBars.length;
+
+            } catch (e) {
+                console.warn('Live poll error:', e.message);
+            } finally {
+                chartsContainer.classList.remove('live-refreshing');
+                const interval = mockMode ? 1 : 10;
+                liveCountdown = interval;
+                updateLiveButton();
+            }
+        }
         
         function toggleLiveMode() {
             if (liveMode) {
@@ -2840,33 +2911,42 @@
             } else {
                 // Start live mode
                 liveMode = true;
-                liveCountdown = 10;
+                const interval = mockMode ? 1 : 10;
+                liveCountdown = interval;
                 
                 // Add active class to button
                 document.getElementById('live-btn').classList.add('active');
                 document.getElementById('summary-live-btn').classList.add('active');
                 document.getElementById('summary-live-btn').textContent = 'LIVE ●';
                 
+                // Track the last bar we already have for delta updates
+                if (lastAnalysisData && lastAnalysisData.bars && lastAnalysisData.bars.length > 0) {
+                    lastBarDatetime = lastAnalysisData.bars[lastAnalysisData.bars.length - 1].datetime;
+                } else {
+                    lastBarDatetime = null;
+                }
+
                 // Start countdown
                 updateLiveButton();
                 liveCountdownInterval = setInterval(() => {
                     liveCountdown--;
                     if (liveCountdown <= 0) {
-                        liveCountdown = 10;
+                        liveCountdown = interval;
                     }
                     updateLiveButton();
                 }, 1000);
                 
-                // Start auto-refresh
+                // Start auto-refresh using the delta live poll
                 liveInterval = setInterval(() => {
-                    analyze();
-                }, 10000);
+                    livePoll();
+                }, interval * 1000);
             }
         }
         
         function stopLiveMode() {
             if (liveMode) {
                 liveMode = false;
+                lastBarDatetime = null;
                 
                 // Clear intervals
                 if (liveInterval) {
@@ -2892,7 +2972,9 @@
         async function loadWatchlistPrices() {
             try {
                 const symbols = defaultWatchlist.map(w => w.symbol).join(',');
-                const res = await authFetch(`/api/watchlist/prices?symbols=${symbols}`);
+                let url = `/api/watchlist/prices?symbols=${symbols}`;
+                if (mockMode) url += '&mock=true';
+                const res = await authFetch(url);
                 if (!res.ok) throw new Error('Failed to fetch prices');
                 
                 const data = await res.json();
@@ -3192,7 +3274,7 @@
                 let url = `/api/analyze?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
                 if (startDate) url += `&start_date=${startDate}`;
                 if (endDate) url += `&end_date=${endDate}`;
-                if (liveMode) url += `&nocache=true`;  // Bypass cache in live mode
+                if (mockMode) url += `&mock=true`;
                 
                 const res = await authFetch(url);
                 if (!res.ok) {
@@ -3201,6 +3283,11 @@
                 }
                 
                 const data = await res.json();
+                
+                // Track last bar datetime so live mode can send delta requests
+                if (data.bars && data.bars.length > 0) {
+                    lastBarDatetime = data.bars[data.bars.length - 1].datetime;
+                }
                 
                 // Update contract header
                 document.getElementById('contract-symbol').textContent = `${currentSymbol} $${strike} ${right === 'C' ? 'Call' : 'Put'}`;
@@ -3217,12 +3304,8 @@
                     document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
                 }
                 
-                // Use incremental updates in live mode, full redraw otherwise
-                if (liveMode && currentBarTimestamps.size > 0) {
-                    updateChartsIncremental(data);
-                } else {
-                    updateCharts(data);
-                }
+                // Always do full chart draw on analyze (live mode uses livePoll for deltas)
+                updateCharts(data);
                 updateAnalysis(data);
                 
                 // Update summary text after analyze
@@ -3239,15 +3322,11 @@
             } catch (e) {
                 document.getElementById('signals-container').innerHTML = `<div class="error-message">${e.message}</div>`;
             } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Analyze';
                 if (liveMode) {
                     const chartsContainer = document.querySelector('.charts-container');
                     chartsContainer.classList.remove('live-refreshing');
-                    // Reset countdown to keep in sync with refresh interval
-                    liveCountdown = 10;
-                    updateLiveButton();
-                } else {
-                    btn.disabled = false;
-                    btn.textContent = '▶ Analyze';
                 }
             }
         }
@@ -3644,6 +3723,26 @@
         // Live mode button
         document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
         
+        // Mock mode toggle
+        document.getElementById('mock-btn').addEventListener('click', () => {
+            mockMode = !mockMode;
+            const btn = document.getElementById('mock-btn');
+            if (mockMode) {
+                btn.style.background = '#facc15';
+                btn.style.color = '#000';
+                btn.textContent = 'MOCK ✓';
+            } else {
+                btn.style.background = '#2a2e39';
+                btn.style.color = '#787b86';
+                btn.textContent = 'MOCK';
+            }
+            // If live mode is running, restart it with new interval
+            if (liveMode) {
+                stopLiveMode();
+                toggleLiveMode();
+            }
+        });
+        
         // Controls chevron
         document.getElementById('controls-chevron').addEventListener('click', toggleControls);
         
@@ -3781,14 +3880,10 @@
         
         // ===== INITIALIZATION =====
         async function init() {
-            // Set default dates (1 day on mobile, 1 week on desktop)
+            // Set default dates (1 day on both mobile and desktop)
             const today = new Date();
             const startFrom = new Date(today);
-            if (isMobile()) {
-                startFrom.setDate(today.getDate() - 1); // 1D default on mobile
-            } else {
-                startFrom.setDate(today.getDate() - 7); // 1W default on desktop
-            }
+            startFrom.setDate(today.getDate() - 1); // 1D default
             
             document.getElementById('start-date').value = startFrom.toISOString().split('T')[0];
             document.getElementById('end-date').value = today.toISOString().split('T')[0];
