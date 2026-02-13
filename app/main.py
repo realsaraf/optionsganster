@@ -27,7 +27,7 @@ from app.config import settings
 from app.polygon_client import PolygonClient, polygon_client
 from app.vpa_engine import VPAEngine, VPASignal, VPAResult, vpa_engine
 from app.greeks_engine import GreeksSignalEngine, greeks_engine
-from app.live_feed import LiveFeedManager, live_feed_manager
+from app.live_feed import LiveFeedManager, live_feed_manager, mock_csv_playback, build_mock_sow
 
 logger = logging.getLogger("optionsganster")
 
@@ -37,118 +37,138 @@ AUTH_PASS_HASH = hashlib.sha256("saraf1236".encode()).hexdigest()
 _sessions: set[str] = set()  # in-memory session tokens
 
 
-# ── Mock data generator for live-mode testing ───────────────
-class MockDataGenerator:
-    """Generates fake OHLCV bars that tick every second for testing live mode."""
+
+# ── Watchlist Price Hub ─────────────────────────────────────
+# Shared across all connected watchlist clients.  Fetches prices
+# once per second for the UNION of all clients' symbols, then
+# fans out filtered results to each client's queue.
+
+class WatchlistHub:
+    """
+    Server-side hub that de-duplicates watchlist price API calls across
+    all connected users.  Only makes Polygon API calls while at least
+    one client is connected, and only for the union of requested symbols.
+    Each client receives only the symbols it asked for.
+    """
 
     def __init__(self):
-        self._streams: dict[str, dict] = {}  # keyed by contract signature
+        self._lock = asyncio.Lock()
+        # client_id → {"queue": asyncio.Queue, "symbols": set[str], "mock": bool}
+        self._clients: dict[int, dict] = {}
+        self._next_id = 0
+        self._poll_task: asyncio.Task | None = None
 
-    def _key(self, symbol: str, expiration: str, strike: float, right: str) -> str:
-        return f"{symbol}|{expiration}|{strike}|{right}"
+    async def register(self, symbols: set[str], mock: bool) -> tuple[int, asyncio.Queue]:
+        """Register a new client. Returns (client_id, queue)."""
+        async with self._lock:
+            cid = self._next_id
+            self._next_id += 1
+            q: asyncio.Queue = asyncio.Queue(maxsize=50)
+            self._clients[cid] = {"queue": q, "symbols": symbols, "mock": mock}
+            print(f"[WatchlistHub] Client {cid} registered: {len(symbols)} symbols, mock={mock}")
+            # Start poll loop if first client
+            if len(self._clients) == 1:
+                self._poll_task = asyncio.create_task(self._poll_loop())
+                print("[WatchlistHub] Poll loop started")
+            return cid, q
 
-    def get_bars(self, symbol: str, expiration: str, strike: float, right: str,
-                 after: Optional[str] = None) -> tuple[list[dict], list[dict]]:
-        """Return (bars, signals).  If *after* is set, only return bars newer than it."""
-        key = self._key(symbol, expiration, strike, right)
-        now = datetime.utcnow()
+    async def update_symbols(self, cid: int, symbols: set[str], mock: bool):
+        """Update which symbols a client wants."""
+        async with self._lock:
+            if cid in self._clients:
+                self._clients[cid]["symbols"] = symbols
+                self._clients[cid]["mock"] = mock
 
-        if key not in self._streams:
-            # Seed with 30 historical bars, each 1 second apart
-            base_price = round(random.uniform(2.0, 10.0), 2)
-            bars: list[dict] = []
-            start = now - timedelta(seconds=30)
-            price = base_price
-            for i in range(30):
-                dt = start + timedelta(seconds=i)
-                change = round(random.gauss(0, 0.05), 2)
-                o = round(price, 2)
-                c = round(price + change, 2)
-                h = round(max(o, c) + abs(random.gauss(0, 0.02)), 2)
-                l = round(min(o, c) - abs(random.gauss(0, 0.02)), 2)
-                vol = random.randint(50, 500)
-                bars.append(dict(datetime=dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                 open=o, high=h, low=l, close=c, volume=vol))
-                price = c
-            self._streams[key] = dict(bars=bars, last_price=price)
-        else:
-            stream = self._streams[key]
-            # Append a new bar for the current second
-            last_bar_dt = datetime.strptime(stream["bars"][-1]["datetime"], "%Y-%m-%d %H:%M:%S")
-            seconds_since = max(1, int((now - last_bar_dt).total_seconds()))
-            price = stream["last_price"]
-            for s in range(seconds_since):
-                dt = last_bar_dt + timedelta(seconds=s + 1)
-                change = round(random.gauss(0, 0.05), 2)
-                o = round(price, 2)
-                c = round(price + change, 2)
-                h = round(max(o, c) + abs(random.gauss(0, 0.02)), 2)
-                l = round(min(o, c) - abs(random.gauss(0, 0.02)), 2)
-                vol = random.randint(50, 500)
-                stream["bars"].append(dict(datetime=dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                           open=o, high=h, low=l, close=c, volume=vol))
-                price = c
-            stream["last_price"] = price
+    async def unregister(self, cid: int):
+        """Remove a client. Stops the poll loop when no clients remain."""
+        async with self._lock:
+            self._clients.pop(cid, None)
+            print(f"[WatchlistHub] Client {cid} unregistered, {len(self._clients)} remaining")
+            if not self._clients and self._poll_task:
+                self._poll_task.cancel()
+                self._poll_task = None
+                print("[WatchlistHub] Poll loop stopped (no clients)")
 
-        all_bars = self._streams[key]["bars"]
+    async def _poll_loop(self):
+        """Fetch prices once per second and fan out to clients."""
+        try:
+            while True:
+                await self._fetch_and_fanout()
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            return
 
-        # Filter by *after* to return only new bars
-        if after:
-            all_bars = [b for b in all_bars if b["datetime"] > after]
+    async def _fetch_and_fanout(self):
+        """Single fetch for the union of all symbols, then filter per client."""
+        async with self._lock:
+            if not self._clients:
+                return
+            # Snapshot client info (avoid holding lock during API call)
+            clients_snapshot = {
+                cid: {"queue": info["queue"], "symbols": set(info["symbols"]), "mock": info["mock"]}
+                for cid, info in self._clients.items()
+            }
 
-        # Generate mock signals for any new bar with |change| > 0.06
-        signals: list[dict] = []
-        for b in all_bars:
-            change = b["close"] - b["open"]
-            vol_ratio = round(random.uniform(0.5, 3.0), 2)
-            if abs(change) > 0.06:
-                sig_type = "strong_bullish" if change > 0 else "strong_bearish"
-                signals.append(dict(
-                    signal=sig_type,
-                    confidence=round(min(abs(change) * 5, 1.0), 2),
-                    description=f"Mock {sig_type.replace('_', ' ')} signal",
-                    datetime=b["datetime"],
-                    price=b["close"],
-                    volume=b["volume"],
-                    volume_ratio=vol_ratio,
-                ))
+        # Compute union of all requested symbols
+        all_symbols: set[str] = set()
+        for info in clients_snapshot.values():
+            all_symbols |= info["symbols"]
 
-        return all_bars, signals
+        if not all_symbols:
+            return
+
+        symbol_list = sorted(all_symbols)
+
+        # Fetch prices – always use real API (mock mode only affects WS option feed)
+        real_prices: dict[str, dict] = {}
+
+        try:
+            price_lookup = await polygon_client.get_snapshot_prices(symbol_list)
+            if not price_lookup:
+                price_lookup = await polygon_client.get_prev_close_prices(symbol_list)
+            for sym in symbol_list:
+                snap = price_lookup.get(sym, {})
+                last_price = float(snap.get("lastPrice", 0))
+                prev_close = float(snap.get("prevClose", 0))
+                if last_price == 0 and prev_close > 0:
+                    last_price = prev_close
+                real_prices[sym] = {
+                    "symbol": sym,
+                    "price": last_price,
+                    "change": round(float(snap.get("todaysChange", 0)), 2),
+                    "changePct": round(float(snap.get("todaysChangePerc", 0)), 2),
+                    "high": float(snap.get("dayHigh", 0)),
+                    "low": float(snap.get("dayLow", 0)),
+                    "volume": int(snap.get("dayVolume", 0)),
+                }
+        except Exception as e:
+            print(f"[WatchlistHub] Price fetch error: {e}")
+
+        # Fan out filtered results to each client
+        dead_clients = []
+        for cid, info in clients_snapshot.items():
+            filtered = [real_prices[s] for s in info["symbols"] if s in real_prices]
+            if not filtered:
+                continue
+            payload = json.dumps({"type": "prices", "prices": filtered})
+            try:
+                info["queue"].put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    info["queue"].get_nowait()
+                    info["queue"].put_nowait(payload)
+                except Exception:
+                    dead_clients.append(cid)
+
+        # Clean up dead clients
+        if dead_clients:
+            async with self._lock:
+                for cid in dead_clients:
+                    self._clients.pop(cid, None)
 
 
-_mock_gen = MockDataGenerator()
-
-
-# ── Mock watchlist price generator ──────────────────────────
-_mock_stock_prices: dict[str, float] = {}
-
-def _get_mock_watchlist_prices(symbols: list[str]) -> list[dict]:
-    """Return fake stock prices that drift randomly each call."""
-    BASE_PRICES = {
-        "SPY": 600, "QQQ": 520, "IWM": 225, "AAPL": 245,
-        "MSFT": 425, "NVDA": 135, "TSLA": 350, "AMD": 120,
-        "AMZN": 230, "META": 680, "GOOGL": 195,
-    }
-    results = []
-    for sym in symbols:
-        if sym not in _mock_stock_prices:
-            _mock_stock_prices[sym] = BASE_PRICES.get(sym, round(random.uniform(50, 500), 2))
-        # Random walk
-        _mock_stock_prices[sym] = round(
-            _mock_stock_prices[sym] * (1 + random.gauss(0, 0.001)), 2
-        )
-        price = _mock_stock_prices[sym]
-        change = round(random.uniform(-2, 2), 2)
-        results.append({
-            "symbol": sym,
-            "price": price,
-            "change": change,
-            "changePct": round(change / price * 100, 2),
-            "high": round(price + abs(random.gauss(0, 1)), 2),
-            "low": round(price - abs(random.gauss(0, 1)), 2),
-            "volume": random.randint(1_000_000, 80_000_000),
-        })
-    return results
+# Singleton
+_watchlist_hub = WatchlistHub()
 
 
 # ── Lifespan (startup / shutdown) ───────────────────────────
@@ -660,15 +680,9 @@ async def analyze_live(
 ):
     """Live mode endpoint – returns NEW bars & signals since *after*.
     Full composite / greeks / bias refresh is now pushed by the WS
-    analysis loop (see /ws/live _analysis_loop)."""
-
-    if mock:
-        bars, signals = _mock_gen.get_bars(symbol, expiration, strike, right, after=after)
-        return {
-            "bars": bars,
-            "signals": signals,
-            "is_mock": True,
-        }
+    analysis loop (see /ws/live _analysis_loop).
+    Note: mock parameter is accepted but ignored – always uses real API data.
+    Mock mode only affects the WebSocket live feed (CSV playback as proxy)."""
 
     # ── Fetch OHLCV ──────────────────────────────────────────
     exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
@@ -754,103 +768,10 @@ async def analyze_option(
     engine: VPAEngine = Depends(get_vpa),
     gengine: GreeksSignalEngine = Depends(get_greeks_engine),
 ) -> AnalysisResponse:
-    """Fetch options data and run VPA analysis."""
+    """Fetch options data and run VPA analysis.
+    Note: mock parameter is accepted but ignored – analysis always uses real API data.
+    Mock mode only affects the WebSocket live feed (CSV playback as proxy)."""
     try:
-        # ── Mock mode: return fake data immediately ───────────
-        if mock:
-            mock_bars, mock_signals = _mock_gen.get_bars(symbol, expiration, strike, right)
-            last_price = mock_bars[-1]["close"] if mock_bars else 5.0
-
-            # Mock bias based on recent price action
-            if len(mock_bars) >= 2:
-                direction = mock_bars[-1]["close"] - mock_bars[0]["open"]
-                bias_label = "bullish" if direction > 0 else "bearish" if direction < 0 else "neutral"
-            else:
-                bias_label = "neutral"
-
-            # Mock underlying bars (parallel to option bars)
-            mock_underlying = []
-            underlying_price = _mock_stock_prices.get(symbol.upper(), 500.0)
-            for b in mock_bars:
-                chg = round(random.gauss(0, 0.3), 2)
-                o = round(underlying_price, 2)
-                c = round(underlying_price + chg, 2)
-                mock_underlying.append(dict(
-                    datetime=b["datetime"],
-                    open=o, high=round(max(o, c) + 0.1, 2),
-                    low=round(min(o, c) - 0.1, 2), close=c,
-                    volume=random.randint(100000, 2000000),
-                ))
-                underlying_price = c
-
-            # Mock composite signal
-            score = round(random.uniform(-0.5, 0.5), 3)
-            action_map = {True: "BUY", False: "SELL"} if abs(score) > 0.1 else {True: "HOLD", False: "HOLD"}
-            action = action_map.get(score > 0, "HOLD")
-            if abs(score) > 0.3:
-                action = f"STRONG {action}"
-            mock_composite = CompositeSignalResponse(
-                signal="lean_bullish" if score > 0 else "lean_bearish",
-                action=action,
-                score=score,
-                confidence=round(random.uniform(0.4, 0.9), 2),
-                trade_archetype="momentum_play",
-                archetype_description="Mock archetype – testing live mode",
-                factors=[
-                    FactorScoreResponse(name="VPA", score=round(random.uniform(-0.3, 0.3), 2),
-                                        confidence=0.7, weight=0.25, detail="Mock VPA factor"),
-                    FactorScoreResponse(name="Greeks", score=round(random.uniform(-0.2, 0.2), 2),
-                                        confidence=0.6, weight=0.25, detail="Mock Greeks factor"),
-                    FactorScoreResponse(name="Flow", score=round(random.uniform(-0.2, 0.2), 2),
-                                        confidence=0.65, weight=0.25, detail="Mock Flow factor"),
-                    FactorScoreResponse(name="Structure", score=round(random.uniform(-0.2, 0.2), 2),
-                                        confidence=0.55, weight=0.25, detail="Mock Structure factor"),
-                ],
-                greeks=GreeksResponse(
-                    delta=round(random.uniform(0.2, 0.8), 4),
-                    gamma=round(random.uniform(0.01, 0.05), 4),
-                    theta=round(random.uniform(-0.1, -0.01), 4),
-                    vega=round(random.uniform(0.05, 0.3), 4),
-                    iv=round(random.uniform(0.2, 0.6), 4),
-                    open_interest=random.randint(500, 50000),
-                    volume=random.randint(100, 10000),
-                    underlying_price=round(underlying_price, 2),
-                    break_even=round(strike + last_price, 2),
-                    last_price=round(last_price, 2),
-                ),
-                chain_metrics=ChainMetricsResponse(
-                    iv_rank=round(random.uniform(20, 80), 1),
-                    iv_percentile=round(random.uniform(20, 80), 1),
-                    put_call_oi_ratio=round(random.uniform(0.5, 2.0), 2),
-                    put_call_volume_ratio=round(random.uniform(0.5, 2.0), 2),
-                    total_call_oi=random.randint(100000, 500000),
-                    total_put_oi=random.randint(100000, 500000),
-                    total_call_volume=random.randint(50000, 200000),
-                    total_put_volume=random.randint(50000, 200000),
-                    net_gex=round(random.uniform(-1e9, 1e9), 0),
-                    gex_regime="positive" if random.random() > 0.5 else "negative",
-                    max_pain=round(strike + random.uniform(-10, 10), 0),
-                    uoa_detected=random.random() > 0.7,
-                    uoa_details=[],
-                    weighted_iv=round(random.uniform(0.2, 0.5), 4),
-                ),
-                recommendation=f"Mock {action} recommendation – confidence {round(random.uniform(40, 90))}%",
-            )
-
-            return AnalysisResponse(
-                symbol=symbol.upper(),
-                expiration=expiration,
-                strike=strike,
-                right=right.upper(),
-                interval=interval,
-                bars=[OHLCVBar(**b) for b in mock_bars],
-                signals=[VPASignalResponse(**s) for s in mock_signals],
-                bias={"bias": bias_label, "strength": round(random.uniform(0.3, 0.9), 2),
-                      "reason": f"Mock {bias_label} bias"},
-                composite=mock_composite,
-                underlying_bars=[OHLCVBar(**u) for u in mock_underlying],
-            )
-
         exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
         end_dt = (
             datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -1073,16 +994,15 @@ async def analyze_option(
 @app.get("/api/watchlist/prices")
 async def get_watchlist_prices(
     symbols: str = Query("SPY,QQQ,IWM,AAPL,MSFT,NVDA,TSLA,AMD"),
-    mock: bool = Query(False, description="Use mock data for testing"),
+    mock: bool = Query(False, description="Ignored – always uses real API"),
     poly: PolygonClient = Depends(get_polygon),
 ):
-    """Get real-time/delayed prices for watchlist symbols using snapshot API."""
+    """Get real-time/delayed prices for watchlist symbols using snapshot API.
+    Note: mock parameter is accepted but ignored – stock prices always come from real API."""
     try:
         symbol_list = [s.strip().upper() for s in symbols.split(",")]
 
-        if mock:
-            return {"prices": _get_mock_watchlist_prices(symbol_list)}
-
+        # Always use real API for stock prices (even in mock mode)
         # Use snapshot API for real-time/15-min delayed prices
         # Falls back to previous-day close if snapshot returns 403 (plan limitation)
         price_lookup = await poly.get_snapshot_prices(symbol_list)
@@ -1142,6 +1062,7 @@ async def websocket_live(ws: WebSocket):
     # Per-client message queue
     queue: asyncio.Queue = asyncio.Queue(maxsize=500)
     subscribed_tickers: set[str] = set()
+    mock_tasks: dict[str, asyncio.Task] = {}   # ticker → mock playback task
     analysis_task: asyncio.Task | None = None   # periodic analysis for option ticker
 
     def _parse_occ_ticker(occ: str):
@@ -1315,8 +1236,12 @@ async def websocket_live(ws: WebSocket):
             while True:
                 msg = await queue.get()
                 await ws.send_text(msg)
-        except (WebSocketDisconnect, Exception):
+        except WebSocketDisconnect:
             pass
+        except Exception as e:
+            print(f"[WS-Sender] Error: {e}")
+            import traceback
+            traceback.print_exc()
 
     sender_task = asyncio.create_task(_sender())
 
@@ -1338,31 +1263,74 @@ async def websocket_live(ws: WebSocket):
             ticker = cmd.get("ticker", "")
 
             if action == "subscribe" and ticker:
-                # Subscribe – get SOW first, then live updates
-                sow_bars = await live_feed_manager.subscribe(ticker, queue)
-                subscribed_tickers.add(ticker)
+                is_mock = cmd.get("mock", False)
 
-                # Send snapshot of accumulated bars
-                await ws.send_text(json.dumps({
-                    "type": "sow",
-                    "ticker": ticker,
-                    "bars": sow_bars,
-                }))
+                if is_mock:
+                    # Per-session mock: CSV playback directly into client queue
+                    interval_min = cmd.get("interval", 5)
+                    if ticker not in mock_tasks:
+                        # Build SOW (historical candles) from CSV data
+                        sow_bars, start_idx = build_mock_sow(
+                            ticker, interval_minutes=interval_min, num_candles=50
+                        )
 
-                await ws.send_text(json.dumps({
-                    "type": "subscribed",
-                    "ticker": ticker,
-                    "message": f"Subscribed to {ticker}",
-                }))
+                        # Send SOW so the chart has data immediately
+                        if sow_bars:
+                            await ws.send_text(json.dumps({
+                                "type": "sow",
+                                "ticker": ticker,
+                                "bars": sow_bars,
+                            }))
 
-                # Start periodic analysis for option tickers
-                if ticker.startswith("O:") and analysis_task is None:
-                    analysis_task = asyncio.create_task(
-                        _analysis_loop(ticker, queue)
-                    )
+                        task = asyncio.create_task(
+                            mock_csv_playback(ticker, queue, interval_minutes=interval_min,
+                                              start_index=start_idx)
+                        )
+                        mock_tasks[ticker] = task
+                        subscribed_tickers.add(ticker)
+
+                    await ws.send_text(json.dumps({
+                        "type": "subscribed",
+                        "ticker": ticker,
+                        "message": f"Subscribed to {ticker} (mock)",
+                    }))
+                else:
+                    # Real mode – subscribe via LiveFeedManager
+                    sow_bars = await live_feed_manager.subscribe(ticker, queue)
+                    subscribed_tickers.add(ticker)
+
+                    # Send snapshot of accumulated bars
+                    await ws.send_text(json.dumps({
+                        "type": "sow",
+                        "ticker": ticker,
+                        "bars": sow_bars,
+                    }))
+
+                    await ws.send_text(json.dumps({
+                        "type": "subscribed",
+                        "ticker": ticker,
+                        "message": f"Subscribed to {ticker}",
+                    }))
+
+                    # Start periodic analysis for option tickers
+                    if ticker.startswith("O:") and analysis_task is None:
+                        analysis_task = asyncio.create_task(
+                            _analysis_loop(ticker, queue)
+                        )
 
             elif action == "unsubscribe" and ticker:
-                if ticker in subscribed_tickers:
+                if ticker in mock_tasks:
+                    # Cancel mock playback task
+                    mock_tasks[ticker].cancel()
+                    del mock_tasks[ticker]
+                    subscribed_tickers.discard(ticker)
+
+                    await ws.send_text(json.dumps({
+                        "type": "unsubscribed",
+                        "ticker": ticker,
+                    }))
+
+                elif ticker in subscribed_tickers:
                     await live_feed_manager.unsubscribe(ticker, queue)
                     subscribed_tickers.discard(ticker)
 
@@ -1395,8 +1363,14 @@ async def websocket_live(ws: WebSocket):
         if analysis_task:
             analysis_task.cancel()
         sender_task.cancel()
+        # Cancel all mock playback tasks
+        for task in mock_tasks.values():
+            task.cancel()
+        # Unsubscribe real tickers from live feed manager
         for ticker in subscribed_tickers:
-            await live_feed_manager.unsubscribe(ticker, queue)
+            if ticker not in mock_tasks:
+                await live_feed_manager.unsubscribe(ticker, queue)
+        mock_tasks.clear()
         print(f"[WS] Client disconnected, cleaned up {len(subscribed_tickers)} subscription(s)")
 
 
@@ -1404,6 +1378,81 @@ async def websocket_live(ws: WebSocket):
 async def feed_status():
     """Get the current status of the live feed manager."""
     return live_feed_manager.get_status()
+
+
+# ── Watchlist WebSocket feed ────────────────────────────────
+
+@app.websocket("/ws/watchlist")
+async def websocket_watchlist(ws: WebSocket):
+    """
+    Dedicated WebSocket for watchlist price streaming.
+
+    Client sends:
+      {"symbols": ["SPY","QQQ","AAPL"], "mock": false}
+      (can be re-sent to update symbols or mock state)
+
+    Server pushes (every ~1 sec):
+      {"type": "prices", "prices": [{symbol, price, change, ...}, ...]}
+      (filtered to only the symbols THIS client requested)
+    """
+    await ws.accept()
+    cid: int | None = None
+
+    async def _sender(q: asyncio.Queue):
+        try:
+            while True:
+                msg = await q.get()
+                await ws.send_text(msg)
+        except (WebSocketDisconnect, Exception):
+            pass
+
+    sender_task: asyncio.Task | None = None
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                cmd = json.loads(raw)
+            except json.JSONDecodeError:
+                await ws.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                continue
+
+            symbols_raw = cmd.get("symbols", [])
+            mock = cmd.get("mock", False)
+            symbols = {s.strip().upper() for s in symbols_raw if s.strip()}
+
+            if not symbols:
+                await ws.send_text(json.dumps({"type": "error", "message": "No symbols provided"}))
+                continue
+
+            if cid is None:
+                # First message → register
+                cid, queue = await _watchlist_hub.register(symbols, mock)
+                sender_task = asyncio.create_task(_sender(queue))
+                await ws.send_text(json.dumps({
+                    "type": "subscribed",
+                    "symbols": sorted(symbols),
+                    "mock": mock,
+                }))
+            else:
+                # Subsequent messages → update symbols / mock flag
+                await _watchlist_hub.update_symbols(cid, symbols, mock)
+                await ws.send_text(json.dumps({
+                    "type": "subscribed",
+                    "symbols": sorted(symbols),
+                    "mock": mock,
+                }))
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"[WS-Watchlist] Error: {e}")
+    finally:
+        if sender_task:
+            sender_task.cancel()
+        if cid is not None:
+            await _watchlist_hub.unregister(cid)
+        print(f"[WS-Watchlist] Client disconnected")
 
 
 # ── Static files (must be last so it doesn't shadow API routes) ─

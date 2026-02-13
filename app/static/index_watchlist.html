@@ -2249,7 +2249,7 @@
                 
                 <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
                 <button class="live-btn" id="live-btn">⚪ LIVE</button>
-                <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 12px;min-width:auto">MOCK</button>
+                <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 12px;min-width:auto" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
             </div>
 
             <div class="filter-bar" id="filter-bar">
@@ -2266,12 +2266,12 @@
 
                 <div class="toggle-group bullish-color">
                     <label class="toggle-switch"><input type="checkbox" id="filter-strong_bullish" checked><span class="toggle-slider"></span></label>
-                    <span class="toggle-text active" data-for="filter-strong_bullish">Strong Bullish</span>
+                    <span class="toggle-text" data-for="filter-strong_bullish">Strong Bullish</span>
                 </div>
 
                 <div class="toggle-group bearish-color">
                     <label class="toggle-switch"><input type="checkbox" id="filter-strong_bearish" checked><span class="toggle-slider"></span></label>
-                    <span class="toggle-text active" data-for="filter-strong_bearish">Strong Bearish</span>
+                    <span class="toggle-text" data-for="filter-strong_bearish">Strong Bearish</span>
                 </div>
 
                 <div class="toggle-group bullish-color">
@@ -2518,10 +2518,9 @@
         let liveWs = null;             // WebSocket connection for live option feed
         let liveWsTicker = null;       // currently subscribed option ticker
         
-        // Watchlist / stocks WS state
-        let stocksWs = null;           // persistent WS for stock price streaming
-        let stocksWsSubscribed = new Set();  // stock tickers subscribed on stocksWs
-        let stocksWsReconnectTimer = null;
+        // Watchlist WS state
+        let watchlistWs = null;         // dedicated WS for watchlist price streaming
+        let watchlistWsReconnectTimer = null;
         let liveUnderlyingTicker = null;  // underlying stock ticker subscribed for chart overlay
         
         // Controls collapse state
@@ -2915,14 +2914,18 @@
 
             liveWs = new WebSocket(url);
 
+            const thisWs = liveWs;   // capture ref for onclose guard
+
             liveWs.onopen = () => {
                 console.log('[LiveWS] Connected');
                 updateLiveButton();
 
                 // If we already have a pending subscription, send it now
                 if (liveWsTicker) {
-                    liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveWsTicker }));
-                    console.log('[LiveWS] Subscribed to', liveWsTicker);
+                    const subMsg = { action: 'subscribe', ticker: liveWsTicker, mock: mockMode };
+                    if (mockMode) subMsg.interval = currentInterval;
+                    liveWs.send(JSON.stringify(subMsg));
+                    console.log('[LiveWS] Subscribed to', liveWsTicker, mockMode ? '(mock)' : '');
                 }
             };
 
@@ -2939,8 +2942,8 @@
                 console.log('[LiveWS] Disconnected, code:', event.code);
                 updateLiveButton();
 
-                // Auto-reconnect if still in live mode
-                if (liveMode) {
+                // Auto-reconnect only if still in live mode AND this is the current WS
+                if (liveMode && liveWs === thisWs) {
                     setTimeout(() => {
                         console.log('[LiveWS] Reconnecting...');
                         connectLiveWs();
@@ -2990,6 +2993,29 @@
 
                 if (!bar) return;
 
+                const ticker = msg.ticker || '';
+
+                // Log every 10th bar to avoid console spam
+                if (!window._liveBarCount) window._liveBarCount = 0;
+                window._liveBarCount++;
+                if (window._liveBarCount <= 3 || window._liveBarCount % 10 === 0) {
+                    console.log(`[LiveWS] bar #${window._liveBarCount}: ${ticker} close=${bar.close} vol=${bar.volume}`);
+                }
+
+                // ── Underlying stock overlay update ──
+                if (ticker === liveUnderlyingTicker && liveMode && underlaySeries) {
+                    const t = toEasternUnix(bar.datetime);
+                    if (underlayMode === 'line') {
+                        underlaySeries.update({ time: t, value: bar.close });
+                    } else if (underlayMode === 'candle') {
+                        underlaySeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                    }
+                    // Also keep underlayBarsData in sync for mode switches
+                    underlayBarsData.push({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                    return; // underlying bars don't update the main chart
+                }
+
+                // ── Option contract bar update ──
                 const chartsContainer = document.querySelector('.charts-container');
                 chartsContainer.classList.add('live-refreshing');
 
@@ -3089,174 +3115,105 @@
             }
         }
 
-        // ===== STOCKS WEBSOCKET (watchlist prices + underlying chart) =====
+        // ===== WATCHLIST WEBSOCKET (dedicated price streaming) =====
 
-        function connectStocksWs() {
-            if (stocksWs && (stocksWs.readyState === WebSocket.OPEN || stocksWs.readyState === WebSocket.CONNECTING)) {
+        function connectWatchlistWs() {
+            if (watchlistWs && (watchlistWs.readyState === WebSocket.OPEN || watchlistWs.readyState === WebSocket.CONNECTING)) {
                 return;
             }
 
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const url = `${proto}//${location.host}/ws/live`;
-            console.log('[StocksWS] Connecting to', url);
+            const url = `${proto}//${location.host}/ws/watchlist`;
+            console.log('[WatchlistWS] Connecting to', url);
 
-            stocksWs = new WebSocket(url);
+            watchlistWs = new WebSocket(url);
 
-            stocksWs.onopen = () => {
-                console.log('[StocksWS] Connected');
-                // Subscribe to all watchlist symbols
-                for (const item of defaultWatchlist) {
-                    stocksWs.send(JSON.stringify({ action: 'subscribe', ticker: item.symbol }));
-                    stocksWsSubscribed.add(item.symbol);
-                }
-                console.log('[StocksWS] Subscribed to', stocksWsSubscribed.size, 'stock tickers');
-
-                // If we have a pending underlying subscription, send it
-                if (liveUnderlyingTicker && !stocksWsSubscribed.has(liveUnderlyingTicker)) {
-                    stocksWs.send(JSON.stringify({ action: 'subscribe', ticker: liveUnderlyingTicker }));
-                    stocksWsSubscribed.add(liveUnderlyingTicker);
-                }
+            watchlistWs.onopen = () => {
+                console.log('[WatchlistWS] Connected');
+                sendWatchlistSymbols();
             };
 
-            stocksWs.onmessage = (event) => {
+            watchlistWs.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data);
-                    handleStocksMessage(msg);
+                    handleWatchlistMessage(msg);
                 } catch (e) {
-                    console.warn('[StocksWS] Bad message:', e);
+                    console.warn('[WatchlistWS] Bad message:', e);
                 }
             };
 
-            stocksWs.onclose = (event) => {
-                console.log('[StocksWS] Disconnected, code:', event.code);
-                stocksWsSubscribed.clear();
-                // Auto-reconnect
-                if (stocksWsReconnectTimer) clearTimeout(stocksWsReconnectTimer);
-                stocksWsReconnectTimer = setTimeout(() => {
-                    console.log('[StocksWS] Reconnecting...');
-                    connectStocksWs();
+            watchlistWs.onclose = (event) => {
+                console.log('[WatchlistWS] Disconnected, code:', event.code);
+                if (watchlistWsReconnectTimer) clearTimeout(watchlistWsReconnectTimer);
+                watchlistWsReconnectTimer = setTimeout(() => {
+                    console.log('[WatchlistWS] Reconnecting...');
+                    connectWatchlistWs();
                 }, 3000);
             };
 
-            stocksWs.onerror = (err) => {
-                console.error('[StocksWS] Error:', err);
+            watchlistWs.onerror = (err) => {
+                console.error('[WatchlistWS] Error:', err);
             };
         }
 
-        function handleStocksMessage(msg) {
+        function sendWatchlistSymbols() {
+            if (!watchlistWs || watchlistWs.readyState !== WebSocket.OPEN) return;
+            const symbols = defaultWatchlist.map(w => w.symbol);
+            // Always use real API for stock prices (mock mode only affects option WS feed)
+            watchlistWs.send(JSON.stringify({ symbols: symbols, mock: false }));
+            console.log('[WatchlistWS] Sent', symbols.length, 'symbols (always real prices)');
+        }
+
+        function handleWatchlistMessage(msg) {
             const type = msg.type;
 
-            if (type === 'bar') {
-                const ticker = msg.ticker;
-                const bar = msg.bar;
-                if (!ticker || !bar) return;
-
-                // Update watchlist price data
-                const prev = watchlistData[ticker];
-                const prevPrice = prev?.price || bar.close;
-                const change = bar.close - (prev?.openPrice || bar.open);
-                const openPrice = prev?.openPrice || bar.open;
-
-                watchlistData[ticker] = {
-                    symbol: ticker,
-                    price: bar.close,
-                    openPrice: openPrice,
-                    prevPrice: prevPrice,
-                    change: Math.round(change * 100) / 100,
-                    changePct: openPrice > 0 ? Math.round((change / openPrice) * 10000) / 100 : 0,
-                    high: Math.max(bar.high, prev?.high || 0),
-                    low: prev?.low ? Math.min(bar.low, prev.low) : bar.low,
-                    volume: bar.accumulated_volume || (prev?.volume || 0) + bar.volume,
-                    direction: bar.close > prevPrice ? 'up' : bar.close < prevPrice ? 'down' : null,
-                    lastUpdate: bar.datetime,
-                };
-
+            if (type === 'prices') {
+                const prices = msg.prices || [];
+                for (const price of prices) {
+                    const prevPrice = watchlistData[price.symbol]?.price;
+                    watchlistData[price.symbol] = {
+                        ...price,
+                        prevPrice: prevPrice || price.price,
+                        direction: prevPrice ? (price.price > prevPrice ? 'up' : price.price < prevPrice ? 'down' : null) : null,
+                    };
+                }
                 renderWatchlist();
 
-                // If this is the underlying for the current option analysis, update overlay chart
-                if (ticker === liveUnderlyingTicker && liveMode && underlaySeries) {
-                    const t = toEasternUnix(bar.datetime);
-                    if (underlayMode === 'candle') {
-                        underlaySeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-                    } else if (underlayMode === 'line') {
-                        underlaySeries.update({ time: t, value: bar.close });
-                    }
-                }
-
             } else if (type === 'subscribed') {
-                console.log('[StocksWS] Confirmed subscription:', msg.ticker);
-            } else if (type === 'unsubscribed') {
-                console.log('[StocksWS] Confirmed unsubscription:', msg.ticker);
-            } else if (type === 'status') {
-                // ignore
-            } else if (type === 'sow') {
-                // SOW for stock — use the last bar to set initial price
-                const ticker = msg.ticker;
-                const bars = msg.bars || [];
-                if (bars.length > 0) {
-                    const lastBar = bars[bars.length - 1];
-                    const firstBar = bars[0];
-                    const prev = watchlistData[ticker];
-                    const change = lastBar.close - firstBar.open;
-                    watchlistData[ticker] = {
-                        symbol: ticker,
-                        price: lastBar.close,
-                        openPrice: firstBar.open,
-                        prevPrice: prev?.price || lastBar.close,
-                        change: Math.round(change * 100) / 100,
-                        changePct: firstBar.open > 0 ? Math.round((change / firstBar.open) * 10000) / 100 : 0,
-                        high: Math.max(...bars.map(b => b.high)),
-                        low: Math.min(...bars.map(b => b.low)),
-                        volume: lastBar.accumulated_volume || bars.reduce((s, b) => s + b.volume, 0),
-                        direction: null,
-                        lastUpdate: lastBar.datetime,
-                    };
-                    renderWatchlist();
-                    console.log(`[StocksWS] SOW for ${ticker}: ${bars.length} bars, last price=${lastBar.close}`);
-                }
+                console.log('[WatchlistWS] Subscribed:', msg.symbols?.join(', '));
+            } else if (type === 'error') {
+                console.warn('[WatchlistWS] Error:', msg.message);
             }
         }
 
         /**
          * Subscribe to the underlying stock for live chart overlay.
-         * Called when the user clicks LIVE on an option.
+         * Uses liveWs (the options feed WS) for real-time bar streaming of the underlying.
          */
         function subscribeUnderlyingLive(symbol) {
-            if (liveUnderlyingTicker === symbol) return;  // already subscribed
+            if (liveUnderlyingTicker === symbol) return;
 
-            // Unsubscribe previous underlying if it's not in the watchlist
-            if (liveUnderlyingTicker && !defaultWatchlist.some(w => w.symbol === liveUnderlyingTicker)) {
-                if (stocksWs && stocksWs.readyState === WebSocket.OPEN) {
-                    stocksWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveUnderlyingTicker }));
-                    stocksWsSubscribed.delete(liveUnderlyingTicker);
+            // Unsubscribe previous underlying
+            if (liveUnderlyingTicker) {
+                if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+                    liveWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveUnderlyingTicker }));
                 }
             }
 
             liveUnderlyingTicker = symbol;
 
-            // If it's already subscribed (from watchlist), nothing to do
-            if (stocksWsSubscribed.has(symbol)) {
-                console.log(`[StocksWS] ${symbol} already subscribed via watchlist`);
-                return;
-            }
-
-            // Subscribe
-            if (stocksWs && stocksWs.readyState === WebSocket.OPEN) {
-                stocksWs.send(JSON.stringify({ action: 'subscribe', ticker: symbol }));
-                stocksWsSubscribed.add(symbol);
-                console.log(`[StocksWS] Subscribed to underlying: ${symbol}`);
+            // Subscribe via the live options WS (always real for stock data)
+            if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+                liveWs.send(JSON.stringify({ action: 'subscribe', ticker: symbol, mock: false }));
+                console.log(`[LiveWS] Subscribed to underlying: ${symbol} (always real)`);
             }
         }
 
         function unsubscribeUnderlyingLive() {
             if (!liveUnderlyingTicker) return;
 
-            // Only unsubscribe if not in the watchlist
-            if (!defaultWatchlist.some(w => w.symbol === liveUnderlyingTicker)) {
-                if (stocksWs && stocksWs.readyState === WebSocket.OPEN) {
-                    stocksWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveUnderlyingTicker }));
-                    stocksWsSubscribed.delete(liveUnderlyingTicker);
-                }
+            if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+                liveWs.send(JSON.stringify({ action: 'unsubscribe', ticker: liveUnderlyingTicker }));
             }
             liveUnderlyingTicker = null;
         }
@@ -3274,7 +3231,7 @@
 
             try {
                 let url = `/api/analyze/live?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}`;
-                if (mockMode) url += '&mock=true';
+                // mock param not needed – live poll always uses real API
                 if (lastBarDatetime) url += `&after=${encodeURIComponent(lastBarDatetime)}`;
 
                 const res = await authFetch(url);
@@ -3350,16 +3307,29 @@
                 }
 
                 if (mockMode) {
-                    // Mock mode: keep using HTTP polling (no upstream WS needed)
-                    const interval = 1;
-                    liveCountdown = interval;
+                    // Mock mode: connect WS and let the SOW (snapshot) populate the chart
+                    liveWsTicker = formatOptionTicker(currentSymbol, expiration, parseFloat(strike), right);
+                    console.log('[LiveWS] Will subscribe (MOCK) to:', liveWsTicker);
+
+                    // Clear chart + underlay so mock SOW starts clean
+                    if (candlestickSeries) candlestickSeries.setData([]);
+                    if (volumeSeries) volumeSeries.setData([]);
+                    removeUnderlay();
+                    underlayBarsData = [];
+                    lastAnalysisData = { bars: [], signals: [], bias: {}, composite: {} };
+                    window._liveBarCount = 0;
+
+                    // Auto-analyze to populate composite/greeks panels (real API)
+                    analyze().catch(() => {});
+
+                    // Start mock WS immediately — backend sends SOW then live bars
+                    connectLiveWs();
+                    if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+                        liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveWsTicker, mock: true, interval: currentInterval }));
+                    }
+                    // Subscribe to underlying stock for live overlay chart
+                    subscribeUnderlyingLive(currentSymbol);
                     updateLiveButton();
-                    liveCountdownInterval = setInterval(() => {
-                        liveCountdown--;
-                        if (liveCountdown <= 0) liveCountdown = interval;
-                        updateLiveButton();
-                    }, 1000);
-                    liveInterval = setInterval(() => livePoll(), interval * 1000);
                 } else {
                     // Real mode: use WebSocket for live per-second agg feed
                     liveWsTicker = formatOptionTicker(currentSymbol, expiration, parseFloat(strike), right);
@@ -3369,7 +3339,7 @@
 
                     // If already connected, subscribe now
                     if (liveWs && liveWs.readyState === WebSocket.OPEN) {
-                        liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveWsTicker }));
+                        liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveWsTicker, mock: false }));
                     }
                     // Otherwise, onopen handler will send the subscribe
 
@@ -3429,7 +3399,7 @@
             try {
                 const symbols = defaultWatchlist.map(w => w.symbol).join(',');
                 let url = `/api/watchlist/prices?symbols=${symbols}`;
-                if (mockMode) url += '&mock=true';
+                // Always use real API for stock prices (mock mode only affects option WS feed)
                 const res = await authFetch(url);
                 if (!res.ok) throw new Error('Failed to fetch prices');
                 
@@ -3731,7 +3701,7 @@
                 let url = `/api/analyze?symbol=${currentSymbol}&expiration=${expiration}&strike=${strike}&right=${right}&interval=${currentInterval}`;
                 if (startDate) url += `&start_date=${startDate}`;
                 if (endDate) url += `&end_date=${endDate}`;
-                if (mockMode) url += `&mock=true`;
+                // mock param not needed – analysis always uses real API data
                 
                 const res = await authFetch(url);
                 if (!res.ok) {
@@ -3761,8 +3731,10 @@
                     document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
                 }
                 
-                // Always do full chart draw on analyze (live mode uses livePoll for deltas)
-                updateCharts(data);
+                // In mock-live mode, only update analysis panels — chart is fed by WS SOW/bars
+                if (!(liveMode && mockMode)) {
+                    updateCharts(data);
+                }
                 updateAnalysis(data);
                 
                 // Update summary text after analyze
@@ -4249,7 +4221,9 @@
                 btn.style.color = '#787b86';
                 btn.textContent = 'MOCK';
             }
-            // If live mode is running, restart it with new interval
+            // Re-send watchlist symbols with new mock state
+            sendWatchlistSymbols();
+            // If live mode is running, restart it with new mock state
             if (liveMode) {
                 stopLiveMode();
                 toggleLiveMode();
@@ -4262,11 +4236,20 @@
         // Interval buttons - Handle both main and summary interval buttons
         document.querySelectorAll('.interval-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                const newInterval = parseInt(btn.dataset.interval);
+                if (newInterval === currentInterval) return;
                 // Update all interval buttons (both main and summary)
                 document.querySelectorAll('.interval-btn').forEach(b => b.classList.remove('active'));
-                currentInterval = parseInt(btn.dataset.interval);
+                currentInterval = newInterval;
                 // Set active on all buttons with same interval
                 document.querySelectorAll(`.interval-btn[data-interval="${currentInterval}"]`).forEach(b => b.classList.add('active'));
+
+                // If live mock mode is active, restart with new interval
+                if (liveMode && mockMode) {
+                    console.log(`[Interval] Changed to ${currentInterval}m while mock-live active — restarting`);
+                    stopLiveMode();
+                    setTimeout(() => toggleLiveMode(), 300);
+                }
             });
         });
 
@@ -4415,21 +4398,14 @@
                 }
             }
             
-            // Load watchlist prices FIRST via REST (needed for ATM calculation before WS connects)
+            // Load watchlist prices via REST first (needed for ATM calculation)
             await loadWatchlistPrices();
             
             // Select default symbol (will now have price data for ATM)
             selectSymbol('SPY');
             
-            // Start stocks WebSocket for real-time price streaming
-            if (!mockMode) {
-                connectStocksWs();
-                // Slower REST fallback – only every 60s as backup (WS handles real-time)
-                priceUpdateInterval = setInterval(loadWatchlistPrices, 60000);
-            } else {
-                // Mock mode: use REST polling at 15s
-                priceUpdateInterval = setInterval(loadWatchlistPrices, 15000);
-            }
+            // Start watchlist WebSocket for 1/sec price streaming
+            connectWatchlistWs();
         }
         
         init();

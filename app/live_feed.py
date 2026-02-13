@@ -18,9 +18,12 @@ Usage from FastAPI:
 """
 
 import asyncio
+import csv
 import json
+import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -363,6 +366,370 @@ class _MassiveUpstreamWS:
 
 
 # ─────────────────────────────────────────────────────────────
+# Per-client mock CSV playback
+# ─────────────────────────────────────────────────────────────
+_DATA_DIR = Path(__file__).parent.parent / "data"
+
+
+def _base_symbol(ticker: str) -> str:
+    """Extract underlying symbol: 'QQQ' → 'qqq', 'O:QQQ260115C00620000' → 'qqq'."""
+    import re
+    if ticker.startswith("O:"):
+        m = re.match(r'^([A-Z]+)', ticker[2:])
+        return m.group(1).lower() if m else ticker[2:].lower()
+    return ticker.lower()
+
+
+def _load_csv_bars(symbol_lower: str) -> list[dict]:
+    """Load all CSV files for a symbol from data/<symbol>/, sorted by date.
+    Falls back to 'qqq' data if no data exists for the requested symbol."""
+    symbol_dir = _DATA_DIR / symbol_lower
+    if not symbol_dir.is_dir():
+        # Fallback to QQQ data (the only guaranteed mock dataset)
+        fallback = _DATA_DIR / "qqq"
+        if symbol_lower != "qqq" and fallback.is_dir():
+            _log(f"[MockPlayback] No CSV data for '{symbol_lower}', falling back to 'qqq'")
+            symbol_dir = fallback
+        else:
+            _log(f"[MockPlayback] No CSV data directory for '{symbol_lower}' at {symbol_dir}")
+            return []
+
+    files = sorted(f for f in os.listdir(symbol_dir) if f.endswith(".csv"))
+    bars: list[dict] = []
+    for fname in files:
+        with open(symbol_dir / fname, newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                bars.append(row)
+
+    _log(f"[MockPlayback] Loaded {len(bars)} bars from {len(files)} CSV files for '{symbol_lower}'")
+    return bars
+
+
+def _detect_bar_signals(history: list[dict], bar: dict) -> list[dict]:
+    """
+    Lightweight VPA signal detection on the latest bar.
+    Uses the provided history for volume-ratio calculation.
+    """
+    if len(history) < 5:
+        return []
+
+    recent_vols = [b["volume"] for b in history[-20:] if b["volume"] > 0]
+    if not recent_vols:
+        return []
+    avg_vol = sum(recent_vols) / len(recent_vols)
+    if avg_vol == 0:
+        return []
+
+    vol_ratio = bar["volume"] / avg_vol
+    price_change = bar["close"] - bar["open"]
+    bar_range = bar["high"] - bar["low"]
+
+    signals = []
+
+    if vol_ratio >= 2.0 and bar_range > 0:
+        body_ratio = abs(price_change) / bar_range if bar_range > 0 else 0
+
+        if price_change > 0 and body_ratio > 0.6:
+            signals.append({
+                "signal": "strong_bullish",
+                "confidence": min(vol_ratio / 5.0, 1.0),
+                "description": f"Strong bullish: vol {vol_ratio:.1f}x avg, solid green bar",
+                "datetime": bar["datetime"],
+                "price": bar["close"],
+                "volume": bar["volume"],
+                "volume_ratio": round(vol_ratio, 2),
+            })
+        elif price_change < 0 and body_ratio > 0.6:
+            signals.append({
+                "signal": "strong_bearish",
+                "confidence": min(vol_ratio / 5.0, 1.0),
+                "description": f"Strong bearish: vol {vol_ratio:.1f}x avg, solid red bar",
+                "datetime": bar["datetime"],
+                "price": bar["close"],
+                "volume": bar["volume"],
+                "volume_ratio": round(vol_ratio, 2),
+            })
+
+        if vol_ratio >= 3.0:
+            upper_wick = bar["high"] - max(bar["open"], bar["close"])
+            lower_wick = min(bar["open"], bar["close"]) - bar["low"]
+
+            if upper_wick > bar_range * 0.5 and price_change < 0:
+                signals.append({
+                    "signal": "climax_top",
+                    "confidence": min(vol_ratio / 6.0, 1.0),
+                    "description": f"Climax top: vol {vol_ratio:.1f}x avg, rejection wick",
+                    "datetime": bar["datetime"],
+                    "price": bar["close"],
+                    "volume": bar["volume"],
+                    "volume_ratio": round(vol_ratio, 2),
+                })
+            elif lower_wick > bar_range * 0.5 and price_change > 0:
+                signals.append({
+                    "signal": "climax_bottom",
+                    "confidence": min(vol_ratio / 6.0, 1.0),
+                    "description": f"Climax bottom: vol {vol_ratio:.1f}x avg, bounce wick",
+                    "datetime": bar["datetime"],
+                    "price": bar["close"],
+                    "volume": bar["volume"],
+                    "volume_ratio": round(vol_ratio, 2),
+                })
+
+    elif vol_ratio < 0.5 and abs(price_change) > 0:
+        if price_change > 0:
+            signals.append({
+                "signal": "weak_up",
+                "confidence": 0.3,
+                "description": f"Weak up move: vol only {vol_ratio:.1f}x avg",
+                "datetime": bar["datetime"],
+                "price": bar["close"],
+                "volume": bar["volume"],
+                "volume_ratio": round(vol_ratio, 2),
+            })
+        else:
+            signals.append({
+                "signal": "weak_down",
+                "confidence": 0.3,
+                "description": f"Weak down move: vol only {vol_ratio:.1f}x avg",
+                "datetime": bar["datetime"],
+                "price": bar["close"],
+                "volume": bar["volume"],
+                "volume_ratio": round(vol_ratio, 2),
+            })
+
+    return signals
+
+
+def _floor_dt(dt: datetime, interval_sec: int) -> datetime:
+    """Floor a datetime to the nearest interval boundary."""
+    ts = int(dt.timestamp())
+    floored = ts - (ts % interval_sec)
+    return datetime.fromtimestamp(floored)
+
+
+# ── Option-like price scaling ──
+_OPTION_BASE_PRICE = 5.0     # Simulated option centre price
+_OPTION_LEVERAGE   = 10      # Amplify stock % moves to look like option moves
+
+def _scale_to_option(raw_price: float, base_stock_price: float) -> float:
+    """Convert a stock price into a simulated option price.
+
+    Maps the stock's percentage change from its baseline into a leveraged
+    change centred around _OPTION_BASE_PRICE.  A 0.1 % move in the stock
+    becomes a 1 % move in the simulated option (at 10x leverage).
+    """
+    pct = (raw_price / base_stock_price) - 1.0
+    return round(_OPTION_BASE_PRICE * (1 + pct * _OPTION_LEVERAGE), 4)
+
+
+def build_mock_sow(ticker: str, interval_minutes: int = 5, num_candles: int = 50) -> tuple[list[dict], int]:
+    """
+    Build a snapshot-of-world from CSV data: *num_candles* pre-built historical
+    candles whose timestamps count backwards from *now*, so the chart already has
+    price history when mock live mode starts.
+
+    Returns (sow_bars, start_index) where start_index is the CSV row offset
+    at which mock_csv_playback should continue after the SOW data.
+    """
+    base_sym = _base_symbol(ticker)
+    raw_bars = _load_csv_bars(base_sym)
+    if not raw_bars:
+        return [], 0
+
+    is_option = ticker.startswith("O:")
+    base_stock_price = float(raw_bars[0]["close"]) if is_option and float(raw_bars[0]["close"]) > 0 else 0
+
+    interval_sec = max(interval_minutes, 1) * 60
+
+    # Determine how many raw rows go into each aggregated candle.
+    # Each raw row is 1-minute data, so rows_per_candle = interval_minutes.
+    rows_per_candle = max(interval_minutes, 1)
+
+    # We need enough raw rows: num_candles * rows_per_candle
+    rows_needed = num_candles * rows_per_candle
+    if rows_needed > len(raw_bars):
+        rows_needed = len(raw_bars)
+        num_candles = rows_needed // rows_per_candle
+
+    if num_candles == 0:
+        return [], 0
+
+    # Slice the raw data (take the first rows_needed rows)
+    raw_slice = raw_bars[:rows_needed]
+
+    # Build aggregated candles with timestamps counting BACK from (now - 1 interval)
+    now_utc = datetime.now(tz=ZoneInfo("UTC"))
+    now_et = now_utc.astimezone(_ET).replace(tzinfo=None)
+    # The most recent SOW candle ends one interval before "now" (so live bars start at "now")
+    latest_candle_end = _floor_dt(now_et, interval_sec)
+
+    sow_bars: list[dict] = []
+    for ci in range(num_candles):
+        chunk_start = ci * rows_per_candle
+        chunk = raw_slice[chunk_start:chunk_start + rows_per_candle]
+
+        o_vals = [float(r["open"]) for r in chunk]
+        c_vals = [float(r["close"]) for r in chunk]
+        h_vals = [float(r["high"]) for r in chunk]
+        l_vals = [float(r["low"]) for r in chunk]
+        v_vals = [int(r["volume"]) for r in chunk]
+
+        o = o_vals[0]
+        c = c_vals[-1]
+        h = max(h_vals)
+        lo = min(l_vals)
+        v = sum(v_vals)
+
+        if is_option and base_stock_price > 0:
+            o  = _scale_to_option(o, base_stock_price)
+            c  = _scale_to_option(c, base_stock_price)
+            h  = _scale_to_option(h, base_stock_price)
+            lo = _scale_to_option(lo, base_stock_price)
+
+        # Timestamp: count back from latest_candle_end
+        candle_offset = num_candles - 1 - ci  # 0 = most recent, num_candles-1 = oldest
+        candle_dt = latest_candle_end - timedelta(seconds=candle_offset * interval_sec)
+        dt_str = candle_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        sow_bars.append({
+            "datetime": dt_str,
+            "open": o,
+            "high": h,
+            "low": lo,
+            "close": c,
+            "volume": v,
+            "vwap": round((h + lo) / 2, 4),
+            "accumulated_volume": 0,
+        })
+
+    _log(f"[MockSOW] Built {len(sow_bars)} candles for {ticker} (interval={interval_minutes}m)")
+    return sow_bars, rows_needed  # start_index for continuing playback
+
+
+async def mock_csv_playback(ticker: str, queue: asyncio.Queue, interval_minutes: int = 5,
+                            start_index: int = 0):
+    """
+    Per-client CSV playback coroutine.
+    Loads historical CSV data for the ticker's underlying symbol and pushes
+    aggregated candles into the provided asyncio.Queue, formatted identically
+    to real-feed bar payloads.
+
+    Ticks arrive every 1s but are aggregated into the selected interval
+    (e.g. 1m, 5m, 15m).  Each tick updates the current candle's OHLCV.
+    A new candle starts when the interval window advances.
+
+    *start_index* lets the playback resume after SOW rows that were already
+    consumed by build_mock_sow().
+    """
+    base_sym = _base_symbol(ticker)
+    bars = _load_csv_bars(base_sym)
+    if not bars:
+        return
+
+    interval_sec = max(interval_minutes, 1) * 60
+    _log(f"[MockPlayback] interval={interval_minutes}m ({interval_sec}s) for {ticker}, start_index={start_index}")
+
+    is_option = ticker.startswith("O:")
+    base_stock_price = float(bars[0]["close"]) if is_option and float(bars[0]["close"]) > 0 else 0
+
+    history: list[dict] = []
+    idx = start_index % len(bars)  # Resume from where SOW left off
+
+    # Current candle accumulator
+    candle_dt: str | None = None     # floored datetime string for current candle
+    candle_open = 0.0
+    candle_high = 0.0
+    candle_low = 0.0
+    candle_close = 0.0
+    candle_volume = 0
+
+    try:
+        while True:
+            row = bars[idx]
+
+            o = float(row["open"])
+            c = float(row["close"])
+            h = float(row["high"])
+            lo = float(row["low"])
+            v = int(row["volume"])
+
+            if is_option and base_stock_price > 0:
+                o  = _scale_to_option(o, base_stock_price)
+                c  = _scale_to_option(c, base_stock_price)
+                h  = _scale_to_option(h, base_stock_price)
+                lo = _scale_to_option(lo, base_stock_price)
+
+            # Floor current time to the interval boundary
+            now_utc = datetime.now(tz=ZoneInfo("UTC"))
+            now_et = now_utc.astimezone(_ET).replace(tzinfo=None)
+            floored = _floor_dt(now_et, interval_sec)
+            floored_str = floored.strftime("%Y-%m-%d %H:%M:%S")
+
+            if floored_str != candle_dt:
+                # New candle window — start fresh
+                candle_dt = floored_str
+                candle_open = o
+                candle_high = h
+                candle_low = lo
+                candle_close = c
+                candle_volume = v
+            else:
+                # Same candle window — aggregate
+                candle_high = max(candle_high, h)
+                candle_low = min(candle_low, lo)
+                candle_close = c
+                candle_volume += v
+
+            bar = {
+                "datetime": candle_dt,
+                "open": candle_open,
+                "high": candle_high,
+                "low": candle_low,
+                "close": candle_close,
+                "volume": candle_volume,
+                "vwap": round((candle_high + candle_low) / 2, 4),
+                "accumulated_volume": 0,
+            }
+
+            # Only add to history when a new candle starts (for signal detection)
+            if len(history) == 0 or history[-1]["datetime"] != candle_dt:
+                history.append(bar)
+                if len(history) > 100:
+                    history = history[-100:]
+            else:
+                history[-1] = bar  # update current candle in history
+
+            signals = _detect_bar_signals(history, bar)
+
+            payload = json.dumps({
+                "type": "bar",
+                "ticker": ticker,
+                "bar": bar,
+                "signals": signals,
+            })
+
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                    queue.put_nowait(payload)
+                except Exception:
+                    pass
+
+            idx = (idx + 1) % len(bars)
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        _log(f"[MockPlayback] Stopped playback for {ticker}")
+        return
+    except Exception as e:
+        _log(f"[MockPlayback] ERROR for {ticker}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# ─────────────────────────────────────────────────────────────
 # LiveFeedManager – public API
 # ─────────────────────────────────────────────────────────────
 class LiveFeedManager:
@@ -480,101 +847,10 @@ class LiveFeedManager:
     def _detect_signals(self, sym: str, bar: dict) -> list[dict]:
         """
         Lightweight VPA signal detection on the latest bar.
-        Uses accumulated history for volume ratio calculation.
+        Delegates to module-level _detect_bar_signals.
         """
         history = self._bar_history.get(sym, [])
-        if len(history) < 5:
-            return []
-
-        # Calculate average volume over recent bars
-        recent_vols = [b["volume"] for b in history[-20:] if b["volume"] > 0]
-        if not recent_vols:
-            return []
-        avg_vol = sum(recent_vols) / len(recent_vols)
-        if avg_vol == 0:
-            return []
-
-        vol_ratio = bar["volume"] / avg_vol
-        price_change = bar["close"] - bar["open"]
-        bar_range = bar["high"] - bar["low"]
-
-        signals = []
-
-        # Strong volume + direction = strong signal
-        if vol_ratio >= 2.0 and bar_range > 0:
-            body_ratio = abs(price_change) / bar_range if bar_range > 0 else 0
-
-            if price_change > 0 and body_ratio > 0.6:
-                signals.append({
-                    "signal": "strong_bullish",
-                    "confidence": min(vol_ratio / 5.0, 1.0),
-                    "description": f"Strong bullish: vol {vol_ratio:.1f}x avg, solid green bar",
-                    "datetime": bar["datetime"],
-                    "price": bar["close"],
-                    "volume": bar["volume"],
-                    "volume_ratio": round(vol_ratio, 2),
-                })
-            elif price_change < 0 and body_ratio > 0.6:
-                signals.append({
-                    "signal": "strong_bearish",
-                    "confidence": min(vol_ratio / 5.0, 1.0),
-                    "description": f"Strong bearish: vol {vol_ratio:.1f}x avg, solid red bar",
-                    "datetime": bar["datetime"],
-                    "price": bar["close"],
-                    "volume": bar["volume"],
-                    "volume_ratio": round(vol_ratio, 2),
-                })
-
-            # Climax detection (very high volume + reversal wick)
-            if vol_ratio >= 3.0:
-                upper_wick = bar["high"] - max(bar["open"], bar["close"])
-                lower_wick = min(bar["open"], bar["close"]) - bar["low"]
-
-                if upper_wick > bar_range * 0.5 and price_change < 0:
-                    signals.append({
-                        "signal": "climax_top",
-                        "confidence": min(vol_ratio / 6.0, 1.0),
-                        "description": f"Climax top: vol {vol_ratio:.1f}x avg, rejection wick",
-                        "datetime": bar["datetime"],
-                        "price": bar["close"],
-                        "volume": bar["volume"],
-                        "volume_ratio": round(vol_ratio, 2),
-                    })
-                elif lower_wick > bar_range * 0.5 and price_change > 0:
-                    signals.append({
-                        "signal": "climax_bottom",
-                        "confidence": min(vol_ratio / 6.0, 1.0),
-                        "description": f"Climax bottom: vol {vol_ratio:.1f}x avg, bounce wick",
-                        "datetime": bar["datetime"],
-                        "price": bar["close"],
-                        "volume": bar["volume"],
-                        "volume_ratio": round(vol_ratio, 2),
-                    })
-
-        # Weak volume + opposite direction = weak move
-        elif vol_ratio < 0.5 and abs(price_change) > 0:
-            if price_change > 0:
-                signals.append({
-                    "signal": "weak_up",
-                    "confidence": 0.3,
-                    "description": f"Weak up move: vol only {vol_ratio:.1f}x avg",
-                    "datetime": bar["datetime"],
-                    "price": bar["close"],
-                    "volume": bar["volume"],
-                    "volume_ratio": round(vol_ratio, 2),
-                })
-            else:
-                signals.append({
-                    "signal": "weak_down",
-                    "confidence": 0.3,
-                    "description": f"Weak down move: vol only {vol_ratio:.1f}x avg",
-                    "datetime": bar["datetime"],
-                    "price": bar["close"],
-                    "volume": bar["volume"],
-                    "volume_ratio": round(vol_ratio, 2),
-                })
-
-        return signals
+        return _detect_bar_signals(history, bar)
 
     # ── Client subscription management ───────────────────────
 
