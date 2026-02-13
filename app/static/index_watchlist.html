@@ -2580,6 +2580,9 @@
         // Track last composite action for change-detection toasts
         let lastCompositeAction = null;
 
+        // Track last VPA-derived action (BUY/SELL/HOLD) for historical chart markers
+        let lastVpaAction = null;
+
         // Underlying underlay state
         let underlayMode = 'line';  // 'off', 'line', 'candle'
         let underlaySeries = null;
@@ -2660,6 +2663,40 @@
             'strong_bearish', 'distribution', 'test_resistance', 'climax_top', 
             'no_demand', 'pin_bar_bear', 'confirmed_reversal_down'
         ];
+
+        // Classify a VPA signal to BUY / SELL / HOLD
+        function classifySignal(signalName) {
+            if (BULLISH_SIGNALS.includes(signalName)) return 'BUY';
+            if (BEARISH_SIGNALS.includes(signalName)) return 'SELL';
+            return 'HOLD';
+        }
+
+        // Build deduplicated BUY/SELL/HOLD transition markers from VPA signals
+        function buildActionMarkers(signals) {
+            if (!signals || signals.length === 0) return [];
+            // Sort chronologically
+            const sorted = [...signals].sort((a, b) => {
+                return new Date(a.datetime.replace(' ', 'T') + 'Z') - new Date(b.datetime.replace(' ', 'T') + 'Z');
+            });
+            const markers = [];
+            let prevAction = null;
+            for (const sig of sorted) {
+                const action = classifySignal(sig.signal);
+                if (action !== prevAction) {
+                    const isBuy = action === 'BUY';
+                    const isSell = action === 'SELL';
+                    markers.push({
+                        time: toEasternUnix(sig.datetime),
+                        position: isBuy ? 'belowBar' : 'aboveBar',
+                        color: isBuy ? '#00e676' : isSell ? '#ff1744' : '#ffab00',
+                        shape: isBuy ? 'arrowUp' : isSell ? 'arrowDown' : 'circle',
+                        text: action,
+                    });
+                    prevAction = action;
+                }
+            }
+            return markers;
+        }
         
         // Default watchlist symbols with metadata
         const defaultWatchlist = [
@@ -3415,6 +3452,7 @@
                 liveMode = false;
                 lastBarDatetime = null;
                 lastCompositeAction = null;
+                lastVpaAction = null;
                 
                 // Clear polling intervals (mock mode)
                 if (liveInterval) {
@@ -4094,6 +4132,22 @@
             );
         }
 
+        function showVpaActionToast(oldAction, newAction, signal) {
+            const icons = { 'BUY': '🟢', 'HOLD': '⚪', 'SELL': '🔴' };
+            const cls = newAction === 'BUY' ? 'buy' : newAction === 'SELL' ? 'sell' : 'hold';
+            const icon = icons[newAction] || '⚪';
+            const conf = Math.round(signal.confidence * 100) + '%';
+            const sigName = signal.signal.replace(/_/g, ' ').toUpperCase();
+            showToast(
+                `<span class="toast-icon">${icon}</span>` +
+                `<div class="toast-body">` +
+                `<span class="toast-title">VPA Signal: ${oldAction} → ${newAction}</span>` +
+                `<span class="toast-detail">${sigName} · Conf ${conf} · $${signal.price.toFixed(2)}</span>` +
+                `</div>`,
+                cls, 6000
+            );
+        }
+
         function updateComposite(comp) {
             if (!comp) return;
 
@@ -4201,7 +4255,7 @@
         function rebuildAllMarkers() {
             if (!candlestickSeries) return;
 
-            // Collect VPA signal markers
+            // Collect VPA signal markers (individual signal types)
             const vpaSignals = lastAnalysisData ? (lastAnalysisData.signals || []) : [];
             const filtered = filterSignals(vpaSignals);
             const markers = filtered.map(signal => {
@@ -4215,7 +4269,25 @@
                 };
             });
 
-            // Add composite BUY/SELL/HOLD marker on the last bar
+            // Add deduplicated BUY/SELL/HOLD transition markers for entire chart history
+            const actionMarkers = buildActionMarkers(vpaSignals);
+            for (const am of actionMarkers) {
+                markers.push(am);
+            }
+
+            // Check if the latest VPA-derived action changed → fire toast
+            if (vpaSignals.length > 0) {
+                const sortedAll = [...vpaSignals].sort((a, b) => {
+                    return new Date(a.datetime.replace(' ', 'T') + 'Z') - new Date(b.datetime.replace(' ', 'T') + 'Z');
+                });
+                const latestAction = classifySignal(sortedAll[sortedAll.length - 1].signal);
+                if (lastVpaAction !== null && latestAction !== lastVpaAction) {
+                    showVpaActionToast(lastVpaAction, latestAction, sortedAll[sortedAll.length - 1]);
+                }
+                lastVpaAction = latestAction;
+            }
+
+            // Add composite BUY/SELL/HOLD marker on the last bar (from greeks engine)
             if (lastCompositeResult && lastAnalysisData && lastAnalysisData.bars.length > 0) {
                 const comp = lastCompositeResult;
                 const lastBar = lastAnalysisData.bars[lastAnalysisData.bars.length - 1];
