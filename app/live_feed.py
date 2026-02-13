@@ -261,9 +261,11 @@ class _UpstreamWS:
 class _MassiveUpstreamWS:
     """Encapsulates an upstream connection via the massive Python client."""
 
-    def __init__(self, label: str, on_message):
+    def __init__(self, label: str, on_message, feed: Feed = Feed.Delayed, market: Market = Market.Stocks):
         self.label = label
         self._on_message = on_message   # async callback(msg_dict)
+        self._feed = feed
+        self._market = market
         self.authenticated = False
         self._auth_failed_permanent = False
         self._conn_limit_hit = False  # True when connection limit exceeded
@@ -288,7 +290,7 @@ class _MassiveUpstreamWS:
         self._running = False
         if self._client:
             try:
-                self._client.close()
+                await self._client.close()
             except Exception:
                 pass
         if self._task:
@@ -332,15 +334,15 @@ class _MassiveUpstreamWS:
             try:
                 api_key = settings.POLYGON_API_KEY
                 masked = api_key[:4] + '…' + api_key[-4:] if len(api_key) > 8 else '***'
-                _log(f"[{self.label}] Connecting via massive (key: {masked}, feed=Delayed, market=Stocks)")
+                _log(f"[{self.label}] Connecting via massive (key: {masked}, feed={self._feed.name}, market={self._market.name})")
 
                 # Build initial subscriptions from active tickers
                 initial_subs = [f"A.{t}" for t in self._active_tickers]
 
                 self._client = WebSocketClient(
                     api_key=api_key,
-                    feed=Feed.Delayed,
-                    market=Market.Stocks,
+                    feed=self._feed,
+                    market=self._market,
                     subscriptions=initial_subs,
                     max_reconnects=5,
                 )
@@ -389,7 +391,7 @@ class _MassiveUpstreamWS:
             finally:
                 if self._client:
                     try:
-                        self._client.close()
+                        await self._client.close()
                     except Exception:
                         pass
                 self.ws = None
@@ -778,11 +780,15 @@ class LiveFeedManager:
         self._running = False
 
         # Two upstream connections (lazy – created on first subscribe)
-        self._options_upstream = _UpstreamWS(
-            "options", OPTIONS_WS_DELAYED, self._handle_aggregate
+        # Options: use Massive client with Launchpad feed (realtime)
+        self._options_upstream = _MassiveUpstreamWS(
+            "options", self._handle_aggregate,
+            feed=Feed.Launchpad, market=Market.Options,
         )
+        # Stocks: use Massive client with Delayed feed
         self._stocks_upstream = _MassiveUpstreamWS(
-            "stocks", self._handle_aggregate
+            "stocks", self._handle_aggregate,
+            feed=Feed.Delayed, market=Market.Stocks,
         )
 
         # downstream clients: ticker → set of asyncio.Queue
