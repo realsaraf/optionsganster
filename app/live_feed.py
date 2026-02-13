@@ -49,6 +49,10 @@ OPTIONS_WS_REALTIME = "wss://socket.polygon.io/options"
 # Grace period before upstream unsubscribe (seconds)
 UNSUBSCRIBE_GRACE = 5
 
+# Backoff when Polygon says "max_connections" (seconds)
+# Polygon needs time to release the old socket on their side
+MAX_CONN_BACKOFF = 30
+
 
 def _is_option_ticker(ticker: str) -> bool:
     """Return True if the ticker is an options OCC symbol (starts with 'O:')."""
@@ -75,6 +79,7 @@ class _UpstreamWS:
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._reconnect_delay = 1
+        self._conn_limit_hit = False  # True when Polygon says max_connections
         # tickers actively subscribed upstream for this market
         self._active_tickers: set[str] = set()
 
@@ -156,6 +161,7 @@ class _UpstreamWS:
                         break
 
                     if self.authenticated:
+                        self._conn_limit_hit = False  # clear on successful auth
                         await self._resubscribe_all(ws)
 
                     async for raw_msg in ws:
@@ -165,18 +171,28 @@ class _UpstreamWS:
                     websockets.exceptions.ConnectionClosedError,
                     ConnectionRefusedError, OSError) as e:
                 _log(f"[{self.label}] Disconnected: {e}")
+                # Check if this was a policy violation (often follows max_connections)
+                if "1008" in str(e) or "policy" in str(e).lower():
+                    self._conn_limit_hit = True
+                    self._reconnect_delay = max(self._reconnect_delay, MAX_CONN_BACKOFF)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 _log(f"[{self.label}] Error: {e}")
 
+            # Ensure the WS is fully closed before attempting reconnect
+            if self.ws:
+                try:
+                    await self.ws.close()
+                except Exception:
+                    pass
             self.ws = None
             self.authenticated = False
 
             if self._running and not self._auth_failed_permanent:
                 _log(f"[{self.label}] Reconnecting in {self._reconnect_delay}s…")
                 await asyncio.sleep(self._reconnect_delay)
-                self._reconnect_delay = min(self._reconnect_delay * 2, 30)
+                self._reconnect_delay = min(self._reconnect_delay * 2, 60)
                 self._auth_event = asyncio.Event()  # reset for next attempt
 
     async def _authenticate(self, ws):
@@ -215,6 +231,12 @@ class _UpstreamWS:
                         else:
                             _log(f"[{self.label}] ❌ AUTH FAILED: {message}")
                         self._auth_event.set()
+                    elif status == "max_connections":
+                        # Polygon says we have too many WS connections.
+                        # Force a long backoff so the stale socket can expire.
+                        self._conn_limit_hit = True
+                        _log(f"[{self.label}] ⚠ MAX CONNECTIONS – will back off {MAX_CONN_BACKOFF}s: {message}")
+                        self._reconnect_delay = MAX_CONN_BACKOFF
                     elif status == "success":
                         _log(f"[{self.label}] ✅ {message}")
                     elif status == "connected":
@@ -244,6 +266,7 @@ class _MassiveUpstreamWS:
         self._on_message = on_message   # async callback(msg_dict)
         self.authenticated = False
         self._auth_failed_permanent = False
+        self._conn_limit_hit = False  # True when connection limit exceeded
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._active_tickers: set[str] = set()
@@ -323,6 +346,7 @@ class _MassiveUpstreamWS:
                 )
 
                 self.authenticated = True
+                self._conn_limit_hit = False  # clear on successful connect
                 self.ws = True   # truthy sentinel for get_status
                 _log(f"[{self.label}] ✅ CONNECTED (massive) – subscribed {', '.join(self._active_tickers)}")
 
@@ -354,15 +378,27 @@ class _MassiveUpstreamWS:
                     self._auth_failed_permanent = True
                     _log(f"[{self.label}] ❌ AUTH FAILED (permanent): {e}")
                     break
-                _log(f"[{self.label}] Error: {e}")
+                # Detect connection-limit / policy-violation errors
+                if "max_connection" in err_msg or "1008" in err_msg or "policy" in err_msg:
+                    self._conn_limit_hit = True
+                    backoff = MAX_CONN_BACKOFF
+                    _log(f"[{self.label}] ⚠ Connection limit error – backing off {backoff}s: {e}")
+                else:
+                    backoff = 5
+                    _log(f"[{self.label}] Error: {e}")
             finally:
+                if self._client:
+                    try:
+                        self._client.close()
+                    except Exception:
+                        pass
                 self.ws = None
                 self.authenticated = False
                 self._client = None
 
             if self._running and not self._auth_failed_permanent:
-                _log(f"[{self.label}] Reconnecting in 5s…")
-                await asyncio.sleep(5)
+                _log(f"[{self.label}] Reconnecting in {backoff}s…")
+                await asyncio.sleep(backoff)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -854,10 +890,11 @@ class LiveFeedManager:
 
     # ── Client subscription management ───────────────────────
 
-    async def subscribe(self, ticker: str, queue: asyncio.Queue) -> list[dict]:
+    async def subscribe(self, ticker: str, queue: asyncio.Queue) -> tuple[list[dict], str | None]:
         """
         Subscribe a client queue to a ticker (option or stock).
-        Returns the current bar history (SOW) for initial chart draw.
+        Returns (bar_history, error_string_or_None).
+        error is non-None when upstream hit connection limit or auth failed.
         """
         # Cancel any pending unsubscribe timer
         timer = self._unsub_timers.pop(ticker, None)
@@ -865,31 +902,47 @@ class LiveFeedManager:
             timer.cancel()
             _log(f"Cancelled unsub timer for {ticker}")
 
+        upstream = self._upstream_for(ticker)
+
+        # Check if upstream is in connection-limit backoff BEFORE subscribing
+        if upstream._conn_limit_hit:
+            _log(f"Subscribe REJECTED for {ticker} – upstream {upstream.label} in connection-limit backoff")
+            return [], "conn_limit"
+
+        if upstream._auth_failed_permanent:
+            _log(f"Subscribe REJECTED for {ticker} – plan doesn't support {upstream.label} WS")
+            return [], "auth_failed"
+
         self._subscribers[ticker].add(queue)
         count = len(self._subscribers[ticker])
         _log(f"Subscribe {ticker} ({_market_label(ticker)}) – now {count} client(s)")
 
         # First subscriber → ensure the correct upstream is running, then subscribe
         if count == 1:
-            upstream = self._upstream_for(ticker)
-            if upstream._auth_failed_permanent:
-                _log(f"Skipping upstream subscribe for {ticker} – plan doesn't support {upstream.label} WS")
-            else:
-                # Add ticker BEFORE starting connection loop so the idle-check
-                # doesn't block the initial connection attempt.
-                upstream._active_tickers.add(ticker)
-                await upstream.ensure_started()
-                # Wait for auth (up to 5s)
-                for _ in range(50):
-                    if upstream.authenticated or upstream._auth_failed_permanent:
-                        break
-                    await asyncio.sleep(0.1)
-                if upstream.authenticated:
-                    # subscribe() re-adds to _active_tickers (set, no-op)
-                    # and sends the WS subscribe command
-                    await upstream.subscribe(ticker)
+            # Add ticker BEFORE starting connection loop so the idle-check
+            # doesn't block the initial connection attempt.
+            upstream._active_tickers.add(ticker)
+            await upstream.ensure_started()
+            # Wait for auth (up to 5s)
+            for _ in range(50):
+                if upstream.authenticated or upstream._auth_failed_permanent:
+                    break
+                if upstream._conn_limit_hit:
+                    # Connection limit hit while we were waiting
+                    self._subscribers[ticker].discard(queue)
+                    upstream._active_tickers.discard(ticker)
+                    _log(f"Subscribe REJECTED for {ticker} – connection limit hit during connect")
+                    return [], "conn_limit"
+                await asyncio.sleep(0.1)
+            if upstream.authenticated:
+                # subscribe() re-adds to _active_tickers (set, no-op)
+                # and sends the WS subscribe command
+                await upstream.subscribe(ticker)
+            elif upstream._auth_failed_permanent:
+                self._subscribers[ticker].discard(queue)
+                return [], "auth_failed"
 
-        return list(self._bar_history.get(ticker, []))
+        return list(self._bar_history.get(ticker, [])), None
 
     async def unsubscribe(self, ticker: str, queue: asyncio.Queue):
         """

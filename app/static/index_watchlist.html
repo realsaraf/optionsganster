@@ -1837,14 +1837,12 @@
                 font-size: 13px;
             }
 
-            /* ---- Filter bar: horizontal scroll ---- */
+            /* ---- Filter bar: wrap on mobile ---- */
             .filter-bar {
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
+                flex-wrap: wrap;
+                overflow-x: visible;
                 padding: 6px 12px;
                 gap: 8px;
-                scrollbar-width: none;
             }
 
             .filter-bar::-webkit-scrollbar {
@@ -2113,11 +2111,57 @@
         .toast-detail { font-size: 12px; opacity: .85; font-weight: 400; }
         @keyframes toastIn  { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes toastOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+
+        /* ── Connection-limit modal ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.65);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            background: #161b22;
+            border: 1px solid #f85149;
+            border-radius: 12px;
+            padding: 28px 32px;
+            max-width: 460px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,.5);
+        }
+        .modal-box .modal-icon { font-size: 40px; margin-bottom: 12px; }
+        .modal-box h2 { color: #f85149; font-size: 18px; margin-bottom: 8px; }
+        .modal-box p  { color: #8b949e; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+        .modal-box .modal-btn {
+            background: #21262d;
+            color: #e6edf3;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px 28px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .modal-box .modal-btn:hover { background: #30363d; }
     </style>
 </head>
 <body>
     <!-- Mobile Menu Toggle Button -->
     <div class="toast-container" id="toast-container"></div>
+
+    <!-- Connection-limit modal -->
+    <div class="modal-overlay" id="conn-limit-modal">
+        <div class="modal-box">
+            <div class="modal-icon">⚠️</div>
+            <h2>Connection Limit Reached</h2>
+            <p id="conn-limit-msg">Polygon’s WebSocket connection limit has been exceeded. The server is backing off and will retry automatically. Please wait ~30 seconds before trying live mode again.</p>
+            <button class="modal-btn" id="conn-limit-ok">OK</button>
+        </div>
+    </div>
 
     <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle Watchlist">
         ☰ <span>Watchlist</span>
@@ -2265,12 +2309,12 @@
                 <span class="filter-label">Signals:</span>
 
                 <div class="toggle-group bullish-color">
-                    <label class="toggle-switch"><input type="checkbox" id="filter-strong_bullish" checked><span class="toggle-slider"></span></label>
+                    <label class="toggle-switch"><input type="checkbox" id="filter-strong_bullish"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-strong_bullish">Strong Bullish</span>
                 </div>
 
                 <div class="toggle-group bearish-color">
-                    <label class="toggle-switch"><input type="checkbox" id="filter-strong_bearish" checked><span class="toggle-slider"></span></label>
+                    <label class="toggle-switch"><input type="checkbox" id="filter-strong_bearish"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-strong_bearish">Strong Bearish</span>
                 </div>
 
@@ -3112,6 +3156,21 @@
 
             } else if (type === 'error') {
                 console.warn('[LiveWS] Error:', msg.message);
+
+                // Connection-limit or auth errors → show modal, revert live mode
+                if (msg.code === 'conn_limit' || msg.code === 'auth_failed') {
+                    const modal = document.getElementById('conn-limit-modal');
+                    const msgEl = document.getElementById('conn-limit-msg');
+                    if (msg.code === 'conn_limit') {
+                        msgEl.textContent = 'Polygon\u2019s WebSocket connection limit has been exceeded. The server is backing off and will retry automatically. Please wait ~30 seconds before trying live mode again.';
+                    } else {
+                        msgEl.textContent = msg.message || 'Authentication failed. Your Polygon plan may not support live WebSocket streaming.';
+                    }
+                    modal.classList.add('active');
+
+                    // Auto-revert live mode so user isn't stuck
+                    stopLiveMode();
+                }
             }
         }
 
@@ -3464,7 +3523,7 @@
         function selectSymbol(symbol) {
             currentSymbol = symbol;
             renderWatchlist();
-            loadExpirations(symbol);
+            loadExpirations(symbol, true);  // autoAnalyze=true
             
             // Stop live mode when symbol changes
             stopLiveMode();
@@ -3472,7 +3531,7 @@
             // Update contract info
             const data = watchlistData[symbol] || {};
             document.getElementById('contract-symbol').textContent = symbol;
-            document.getElementById('contract-details').textContent = 'Select expiration & strike';
+            document.getElementById('contract-details').textContent = 'Loading...';
             
             // Auto-close watchlist on mobile when symbol is selected
             if (isMobile()) {
@@ -3481,7 +3540,7 @@
         }
         
         // ===== EXPIRATIONS & STRIKES =====
-        async function loadExpirations(symbol) {
+        async function loadExpirations(symbol, autoAnalyze = false) {
             const select = document.getElementById('expiration');
             select.innerHTML = '<option value="">Loading...</option>';
             
@@ -3508,7 +3567,7 @@
                     }).join('');
                     
                     if (data.expirations.length > 0) {
-                        loadStrikes(symbol, data.expirations[0]);
+                        await loadStrikes(symbol, data.expirations[0], autoAnalyze);
                     }
                     return;  // success
                 } catch (e) {
@@ -3537,7 +3596,7 @@
             document.getElementById('expiration').parentNode.appendChild(btn);
         }
         
-        async function loadStrikes(symbol, expiration) {
+        async function loadStrikes(symbol, expiration, autoAnalyze = false) {
             const select = document.getElementById('strike');
             select.innerHTML = '<option value="">Loading...</option>';
             
@@ -3570,6 +3629,11 @@
                     const isATM = strike === atmStrike;
                     return `<option value="${strike}" ${isATM ? 'selected' : ''}>${strike}${isATM ? ' (ATM)' : ''}</option>`;
                 }).join('');
+
+                // Auto-analyze with ATM strike + default settings
+                if (autoAnalyze && atmStrike) {
+                    analyze().catch(e => console.warn('Auto-analyze failed:', e));
+                }
                 
             } catch (e) {
                 select.innerHTML = '<option value="">Error</option>';
@@ -4207,6 +4271,16 @@
         
         // Live mode button
         document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
+
+        // Connection-limit modal dismiss
+        document.getElementById('conn-limit-ok').addEventListener('click', () => {
+            document.getElementById('conn-limit-modal').classList.remove('active');
+        });
+        document.getElementById('conn-limit-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'conn-limit-modal') {
+                e.target.classList.remove('active');
+            }
+        });
         
         // Mock mode toggle
         document.getElementById('mock-btn').addEventListener('click', () => {
@@ -4353,10 +4427,17 @@
         });
 
         document.getElementById('nav-settings').addEventListener('click', () => {
-            closeAllMobilePanels();
-            setActiveNav('nav-settings');
-            // Expand controls for editing
-            expandControls();
+            if (!controlsCollapsed) {
+                // Settings already open — close it and go back to chart
+                closeAllMobilePanels();
+                setActiveNav('nav-chart');
+                collapseControls();
+            } else {
+                closeAllMobilePanels();
+                setActiveNav('nav-settings');
+                // Expand controls for editing
+                expandControls();
+            }
         });
 
         document.getElementById('nav-analysis').addEventListener('click', () => {

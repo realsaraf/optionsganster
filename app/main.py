@@ -467,7 +467,7 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
     <div class="stats">
       <div class="stat"><div class="stat-value"><span class="green">AI</span></div><div class="stat-label">Driven</div></div>
       <div class="stat"><div class="stat-value"><span class="blue">Live</span></div><div class="stat-label">Signals</div></div>
-      <div class="stat"><div class="stat-value"><span class="green">$300</span></div><div class="stat-label">Monthly</div></div>
+      <div class="stat"><div class="stat-value"><span class="green">$0</span></div><div class="stat-label">Monthly</div></div>
     </div>
   </div>
 </section>
@@ -1296,7 +1296,21 @@ async def websocket_live(ws: WebSocket):
                     }))
                 else:
                     # Real mode – subscribe via LiveFeedManager
-                    sow_bars = await live_feed_manager.subscribe(ticker, queue)
+                    sow_bars, sub_error = await live_feed_manager.subscribe(ticker, queue)
+
+                    if sub_error:
+                        # Connection limit hit or auth failed – notify client
+                        error_messages = {
+                            "conn_limit": "Polygon connection limit reached. The server is backing off and will retry automatically. Please try again in ~30 seconds.",
+                            "auth_failed": "Polygon authentication failed. Your plan may not support live WebSocket streaming.",
+                        }
+                        await ws.send_text(json.dumps({
+                            "type": "error",
+                            "code": sub_error,
+                            "message": error_messages.get(sub_error, f"Subscribe failed: {sub_error}"),
+                        }))
+                        continue
+
                     subscribed_tickers.add(ticker)
 
                     # Send snapshot of accumulated bars
