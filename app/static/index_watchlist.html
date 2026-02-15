@@ -42,12 +42,423 @@
         
         /* ===== WATCHLIST SIDEBAR (LEFT) ===== */
         .watchlist-sidebar {
-            width: 220px;
+            width: 260px;
             background: #1e222d;
             border-right: 1px solid #2a2e39;
             display: flex;
             flex-direction: column;
             flex-shrink: 0;
+            transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                        min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .watchlist-sidebar.collapsed {
+            width: 0px;
+            min-width: 0px;
+            border-right: none;
+        }
+
+        .watchlist-sidebar.collapsed .watchlist-header,
+        .watchlist-sidebar.collapsed .watchlist-search,
+        .watchlist-sidebar.collapsed .watchlist-items,
+        .watchlist-sidebar.collapsed .watchlist-tabs,
+        .watchlist-sidebar.collapsed .ideas-panel {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Watchlist sidebar tabs */
+        .watchlist-tabs {
+            display: flex;
+            border-bottom: 1px solid #2a2e39;
+            flex-shrink: 0;
+        }
+        .watchlist-tab {
+            flex: 1;
+            padding: 10px 8px;
+            background: transparent;
+            border: none;
+            color: #787b86;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .watchlist-tab:hover { color: #d1d4dc; }
+        .watchlist-tab.active { color: #2962ff; border-bottom-color: #2962ff; }
+
+        /* Ideas panel */
+        .ideas-panel {
+            flex: 1;
+            overflow-y: auto;
+            display: none;
+        }
+        .ideas-panel-title { display: none; } /* hidden on desktop */
+        .ideas-panel.active { display: flex; flex-direction: column; }
+        .ideas-list { display: flex; flex-direction: column; }
+        .ideas-loading, .ideas-empty {
+            color: #787b86;
+            font-size: 12px;
+            text-align: center;
+            padding: 24px 12px;
+        }
+        .idea-item {
+            padding: 10px 14px;
+            margin: 6px 8px;
+            background: #1a1e2a;
+            border: 1px solid #2a2e39;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .idea-item:hover {
+            background: #252936;
+            border-color: #3a3e49;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+        .idea-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+        }
+        .idea-ticker {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d1d4dc;
+        }
+        .idea-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+        .idea-badge.call { background: #0f3d2e; color: #26a69a; }
+        .idea-badge.put { background: #3d1f1f; color: #ef5350; }
+        .idea-detail {
+            font-size: 11px;
+            color: #787b86;
+            margin-top: 4px;
+        }
+        .idea-signal {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
+            font-size: 11px;
+        }
+        .idea-signal-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .idea-signal-dot.buy { background: #26a69a; }
+        .idea-signal-dot.sell { background: #ef5350; }
+
+        /* Strong idea glow + pulse */
+        .idea-item.strong-idea {
+            border-left: 3px solid #26a69a;
+            background: rgba(38, 166, 154, 0.06);
+            animation: strongPulse 2s ease-in-out 1;
+        }
+        .idea-item.strong-idea.strong-sell {
+            border-left-color: #ef5350;
+            background: rgba(239, 83, 80, 0.06);
+        }
+        @keyframes strongPulse {
+            0%   { background: rgba(38, 166, 154, 0.20); }
+            100% { background: rgba(38, 166, 154, 0.06); }
+        }
+        .idea-item.strong-sell {
+            animation-name: strongPulseSell;
+        }
+        @keyframes strongPulseSell {
+            0%   { background: rgba(239, 83, 80, 0.20); }
+            100% { background: rgba(239, 83, 80, 0.06); }
+        }
+        .idea-strong-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            animation: badgeBlink 1.5s ease-in-out 3;
+        }
+        .idea-strong-badge.buy { background: #26a69a; color: #fff; }
+        .idea-strong-badge.sell { background: #ef5350; color: #fff; }
+        @keyframes badgeBlink {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.4; }
+        }
+
+        /* Toast notification */
+        .ideas-toast {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .ideas-toast-item {
+            background: #1e222d;
+            border: 1px solid #26a69a;
+            border-radius: 8px;
+            padding: 12px 18px;
+            color: #d1d4dc;
+            font-size: 13px;
+            box-shadow: 0 4px 20px rgba(38, 166, 154, 0.25);
+            pointer-events: auto;
+            cursor: pointer;
+            opacity: 0;
+            transform: translateX(100px);
+            animation: toastIn 0.4s ease-out forwards, toastOut 0.4s ease-in 4.6s forwards;
+        }
+        .ideas-toast-item.sell-toast {
+            border-color: #ef5350;
+            box-shadow: 0 4px 20px rgba(239, 83, 80, 0.25);
+        }
+        .ideas-toast-title {
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+        .ideas-toast-title.buy { color: #26a69a; }
+        .ideas-toast-title.sell { color: #ef5350; }
+        @keyframes toastIn {
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toastOut {
+            to { opacity: 0; transform: translateX(100px); }
+        }
+        .idea-signal-dot.hold { background: #787b86; }
+
+        /* Submit Idea button in header — golden/amber */
+        .submit-idea-btn {
+            display: none;
+            align-items: center;
+            gap: 5px;
+            background: linear-gradient(135deg, #d4a017, #b8860b);
+            color: #1a1200;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+            letter-spacing: 0.3px;
+            box-shadow: 0 2px 8px rgba(212, 160, 23, 0.25);
+        }
+        .submit-idea-btn:hover {
+            background: linear-gradient(135deg, #e6b422, #c99700);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(212, 160, 23, 0.40);
+        }
+        .submit-idea-btn.visible { display: flex; }
+
+        /* Idea submit modal */
+        .idea-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 15000;
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(6px);
+            align-items: center;
+            justify-content: center;
+        }
+        .idea-modal-overlay.open { display: flex; }
+        .idea-modal {
+            background: #1e222d;
+            border: 1px solid #2a2e39;
+            border-radius: 12px;
+            padding: 28px 24px;
+            width: 380px;
+            max-width: 90vw;
+            box-shadow: 0 24px 64px rgba(0,0,0,.5);
+        }
+        .idea-modal h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #d1d4dc;
+            margin-bottom: 16px;
+        }
+        .idea-modal .idea-form-info {
+            background: #131722;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 14px;
+            font-size: 12px;
+            color: #787b86;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        .idea-modal .idea-form-info .val {
+            color: #d1d4dc;
+            font-weight: 600;
+        }
+        .idea-modal .idea-action-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .idea-modal .idea-action-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 6px;
+            border: 2px solid #2a2e39;
+            background: transparent;
+            color: #787b86;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .idea-modal .idea-action-btn.buy-action:hover,
+        .idea-modal .idea-action-btn.buy-action.selected {
+            border-color: #26a69a;
+            background: rgba(38, 166, 154, 0.1);
+            color: #26a69a;
+        }
+        .idea-modal .idea-action-btn.sell-action:hover,
+        .idea-modal .idea-action-btn.sell-action.selected {
+            border-color: #ef5350;
+            background: rgba(239, 83, 80, 0.1);
+            color: #ef5350;
+        }
+        .idea-modal textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #2a2e39;
+            background: #131722;
+            color: #d1d4dc;
+            font-size: 12px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 50px;
+            margin-bottom: 14px;
+            outline: none;
+        }
+        .idea-modal textarea:focus { border-color: #2962ff; }
+        .idea-modal .idea-submit-final {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: none;
+            background: #2962ff;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .idea-modal .idea-submit-final:hover { background: #1e88e5; }
+        .idea-modal .idea-submit-final:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .idea-modal-close {
+            position: absolute;
+            top: 10px;
+            right: 14px;
+            background: none;
+            border: none;
+            color: #787b86;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        .idea-modal-close:hover { color: #d1d4dc; }
+
+        /* Idea card: poster + time */
+        .idea-meta {
+            font-size: 10px;
+            color: #5d606b;
+            margin-top: 3px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .idea-meta .idea-poster {
+            font-weight: 600;
+            color: #787b86;
+        }
+
+        /* Idea price badge in header — golden highlight */
+        .idea-price-badge {
+            display: none;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            background: rgba(212, 160, 23, 0.15);
+            border: 1px solid rgba(212, 160, 23, 0.40);
+            border-radius: 4px;
+            font-size: 12px;
+            color: #e6b422;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .idea-price-badge.visible { display: flex; }
+        .idea-price-badge .idea-price-label {
+            font-size: 10px;
+            color: #b8960b;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        /* Sidebar toggle button — overlaps sidebar edge */
+        .sidebar-toggle-btn {
+            width: 20px;
+            height: 48px;
+            background: #3d3520;
+            border: 1px solid #6b5c2e;
+            border-left: none;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            left: 260px;
+            top: 50%;
+            transform: translateY(-50%);
+            flex-shrink: 0;
+            z-index: 20;
+            color: #e2c56b;
+            font-size: 11px;
+            padding: 0;
+            transition: background 0.15s, color 0.15s, left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: #4d4528;
+            color: #f5d97e;
+        }
+
+        .sidebar-toggle-btn .toggle-arrow {
+            transition: transform 0.25s;
+        }
+
+        .sidebar-toggle-btn.collapsed .toggle-arrow {
+            transform: rotate(180deg);
+        }
+
+        .sidebar-toggle-btn.collapsed {
+            left: 0px;
         }
         
         .watchlist-header {
@@ -194,6 +605,7 @@
             flex: 1;
             overflow: hidden;
             height: 100vh;
+            position: relative;
         }
         
         .main-panel {
@@ -260,6 +672,11 @@
         .contract-change {
             font-size: 12px;
             font-family: 'SF Mono', 'Monaco', monospace;
+        }
+
+        /* Mobile LIVE badge — hidden on desktop */
+        .mobile-live-badge {
+            display: none;
         }
         
         .contract-change.positive { color: #26a69a; }
@@ -355,6 +772,7 @@
         }
         
         .analyze-btn {
+            display: none;
             background: #2962ff;
             color: white;
             border: none;
@@ -1153,6 +1571,50 @@
             margin-right: 2px;
         }
 
+        /* ── Confidence Toggle Group ── */
+        .conf-toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-left: 10px;
+            border-left: 1px solid #2a2e39;
+            margin-left: 2px;
+        }
+        .conf-toggle-group .conf-label {
+            font-size: 10px;
+            color: #787b86;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .conf-btn-group {
+            display: flex;
+            gap: 1px;
+            background: #131722;
+            padding: 2px;
+            border-radius: 4px;
+        }
+        .conf-btn {
+            background: transparent;
+            border: none;
+            color: #787b86;
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-weight: 600;
+            line-height: 1;
+        }
+        .conf-btn:hover {
+            color: #d1d4dc;
+        }
+        .conf-btn.active {
+            background: #2962ff;
+            color: #fff;
+        }
+
         /* ── Stock Underlay Toggle (compact, inline in filter bar) ── */
         .underlay-toggle {
             display: flex;
@@ -1615,6 +2077,23 @@
 
         /* ===== MOBILE RESPONSIVE (≤768px) ===== */
         @media (max-width: 768px) {
+            /* Hide sidebar tab bar on mobile — bottom nav controls which panel shows */
+            .watchlist-tabs { display: none !important; }
+
+            /* Hide sidebar collapse/expand toggle on mobile */
+            .sidebar-toggle-btn { display: none !important; }
+
+            /* Ideas panel title — visible only on mobile */
+            .ideas-panel-title {
+                display: block !important;
+                font-size: 18px;
+                font-weight: 700;
+                color: #d1d4dc;
+                padding: 14px 16px 8px;
+                border-bottom: 1px solid #2a2e39;
+                letter-spacing: 0.5px;
+            }
+
             html, body {
                 overflow: hidden;
                 height: 100%;
@@ -1708,32 +2187,61 @@
                 margin: 8px auto 4px;
             }
 
-            /* ---- Compact header ---- */
+            /* ---- Compact header (two rows on mobile) ---- */
             .header {
-                flex-direction: row;
-                align-items: center;
-                gap: 10px;
-                padding: 8px 12px;
-                min-height: 48px;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0;
+                padding: 0;
+                min-height: auto;
             }
 
             .header-logo {
                 display: none;
             }
 
+            /* Top row: underlying symbol + ticking price */
+            .mobile-header-top {
+                display: flex !important;
+                align-items: center;
+                justify-content: space-between;
+                padding: 6px 12px;
+                background: #131722;
+                border-bottom: 1px solid #2a2e3966;
+            }
+
+            .mobile-underlying-symbol {
+                font-size: 15px;
+                font-weight: 800;
+                color: #d1d4dc;
+            }
+
+            .mobile-underlying-price {
+                font-size: 15px;
+                font-weight: 700;
+                font-family: 'SF Mono', 'Monaco', monospace;
+                color: #d1d4dc;
+                transition: color 0.3s;
+            }
+
+            .mobile-underlying-price.tick-up { color: #26a69a; }
+            .mobile-underlying-price.tick-down { color: #ef5350; }
+
+            /* Bottom row: contract info */
             .header-contract {
                 flex: 1;
                 flex-direction: row;
                 align-items: baseline;
                 gap: 8px;
-                padding: 4px 0;
+                padding: 5px 12px;
                 background: transparent;
                 border-radius: 0;
             }
 
             .contract-symbol {
-                font-size: 15px;
-                font-weight: 800;
+                font-size: 13px;
+                font-weight: 700;
+                color: #787b86;
             }
 
             .contract-details {
@@ -1741,30 +2249,108 @@
             }
 
             .contract-price {
-                font-size: 14px;
+                font-size: 13px;
             }
 
             .contract-change {
                 font-size: 11px;
             }
 
+            /* Hide logout in header on mobile — it's in settings */
             .logout-btn {
-                position: static;
-                margin-left: auto;
-                font-size: 11px;
-                padding: 6px 8px;
-                z-index: auto;
+                display: none !important;
             }
 
-            /* ---- Controls Summary ---- */
+            .submit-idea-btn:not(.visible) {
+                display: none !important;
+            }
+
+            /* Mobile logout in settings */
+            .mobile-logout-row {
+                display: flex !important;
+                padding: 8px 0;
+                margin-top: 4px;
+                border-top: 1px solid #2a2e39;
+            }
+
+            .mobile-logout-btn {
+                display: flex !important;
+                align-items: center;
+                gap: 6px;
+                color: #ef5350;
+                background: rgba(239, 83, 80, 0.08);
+                border: 1px solid rgba(239, 83, 80, 0.2);
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                text-decoration: none;
+                width: 100%;
+                justify-content: center;
+                transition: all 0.15s;
+            }
+
+            .mobile-logout-btn:hover {
+                background: rgba(239, 83, 80, 0.15);
+            }
+
+            /* ---- Controls Summary: hidden on mobile ---- */
             .controls-summary {
-                display: none;
-                padding: 6px 12px;
-                height: 40px;
+                display: none !important;
             }
 
             .controls-summary.active {
-                display: flex;
+                display: none !important;
+            }
+
+            /* ---- Mobile LIVE badge in header ---- */
+            .mobile-live-badge {
+                display: inline-flex !important;
+                align-items: center;
+                gap: 4px;
+                padding: 3px 10px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                cursor: pointer;
+                background: #2a2e39;
+                color: #787b86;
+                border: 1px solid #363a45;
+                margin-left: auto;
+                white-space: nowrap;
+                transition: all 0.2s;
+            }
+            .mobile-live-badge.active {
+                background: rgba(239, 83, 80, 0.15);
+                color: #ef5350;
+                border-color: rgba(239, 83, 80, 0.4);
+                animation: livePulse 1.5s ease-in-out infinite;
+            }
+            .mobile-live-badge.mock-active {
+                background: rgba(255, 235, 59, 0.12);
+                color: #ffeb3b;
+                border-color: rgba(255, 235, 59, 0.3);
+            }
+
+            /* ---- Show analyze-btn on mobile ---- */
+            .analyze-btn {
+                display: flex !important;
+                grid-column: 1 / -1;
+                justify-content: center;
+                align-items: center;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: 600;
+                background: #2962ff;
+                color: #fff;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+            }
+            .analyze-btn:hover {
+                background: #1e88e5;
             }
 
             /* ---- Controls Bar: 2-column grid ---- */
@@ -2185,6 +2771,27 @@
 
     <!-- Backdrop for mobile overlays -->
     <div class="backdrop" id="backdrop"></div>
+    <div class="ideas-toast" id="ideas-toast"></div>
+
+    <!-- Idea submit modal -->
+    <div class="idea-modal-overlay" id="idea-modal-overlay">
+        <div class="idea-modal" style="position:relative;">
+            <button class="idea-modal-close" id="idea-modal-close">&times;</button>
+            <h3>💡 Submit Trade Idea</h3>
+            <div class="idea-form-info" id="idea-form-info">
+                <span>Symbol</span><span class="val" id="idea-form-symbol">-</span>
+                <span>Contract</span><span class="val" id="idea-form-contract">-</span>
+                <span>Expiration</span><span class="val" id="idea-form-exp">-</span>
+                <span>Price</span><span class="val" id="idea-form-price">-</span>
+            </div>
+            <div class="idea-action-group">
+                <button class="idea-action-btn buy-action" data-action="BUY">BUY</button>
+                <button class="idea-action-btn sell-action" data-action="SELL">SELL</button>
+            </div>
+            <textarea id="idea-note" placeholder="Optional note (e.g. breakout setup, earnings play...)"></textarea>
+            <button class="idea-submit-final" id="idea-submit-final" disabled>Submit Idea</button>
+        </div>
+    </div>
 
     <div class="app-container">
         <!-- LEFT: Watchlist Sidebar -->
@@ -2194,18 +2801,47 @@
                 <button class="mobile-close-btn" id="watchlist-close-btn" aria-label="Close Watchlist">×</button>
                 <button class="watchlist-add-btn" title="Add Symbol">+</button>
             </div>
-            <div class="watchlist-search">
+
+            <!-- Sidebar tabs (hidden on mobile — bottom nav controls which panel shows) -->
+            <div class="watchlist-tabs" id="watchlist-tabs">
+                <button class="watchlist-tab active" data-tab="watchlist">Watchlist</button>
+                <button class="watchlist-tab" data-tab="ideas">Ideas</button>
+            </div>
+
+            <!-- Tab: Watchlist (default) -->
+            <div class="watchlist-search" id="watchlist-search-wrap">
                 <input type="text" id="watchlist-search" placeholder="Search symbols...">
             </div>
             <div class="watchlist-items" id="watchlist-container">
                 <!-- Watchlist items will be populated here -->
                 <div class="loading">Loading...</div>
             </div>
+
+            <!-- Tab: Ideas -->
+            <div class="ideas-panel" id="ideas-panel">
+                <div class="ideas-panel-title" style="display:none;">Trade Ideas</div>
+                <div class="watchlist-search">
+                    <input type="text" id="ideas-search" placeholder="Filter by symbol...">
+                </div>
+                <div class="ideas-loading" id="ideas-loading" style="display:none;">Loading ideas...</div>
+                <div class="ideas-empty" id="ideas-empty" style="display:none;">No trade ideas today</div>
+                <div class="ideas-list" id="ideas-list"></div>
+            </div>
         </div>
+
+        <!-- Sidebar collapse/expand toggle (outside sidebar) -->
+        <button class="sidebar-toggle-btn" id="sidebar-toggle-btn" title="Toggle Watchlist">
+            <span class="toggle-arrow">&#9664;</span>
+        </button>
         
         <!-- MAIN: Chart & Controls -->
         <div class="main-panel">
             <div class="header">
+                <!-- Mobile top row: underlying symbol + ticking price -->
+                <div class="mobile-header-top" id="mobile-header-top" style="display:none;">
+                    <span class="mobile-underlying-symbol" id="mobile-underlying-symbol">SPY</span>
+                    <span class="mobile-underlying-price" id="mobile-underlying-price">-</span>
+                </div>
                 <div class="header-logo">
                     <h1>Options<span>Ganster</span></h1>
                 </div>
@@ -2213,8 +2849,14 @@
                     <div class="contract-symbol" id="contract-symbol">-</div>
                     <div class="contract-price" id="contract-price">-</div>
                     <div class="contract-change" id="contract-change">-</div>
+                    <span class="mobile-live-badge" id="mobile-live-badge" style="display:none;">LIVE</span>
+                    <div class="idea-price-badge" id="idea-price-badge">
+                        <span class="idea-price-label">Idea @</span>
+                        <span id="idea-price-value">-</span>
+                    </div>
                     <div class="contract-details" id="contract-details">Select a symbol</div>
                 </div>
+                <button class="submit-idea-btn" id="submit-idea-btn" title="Share this contract as a trade idea">💡 Submit Idea</button>
                 <a href="/api/logout" class="logout-btn" title="Sign Out">⏻ Logout</a>
             </div>
             
@@ -2302,9 +2944,13 @@
                     <button class="interval-btn" data-interval="60">1H</button>
                 </div>
                 
-                <button class="analyze-btn" id="analyze-btn" style="display:none">▶ Analyze</button>
+                <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
                 <button class="live-btn" id="live-btn">⚪ LIVE</button>
                 <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 12px;min-width:auto" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
+                <!-- Mobile logout row (hidden on desktop, shown on mobile via CSS) -->
+                <div class="mobile-logout-row" style="display:none;">
+                    <a href="/api/logout" class="mobile-logout-btn">⏻ Sign Out</a>
+                </div>
             </div>
 
             <div class="filter-bar" id="filter-bar">
@@ -2318,6 +2964,17 @@
                 </div>
 
                 <span class="filter-label">Signals:</span>
+
+                <div class="conf-toggle-group">
+                    <span class="conf-label">Min Conf:</span>
+                    <div class="conf-btn-group">
+                        <button class="conf-btn" data-conf="50">50%</button>
+                        <button class="conf-btn" data-conf="60">60%</button>
+                        <button class="conf-btn" data-conf="70">70%</button>
+                        <button class="conf-btn active" data-conf="80">80%</button>
+                        <button class="conf-btn" data-conf="90">90%</button>
+                    </div>
+                </div>
 
                 <div class="toggle-group bullish-color">
                     <label class="toggle-switch"><input type="checkbox" id="filter-strong_bullish"><span class="toggle-slider"></span></label>
@@ -2548,6 +3205,10 @@
             <span class="nav-icon">⚙</span>
             <span>Settings</span>
         </button>
+        <button class="mobile-nav-item" id="nav-ideas" aria-label="Ideas">
+            <span class="nav-icon">💡</span>
+            <span>Ideas</span>
+        </button>
         <button class="mobile-nav-item" id="nav-analysis" aria-label="Analysis">
             <span class="nav-icon">📊</span>
             <span>Analysis</span>
@@ -2581,6 +3242,47 @@
         let watchlistWs = null;         // dedicated WS for watchlist price streaming
         let watchlistWsReconnectTimer = null;
         let liveUnderlyingTicker = null;  // underlying stock ticker subscribed for chart overlay
+
+        // ===== URL QUERY PARAMS SYNC =====
+        function updateUrlParams() {
+            const params = new URLSearchParams();
+            if (currentSymbol) params.set('symbol', currentSymbol);
+            const exp = document.getElementById('expiration')?.value;
+            if (exp) params.set('exp', exp);
+            const strike = document.getElementById('strike')?.value;
+            if (strike) params.set('strike', strike);
+            const right = document.getElementById('right')?.value;
+            if (right) params.set('right', right);
+            if (currentInterval) params.set('interval', currentInterval);
+            // Find active date range button
+            const activeRange = document.querySelector('.desktop-date-range .date-range-btn.active');
+            if (activeRange) params.set('range', activeRange.dataset.range);
+            // Confidence filter
+            if (minConfidence !== 80) params.set('conf', minConfidence);
+            // Signal toggles
+            const enabledSignals = [];
+            document.querySelectorAll('.filter-bar input[type=checkbox]').forEach(cb => {
+                if (cb.checked) enabledSignals.push(cb.id.replace('filter-', ''));
+            });
+            if (enabledSignals.length > 0) params.set('signals', enabledSignals.join(','));
+            const qs = params.toString();
+            const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+            window.history.replaceState(null, '', newUrl);
+        }
+
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                symbol: params.get('symbol'),
+                exp: params.get('exp'),
+                strike: params.get('strike'),
+                right: params.get('right'),
+                interval: params.get('interval'),
+                range: params.get('range'),
+                conf: params.get('conf'),
+                signals: params.get('signals'),
+            };
+        }
         
         // Controls collapse state
         let controlsCollapsed = false;
@@ -2600,6 +3302,15 @@
 
         // Underlying underlay state
         let underlayMode = 'line';  // 'off', 'line', 'candle'
+
+        // User role/auth info
+        let currentUser = null; // {email, role, display_name}
+
+        // Idea price tracking — when navigating from an idea
+        let activeIdeaPrice = null; // null or {price, action, timestamp, posted_by}
+
+        // Ideas WebSocket
+        let ideasWs = null;
         let underlaySeries = null;
         let underlayBarsData = [];   // raw underlying bars from API
         let pocLine = null;          // Point of Control price line on stock chart
@@ -2671,9 +3382,19 @@
             return enabled;
         }
 
+        let minConfidence = 80; // 0-100
+
         function filterSignals(signals) {
             const enabled = getEnabledSignals();
-            return signals.filter(s => enabled.has(s.signal));
+            return signals.filter(s => {
+                // Toggle OFF = hidden, Toggle ON = visible
+                if (!enabled.has(s.signal)) return false;
+                if (minConfidence > 0) {
+                    const conf = (s.confidence || 0) * 100;
+                    if (conf < minConfidence) return false;
+                }
+                return true;
+            });
         }
 
         function updateFilteredMarkers(signals) {
@@ -2694,11 +3415,26 @@
         const LANDSCAPE_MAX_WIDTH = 1024;
         const LANDSCAPE_MAX_HEIGHT = 500;
         
+        // Wire up confidence toggle buttons
+        document.querySelectorAll('.conf-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                minConfidence = parseInt(btn.dataset.conf);
+                updateUrlParams();
+                if (lastAnalysisData) {
+                    updateFilteredMarkers(lastAnalysisData.signals || []);
+                    updateAnalysis(lastAnalysisData);
+                }
+            });
+        });
+
         // Wire up filter toggle events
         document.querySelectorAll('.filter-bar input[type=checkbox]').forEach(cb => {
             cb.addEventListener('change', () => {
                 const label = document.querySelector(`[data-for="${cb.id}"]`);
                 if (label) label.classList.toggle('active', cb.checked);
+                updateUrlParams();
                 if (lastAnalysisData) {
                     updateFilteredMarkers(lastAnalysisData.signals || []);
                     updateAnalysis(lastAnalysisData);
@@ -2743,12 +3479,14 @@
                 if (action !== prevAction) {
                     const isBuy = action === 'BUY';
                     const isSell = action === 'SELL';
+                    const confPct = sig.confidence ? Math.round(sig.confidence * 100) : null;
+                    const label = confPct !== null ? `${action} ${confPct}%` : action;
                     markers.push({
                         time: toEasternUnix(sig.datetime),
                         position: isBuy ? 'belowBar' : 'aboveBar',
                         color: isBuy ? '#00e676' : isSell ? '#ff1744' : 'rgba(255,176,60,0.30)',
                         shape: isBuy ? 'arrowUp' : isSell ? 'arrowDown' : 'circle',
-                        text: action,
+                        text: label,
                     });
                     prevAction = action;
                 }
@@ -2790,7 +3528,9 @@
 
         function openWatchlist() {
             if (isMobile()) {
-                document.getElementById('watchlist-sidebar').classList.add('mobile-open');
+                const sidebar = document.getElementById('watchlist-sidebar');
+                sidebar.classList.remove('collapsed');   // collapsed sets width:0, must remove
+                sidebar.classList.add('mobile-open');
                 document.getElementById('backdrop').classList.add('active');
                 document.getElementById('mobile-action-banner').classList.remove('visible');
                 setActiveNav('nav-watchlist');
@@ -3017,6 +3757,7 @@
         function updateLiveButton() {
             const desktopBtn = document.getElementById('live-btn');
             const summaryBtn = document.getElementById('summary-live-btn');
+            const mobileBadge = document.getElementById('mobile-live-badge');
             
             if (liveMode) {
                 const prefix = mockMode ? '🟡 MOCK ' : '🔴 LIVE ';
@@ -3027,11 +3768,27 @@
                     summaryBtn.textContent = `LIVE ${dot}`;
                     summaryBtn.classList.add('active');
                 }
+                if (mobileBadge) {
+                    if (mockMode) {
+                        mobileBadge.textContent = `MOCK ${dot}`;
+                        mobileBadge.classList.add('mock-active');
+                        mobileBadge.classList.remove('active');
+                    } else {
+                        mobileBadge.textContent = `LIVE ${dot}`;
+                        mobileBadge.classList.add('active');
+                        mobileBadge.classList.remove('mock-active');
+                    }
+                }
             } else {
                 desktopBtn.textContent = '⚪ LIVE';
                 if (summaryBtn) {
                     summaryBtn.textContent = 'LIVE';
                     summaryBtn.classList.remove('active');
+                }
+                if (mobileBadge) {
+                    mobileBadge.textContent = 'LIVE';
+                    mobileBadge.classList.remove('active');
+                    mobileBadge.classList.remove('mock-active');
                 }
             }
         }
@@ -3375,11 +4132,38 @@
                     };
                 }
                 renderWatchlist();
+                // Update the mobile header underlying price ticker
+                updateMobileUnderlyingPrice();
 
             } else if (type === 'subscribed') {
                 console.log('[WatchlistWS] Subscribed:', msg.symbols?.join(', '));
             } else if (type === 'error') {
                 console.warn('[WatchlistWS] Error:', msg.message);
+            }
+        }
+
+        /**
+         * Update the mobile header with the currently selected symbol's underlying price.
+         * Ticks green/red on price changes.
+         */
+        function updateMobileUnderlyingPrice() {
+            const symEl = document.getElementById('mobile-underlying-symbol');
+            const priceEl = document.getElementById('mobile-underlying-price');
+            if (!symEl || !priceEl) return;
+
+            symEl.textContent = currentSymbol;
+            const data = watchlistData[currentSymbol];
+            if (data && data.price != null) {
+                priceEl.textContent = `$${data.price.toFixed(2)}`;
+                // Flash tick color
+                priceEl.classList.remove('tick-up', 'tick-down');
+                if (data.direction === 'up') {
+                    priceEl.classList.add('tick-up');
+                } else if (data.direction === 'down') {
+                    priceEl.classList.add('tick-down');
+                }
+                // Remove tick class after animation
+                setTimeout(() => priceEl.classList.remove('tick-up', 'tick-down'), 1000);
             }
         }
 
@@ -3662,10 +4446,19 @@
         function selectSymbol(symbol) {
             currentSymbol = symbol;
             renderWatchlist();
+            updateUrlParams();
             loadExpirations(symbol, true);  // autoAnalyze=true
+            
+            // Update mobile underlying price header
+            updateMobileUnderlyingPrice();
             
             // Stop live mode when symbol changes
             stopLiveMode();
+
+            // Clear idea price badge when manually selecting a symbol
+            activeIdeaPrice = null;
+            const badge = document.getElementById('idea-price-badge');
+            if (badge) badge.classList.remove('visible');
             
             // Update contract info
             const data = watchlistData[symbol] || {};
@@ -4008,6 +4801,7 @@
                 
                 // Update summary text after analyze
                 updateSummaryText();
+                updateUrlParams();
                 if (isMobile() && !hasAnalyzed) {
                     hasAnalyzed = true;
                 }
@@ -4501,6 +5295,7 @@
 
             // Collect VPA signal markers (individual signal types)
             const vpaSignals = lastAnalysisData ? (lastAnalysisData.signals || []) : [];
+            // VPA dot markers: filtered by BOTH signal type toggles AND confidence
             const filtered = filterSignals(vpaSignals);
             const markers = filtered.map(signal => {
                 const isBullish = BULLISH_SIGNALS.includes(signal.signal);
@@ -4513,8 +5308,16 @@
                 };
             });
 
-            // Add deduplicated BUY/SELL/HOLD transition markers for entire chart history
-            const actionMarkers = buildActionMarkers(vpaSignals);
+            // BUY/SELL action markers: filtered by confidence ONLY (not signal type toggles)
+            // so toggling off e.g. "Strong Bullish" hides the VPA dot but keeps BUY/SELL labels
+            const confFiltered = vpaSignals.filter(s => {
+                if (minConfidence > 0) {
+                    const conf = (s.confidence || 0) * 100;
+                    if (conf < minConfidence) return false;
+                }
+                return true;
+            });
+            const actionMarkers = buildActionMarkers(confFiltered);
             for (const am of actionMarkers) {
                 markers.push(am);
             }
@@ -4571,7 +5374,7 @@
         // ===== EVENT LISTENERS =====
         document.getElementById('expiration').addEventListener('change', (e) => {
             if (currentSymbol && e.target.value) {
-                loadStrikes(currentSymbol, e.target.value, true);  // auto-analyze after strikes load
+                loadStrikes(currentSymbol, e.target.value, !isMobile());  // auto-analyze only on desktop
             }
             // Stop live mode when expiration changes
             stopLiveMode();
@@ -4580,8 +5383,8 @@
         document.getElementById('strike').addEventListener('change', () => {
             // Stop live mode when strike changes
             stopLiveMode();
-            // Auto-analyze with new strike
-            if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+            // Auto-analyze with new strike (desktop only — mobile waits for Analyze button)
+            if (!isMobile() && currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
                 analyze().catch(e => console.warn('Auto-analyze on strike change failed:', e));
             }
         });
@@ -4649,6 +5452,7 @@
                 currentInterval = newInterval;
                 // Set active on all buttons with same interval
                 document.querySelectorAll(`.interval-btn[data-interval="${currentInterval}"]`).forEach(b => b.classList.add('active'));
+                updateUrlParams();
 
                 // If live mock mode is active, restart with new interval
                 if (liveMode && mockMode) {
@@ -4678,6 +5482,7 @@
                 from.setDate(today.getDate() - days);
                 document.getElementById('start-date').value = from.toISOString().split('T')[0];
                 document.getElementById('end-date').value = today.toISOString().split('T')[0];
+                updateUrlParams();
                 // Auto-analyze with new date range if a symbol is selected
                 if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
                     analyze().catch(e => console.warn('Auto-analyze on date range change failed:', e));
@@ -4700,8 +5505,9 @@
                 document.getElementById('dcp-call').className = 'cp-opt';
             }
             stopLiveMode();
-            // Auto-analyze with new call/put
-            if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+            updateUrlParams();
+            // Auto-analyze with new call/put (desktop only — mobile waits for Analyze button)
+            if (!isMobile() && currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
                 analyze().catch(e => console.warn('Auto-analyze on call/put change failed:', e));
             }
         }
@@ -4716,6 +5522,9 @@
 
         // ===== SUMMARY LIVE BUTTON =====
         document.getElementById('summary-live-btn').addEventListener('click', toggleLiveMode);
+        
+        // ===== MOBILE LIVE BADGE =====
+        document.getElementById('mobile-live-badge').addEventListener('click', toggleLiveMode);
         
         // Signal peek click handler
         document.getElementById('signal-peek').addEventListener('click', () => {
@@ -4738,6 +5547,422 @@
         
         document.getElementById('watchlist-search').addEventListener('input', renderWatchlist);
 
+        // ===== SIDEBAR COLLAPSE/EXPAND (DESKTOP) =====
+        (function initSidebarCollapse() {
+            const sidebar = document.getElementById('watchlist-sidebar');
+            const toggleBtn = document.getElementById('sidebar-toggle-btn');
+            const storageKey = 'watchlist-sidebar-collapsed';
+
+            function collapseSidebar() {
+                sidebar.classList.add('collapsed');
+                toggleBtn.classList.add('collapsed');
+                localStorage.setItem(storageKey, '1');
+            }
+
+            function expandSidebar() {
+                sidebar.classList.remove('collapsed');
+                toggleBtn.classList.remove('collapsed');
+                localStorage.setItem(storageKey, '0');
+            }
+
+            toggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (sidebar.classList.contains('collapsed')) {
+                    expandSidebar();
+                } else {
+                    collapseSidebar();
+                }
+            });
+
+            // Restore state from localStorage
+            if (localStorage.getItem(storageKey) === '1') {
+                collapseSidebar();
+            }
+        })();
+
+        // ===== SIDEBAR TABS (Watchlist / Ideas) =====
+        (function initSidebarTabs() {
+            const tabs = document.querySelectorAll('.watchlist-tab');
+            const searchWrap = document.getElementById('watchlist-search-wrap');
+            const watchlistItems = document.getElementById('watchlist-container');
+            const ideasPanel = document.getElementById('ideas-panel');
+            let ideasLoaded = false;
+
+            function switchTab(tabName) {
+                tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+                // Update sidebar header title
+                const sidebarTitle = document.querySelector('.watchlist-header h2');
+                if (sidebarTitle) {
+                    sidebarTitle.textContent = tabName === 'ideas' ? 'Trade Ideas' : 'Watchlist';
+                }
+                if (tabName === 'watchlist') {
+                    searchWrap.style.display = '';
+                    watchlistItems.style.display = '';
+                    ideasPanel.classList.remove('active');
+                } else {
+                    searchWrap.style.display = 'none';
+                    watchlistItems.style.display = 'none';
+                    ideasPanel.classList.add('active');
+                    if (!ideasLoaded) {
+                        ideasLoaded = true;
+                        loadIdeas();
+                    }
+                }
+            }
+
+            tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+            // ══════════════════════════════════════════════════════
+            //  USER ROLE DETECTION + SUBMIT BUTTON VISIBILITY
+            // ══════════════════════════════════════════════════════
+            async function fetchUserRole() {
+                try {
+                    const res = await authFetch('/api/me');
+                    if (res.ok) {
+                        currentUser = await res.json();
+                        // Show submit button only for admin
+                        const submitBtn = document.getElementById('submit-idea-btn');
+                        if (submitBtn && currentUser.role === 'admin') {
+                            submitBtn.classList.add('visible');
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Could not fetch user role:', e);
+                }
+            }
+            fetchUserRole();
+
+            // ══════════════════════════════════════════════════════
+            //  IDEA SUBMIT MODAL WIRING
+            // ══════════════════════════════════════════════════════
+            const submitBtn = document.getElementById('submit-idea-btn');
+            const modalOverlay = document.getElementById('idea-modal-overlay');
+            const modalClose = document.getElementById('idea-modal-close');
+            const actionBtns = document.querySelectorAll('.idea-action-btn');
+            const submitFinalBtn = document.getElementById('idea-submit-final');
+            const ideaNoteEl = document.getElementById('idea-note');
+            let selectedAction = null;
+
+            // Open modal — populate with current contract info
+            if (submitBtn) {
+                submitBtn.addEventListener('click', () => {
+                    const sym = currentSymbol || '-';
+                    const strike = document.getElementById('strike')?.value || '-';
+                    const right = document.querySelector('.call-put-btn.active')?.dataset?.right || 'C';
+                    const exp = document.getElementById('expiration')?.value || '-';
+                    const priceText = document.getElementById('contract-price')?.textContent || '0';
+                    const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || 0;
+
+                    document.getElementById('idea-form-symbol').textContent = sym;
+                    document.getElementById('idea-form-contract').textContent =
+                        `$${strike} ${right === 'C' ? 'CALL' : 'PUT'}`;
+                    document.getElementById('idea-form-exp').textContent = exp;
+                    document.getElementById('idea-form-price').textContent = `$${price.toFixed(2)}`;
+
+                    // Reset action selection
+                    selectedAction = null;
+                    actionBtns.forEach(b => b.classList.remove('selected'));
+                    submitFinalBtn.disabled = true;
+                    ideaNoteEl.value = '';
+
+                    modalOverlay.classList.add('open');
+                });
+            }
+
+            // Close modal
+            if (modalClose) {
+                modalClose.addEventListener('click', () => {
+                    modalOverlay.classList.remove('open');
+                });
+            }
+            if (modalOverlay) {
+                modalOverlay.addEventListener('click', (e) => {
+                    if (e.target === modalOverlay) modalOverlay.classList.remove('open');
+                });
+            }
+
+            // Action toggle (BUY / SELL)
+            actionBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    actionBtns.forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                    selectedAction = btn.dataset.action;
+                    submitFinalBtn.disabled = false;
+                });
+            });
+
+            // Submit idea to backend
+            if (submitFinalBtn) {
+                submitFinalBtn.addEventListener('click', async () => {
+                    if (!selectedAction) return;
+                    submitFinalBtn.disabled = true;
+                    submitFinalBtn.textContent = 'Submitting...';
+
+                    const strike = parseFloat(document.getElementById('strike')?.value) || 0;
+                    const right = document.querySelector('.call-put-btn.active')?.dataset?.right || 'C';
+                    const exp = document.getElementById('expiration')?.value || '';
+                    const priceText = document.getElementById('contract-price')?.textContent || '0';
+                    const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || 0;
+
+                    try {
+                        const res = await authFetch('/api/ideas/submit', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                symbol: currentSymbol,
+                                expiration: exp,
+                                strike: strike,
+                                right: right,
+                                price: price,
+                                action: selectedAction,
+                                note: ideaNoteEl.value.trim()
+                            })
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || 'Submit failed');
+                        }
+                        modalOverlay.classList.remove('open');
+                    } catch (err) {
+                        console.error('Submit idea error:', err);
+                        alert('Failed to submit idea: ' + err.message);
+                    } finally {
+                        submitFinalBtn.disabled = false;
+                        submitFinalBtn.textContent = 'Submit Idea';
+                    }
+                });
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  IDEAS STATE + RENDERING
+            // ══════════════════════════════════════════════════════
+            let allIdeas = [];
+            let ideasSearchTerm = '';
+
+            // ── Search box ──
+            document.getElementById('ideas-search').addEventListener('input', (e) => {
+                ideasSearchTerm = e.target.value.trim().toUpperCase();
+                renderIdeas();
+            });
+
+            // Format timestamp to nice time (e.g. "2:35 PM")
+            function formatIdeaTime(isoStr) {
+                try {
+                    const d = new Date(isoStr);
+                    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                } catch { return ''; }
+            }
+
+            // ── Render user-submitted ideas ──
+            function renderIdeas() {
+                const list = document.getElementById('ideas-list');
+                const empty = document.getElementById('ideas-empty');
+                list.innerHTML = '';
+
+                const filtered = allIdeas.filter(idea => {
+                    if (ideasSearchTerm && !idea.symbol.includes(ideasSearchTerm)) return false;
+                    return true;
+                });
+
+                if (filtered.length === 0) {
+                    empty.textContent = allIdeas.length > 0
+                        ? 'No ideas match search'
+                        : 'No trade ideas today';
+                    empty.style.display = 'block';
+                    return;
+                }
+                empty.style.display = 'none';
+
+                // Show newest first
+                [...filtered].reverse().forEach(idea => {
+                    const el = document.createElement('div');
+                    const isBuy = idea.action === 'BUY';
+                    const badgeClass = idea.right === 'C' ? 'call' : 'put';
+
+                    el.className = 'idea-item';
+                    el.innerHTML = `
+                        <div class="idea-top">
+                            <span class="idea-ticker">${idea.symbol} $${idea.strike}</span>
+                            <span class="idea-badge ${badgeClass}">${idea.type_label}</span>
+                        </div>
+                        <div class="idea-detail">${idea.exp_label} · $${idea.price}</div>
+                        <div class="idea-signal">
+                            <span class="idea-signal-dot ${isBuy ? 'buy' : 'sell'}"></span>
+                            <span style="color:${isBuy ? '#26a69a' : '#ef5350'};font-weight:600">${idea.action}</span>
+                        </div>
+                        <div class="idea-meta">
+                            <span class="idea-poster">💡 ${idea.posted_by || 'Admin'}</span>
+                            <span style="color:#787b86">${formatIdeaTime(idea.timestamp)}</span>
+                        </div>
+                        ${idea.note ? `<div style="color:#9ca3af;font-size:11px;margin-top:4px;font-style:italic">"${idea.note}"</div>` : ''}
+                    `;
+                    el.addEventListener('click', () => applyIdea(idea));
+                    list.appendChild(el);
+                });
+            }
+
+            // ── Fetch today's ideas from REST ──
+            async function loadIdeas() {
+                const loading = document.getElementById('ideas-loading');
+                const empty = document.getElementById('ideas-empty');
+                const list = document.getElementById('ideas-list');
+                loading.style.display = 'block';
+                empty.style.display = 'none';
+                list.innerHTML = '';
+
+                try {
+                    const res = await authFetch('/api/ideas');
+                    if (!res.ok) throw new Error('Failed to fetch ideas');
+                    const data = await res.json();
+
+                    loading.style.display = 'none';
+
+                    if (!data.ideas || data.ideas.length === 0) {
+                        empty.style.display = 'block';
+                        allIdeas = [];
+                        return;
+                    }
+
+                    allIdeas = data.ideas;
+                    renderIdeas();
+                } catch (err) {
+                    loading.style.display = 'none';
+                    empty.textContent = 'Failed to load ideas';
+                    empty.style.display = 'block';
+                    console.error('Ideas fetch error:', err);
+                }
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  IDEAS WEBSOCKET — real-time new idea notifications
+            // ══════════════════════════════════════════════════════
+            function connectIdeasWs() {
+                const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const token = document.cookie.split(';')
+                    .map(c => c.trim())
+                    .find(c => c.startsWith('session='))
+                    ?.split('=')[1] || '';
+                const url = `${proto}//${location.host}/ws/ideas?token=${token}`;
+                ideasWs = new WebSocket(url);
+
+                ideasWs.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'new_idea' && msg.idea) {
+                            // Add to local list and re-render
+                            allIdeas.push(msg.idea);
+                            renderIdeas();
+                            // Show toast + sound
+                            emitIdeaToast(msg.idea);
+                        }
+                    } catch (e) { console.warn('Ideas WS parse error:', e); }
+                };
+
+                ideasWs.onclose = () => {
+                    // Reconnect after 5 seconds
+                    setTimeout(connectIdeasWs, 5000);
+                };
+
+                ideasWs.onerror = () => {
+                    ideasWs.close();
+                };
+            }
+            connectIdeasWs();
+
+            // ── Toast + sound alert for new idea ──
+            function emitIdeaToast(idea) {
+                // Play two-tone alert sound
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime);
+                    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.15);
+                    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.30);
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+                    osc.start(ctx.currentTime);
+                    osc.stop(ctx.currentTime + 0.45);
+                } catch (e) { /* audio not available */ }
+
+                const isBuy = idea.action === 'BUY';
+                const toastContainer = document.getElementById('ideas-toast');
+                const toast = document.createElement('div');
+                toast.className = 'ideas-toast-item' + (isBuy ? '' : ' sell-toast');
+                toast.style.animationDelay = '0s, 4.6s';
+                toast.innerHTML = `
+                    <div class="ideas-toast-title ${isBuy ? 'buy' : 'sell'}">
+                        💡 ${idea.action}: ${idea.symbol} $${idea.strike}
+                    </div>
+                    <div>${idea.type_label} · ${idea.exp_label} · $${idea.price}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:2px">by ${idea.posted_by || 'Admin'}</div>
+                `;
+                toast.addEventListener('click', () => {
+                    applyIdea(idea);
+                    toast.remove();
+                });
+                toastContainer.appendChild(toast);
+                setTimeout(() => toast.remove(), 5200);
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  APPLY IDEA — navigate to the contract + track price
+            // ══════════════════════════════════════════════════════
+            async function applyIdea(idea) {
+                // Store idea price for the badge
+                activeIdeaPrice = {
+                    price: idea.price,
+                    action: idea.action,
+                    timestamp: idea.timestamp,
+                    posted_by: idea.posted_by
+                };
+
+                // Show idea price badge in header
+                const badge = document.getElementById('idea-price-badge');
+                const valEl = document.getElementById('idea-price-value');
+                if (badge && valEl) {
+                    valEl.textContent = `$${idea.price.toFixed(2)}`;
+                    valEl.style.color = idea.action === 'BUY' ? '#26a69a' : '#ef5350';
+                    badge.classList.add('visible');
+                }
+
+                // Switch to watchlist tab (so chart is focus)
+                switchTab('watchlist');
+
+                // Set symbol
+                currentSymbol = idea.symbol;
+                renderWatchlist();
+
+                // Set call/put
+                syncCallPut(idea.right);
+
+                // Load expirations
+                await loadExpirations(idea.symbol, false);
+                const expSelect = document.getElementById('expiration');
+                if (expSelect.querySelector(`option[value="${idea.expiration}"]`)) {
+                    expSelect.value = idea.expiration;
+                }
+
+                // Load strikes for that exp
+                await loadStrikes(idea.symbol, idea.expiration, false);
+                const strikeSelect = document.getElementById('strike');
+                if (strikeSelect.querySelector(`option[value="${idea.strike}"]`)) {
+                    strikeSelect.value = String(idea.strike);
+                }
+
+                // Analyze
+                await analyze();
+            }
+
+            // Expose refresh + applyIdea for external use
+            window.refreshIdeas = function() { ideasLoaded = false; loadIdeas(); };
+            window.applyIdea = applyIdea;
+            window.switchSidebarTab = switchTab;
+        })();
+
         // ===== MOBILE EVENT LISTENERS =====
         // Mobile toggle buttons (old, kept for landscape)
         document.getElementById('mobile-menu-toggle').addEventListener('click', toggleWatchlist);
@@ -4756,11 +5981,13 @@
         // ===== MOBILE BOTTOM NAV =====
         document.getElementById('nav-watchlist').addEventListener('click', () => {
             const sidebar = document.getElementById('watchlist-sidebar');
-            if (sidebar.classList.contains('mobile-open')) {
+            if (sidebar.classList.contains('mobile-open') && !document.querySelector('.watchlist-tab[data-tab="ideas"].active')) {
                 closeWatchlist();
             } else {
                 closeAnalysis();
+                if (window.switchSidebarTab) window.switchSidebarTab('watchlist');
                 openWatchlist();
+                setActiveNav('nav-watchlist');
             }
         });
 
@@ -4785,6 +6012,18 @@
             }
         });
 
+        document.getElementById('nav-ideas').addEventListener('click', () => {
+            const sidebar = document.getElementById('watchlist-sidebar');
+            if (sidebar.classList.contains('mobile-open') && document.querySelector('.watchlist-tab[data-tab="ideas"].active')) {
+                closeWatchlist();
+            } else {
+                closeAnalysis();
+                if (window.switchSidebarTab) window.switchSidebarTab('ideas');
+                openWatchlist();
+                setActiveNav('nav-ideas');
+            }
+        });
+
         document.getElementById('nav-analysis').addEventListener('click', () => {
             const sidebar = document.getElementById('analysis-sidebar');
             if (sidebar.classList.contains('mobile-open')) {
@@ -4802,13 +6041,54 @@
         
         // ===== INITIALIZATION =====
         async function init() {
-            // Set default dates (5 days to ensure trading days are included on weekends)
+            const urlP = getUrlParams();
+
+            // Set interval from URL or default 5
+            if (urlP.interval) {
+                currentInterval = parseInt(urlP.interval) || 5;
+                document.querySelectorAll('.interval-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll(`.interval-btn[data-interval="${currentInterval}"]`).forEach(b => b.classList.add('active'));
+            }
+
+            // Set date range from URL or default 5D
             const today = new Date();
+            const rangeDays = urlP.range ? parseInt(urlP.range) : 5;
             const startFrom = new Date(today);
-            startFrom.setDate(today.getDate() - 5); // 5D default
-            
+            startFrom.setDate(today.getDate() - rangeDays);
             document.getElementById('start-date').value = startFrom.toISOString().split('T')[0];
             document.getElementById('end-date').value = today.toISOString().split('T')[0];
+            // Activate correct range button
+            document.querySelectorAll('.date-range-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll(`.date-range-btn[data-range="${rangeDays}"]`).forEach(b => b.classList.add('active'));
+
+            // Set call/put from URL
+            if (urlP.right === 'P' || urlP.right === 'C') {
+                syncCallPut(urlP.right);
+            }
+
+            // Restore confidence from URL
+            if (urlP.conf) {
+                const confVal = parseInt(urlP.conf);
+                if ([50, 60, 70, 80, 90].includes(confVal)) {
+                    minConfidence = confVal;
+                    document.querySelectorAll('.conf-btn').forEach(b => {
+                        b.classList.toggle('active', parseInt(b.dataset.conf) === confVal);
+                    });
+                }
+            }
+
+            // Restore signal toggles from URL
+            if (urlP.signals) {
+                const sigs = urlP.signals.split(',');
+                sigs.forEach(sig => {
+                    const cb = document.getElementById('filter-' + sig);
+                    if (cb) {
+                        cb.checked = true;
+                        const label = document.querySelector(`[data-for="filter-${sig}"]`);
+                        if (label) label.classList.add('active');
+                    }
+                });
+            }
             
             // Init charts
             initCharts();
@@ -4816,10 +6096,8 @@
             // Initialize mobile controls visibility and state
             if (isMobile()) {
                 const controlsSummary = document.getElementById('controls-summary');
-                // Show controls-summary immediately on mobile
                 if (controlsSummary) {
                     controlsSummary.classList.add('active');
-                    // Start with controls collapsed on mobile to maximize chart space
                     collapseControls();
                 }
             }
@@ -4827,8 +6105,31 @@
             // Load watchlist prices via REST first (needed for ATM calculation)
             await loadWatchlistPrices();
             
-            // Select default symbol (will now have price data for ATM)
-            selectSymbol('QQQ');
+            // Select symbol from URL or default QQQ
+            const initSymbol = urlP.symbol || 'QQQ';
+
+            // If URL has full params (exp+strike), do targeted init without auto-analyze
+            if (urlP.exp && urlP.strike) {
+                currentSymbol = initSymbol;
+                renderWatchlist();
+                updateMobileUnderlyingPrice();
+                // Load expirations, then set the URL exp
+                await loadExpirations(initSymbol, false);
+                const expSelect = document.getElementById('expiration');
+                if (expSelect.querySelector(`option[value="${urlP.exp}"]`)) {
+                    expSelect.value = urlP.exp;
+                }
+                // Load strikes for that exp, then set URL strike
+                await loadStrikes(initSymbol, expSelect.value, false);
+                const strikeSelect = document.getElementById('strike');
+                if (strikeSelect.querySelector(`option[value="${urlP.strike}"]`)) {
+                    strikeSelect.value = urlP.strike;
+                }
+                // Now analyze with all params set
+                analyze().catch(e => console.warn('URL-param auto-analyze failed:', e));
+            } else {
+                selectSymbol(initSymbol);
+            }
             
             // Start watchlist WebSocket for 1/sec price streaming
             connectWatchlistWs();

@@ -32,9 +32,82 @@ from app.live_feed import LiveFeedManager, live_feed_manager, mock_csv_playback,
 logger = logging.getLogger("optionsganster")
 
 # ── Auth config ─────────────────────────────────────────────
-AUTH_EMAIL = "realsaraf@gmail.com"
-AUTH_PASS_HASH = hashlib.sha256("saraf1236".encode()).hexdigest()
-_sessions: set[str] = set()  # in-memory session tokens
+# Multi-user store: email → {password_hash, role, display_name}
+_USERS: dict[str, dict] = {
+    "realsaraf@gmail.com": {
+        "password_hash": hashlib.sha256("saraf1237".encode()).hexdigest(),
+        "role": "admin",
+        "display_name": "realsaraf",
+    },
+    "user@og.com": {
+        "password_hash": hashlib.sha256("og1236".encode()).hexdigest(),
+        "role": "general",
+        "display_name": "OG Trader",
+    },    
+    "kutubtalukder@gmail.com": {
+        "password_hash": hashlib.sha256("kt1236".encode()).hexdigest(),
+        "role": "general",
+        "display_name": "KT Trader",
+    }
+}
+_sessions: dict[str, dict] = {}  # token → {email, role, display_name}
+
+
+# ── Ideas Hub (user-submitted ideas + WS broadcast) ─────────
+from datetime import timezone
+
+class IdeasHub:
+    """Manages user-submitted trade ideas for the day, with WebSocket fan-out."""
+
+    def __init__(self):
+        self._ideas: list[dict] = []      # today's ideas
+        self._date: str = ""              # current date key
+        self._clients: dict[int, asyncio.Queue] = {}  # ws clients
+        self._next_id = 0
+        self._lock = asyncio.Lock()
+
+    def _ensure_today(self):
+        today = date.today().isoformat()
+        if self._date != today:
+            self._ideas.clear()
+            self._date = today
+
+    async def submit(self, idea: dict) -> dict:
+        """Submit a new idea. Returns the full idea dict with id/timestamp."""
+        self._ensure_today()
+        idea["id"] = len(self._ideas) + 1
+        idea["timestamp"] = datetime.now(timezone.utc).isoformat()
+        self._ideas.append(idea)
+        # Broadcast to all connected WS clients
+        msg = json.dumps({"type": "new_idea", "idea": idea})
+        dead = []
+        for cid, q in self._clients.items():
+            try:
+                q.put_nowait(msg)
+            except asyncio.QueueFull:
+                dead.append(cid)
+        for cid in dead:
+            self._clients.pop(cid, None)
+        return idea
+
+    def get_ideas(self) -> list[dict]:
+        self._ensure_today()
+        return list(self._ideas)
+
+    async def register(self) -> tuple[int, asyncio.Queue]:
+        async with self._lock:
+            cid = self._next_id
+            self._next_id += 1
+            q: asyncio.Queue = asyncio.Queue(maxsize=50)
+            self._clients[cid] = q
+            return cid, q
+
+    async def unregister(self, cid: int):
+        async with self._lock:
+            self._clients.pop(cid, None)
+
+
+_ideas_hub = IdeasHub()
 
 
 
@@ -201,9 +274,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         token = request.cookies.get("session")
         if not token or token not in _sessions:
-            if path.startswith("/api/"):
+            if path.startswith("/api/") or path.startswith("/ws/"):
                 return Response(status_code=401, content="Unauthorized")
             return RedirectResponse("/login", status_code=302)
+        # Attach user info to request state for downstream use
+        request.state.user = _sessions[token]
         return await call_next(request)
 
 app.add_middleware(AuthMiddleware)
@@ -591,11 +666,19 @@ class LoginRequest(BaseModel):
 @app.post("/api/login")
 async def login(body: LoginRequest):
     pw_hash = hashlib.sha256(body.password.encode()).hexdigest()
-    if body.email != AUTH_EMAIL or pw_hash != AUTH_PASS_HASH:
+    user_record = _USERS.get(body.email)
+    if not user_record or pw_hash != user_record["password_hash"]:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = secrets.token_hex(32)
-    _sessions.add(token)
-    resp = Response(content='{"ok":true}', media_type="application/json")
+    _sessions[token] = {
+        "email": body.email,
+        "role": user_record["role"],
+        "display_name": user_record["display_name"],
+    }
+    resp = Response(
+        content=json.dumps({"ok": True, "role": user_record["role"], "display_name": user_record["display_name"]}),
+        media_type="application/json",
+    )
     resp.set_cookie(key="session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
     return resp
 
@@ -604,10 +687,19 @@ async def login(body: LoginRequest):
 async def logout(request: Request):
     token = request.cookies.get("session")
     if token:
-        _sessions.discard(token)
+        _sessions.pop(token, None)
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie("session")
     return resp
+
+
+@app.get("/api/me")
+async def get_me(request: Request):
+    """Return the current user's profile (role, display_name)."""
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"email": user["email"], "role": user["role"], "display_name": user["display_name"]}
 
 
 # ── Endpoints ───────────────────────────────────────────────
@@ -1017,6 +1109,316 @@ async def analyze_option(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── User-submitted Ideas endpoints ───────────────────────────
+
+class IdeaSubmitRequest(BaseModel):
+    symbol: str
+    expiration: str
+    strike: float
+    right: str          # "C" or "P"
+    price: float        # contract price at time of submission
+    action: str         # e.g. "BUY", "SELL"
+    note: str = ""      # optional note from the user
+
+
+@app.post("/api/ideas/submit")
+async def submit_idea(body: IdeaSubmitRequest, request: Request):
+    """Submit a trade idea. Admin-only."""
+    user = getattr(request.state, "user", None)
+    if not user or user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can post ideas")
+
+    dte = 0
+    try:
+        exp_date = datetime.strptime(body.expiration, "%Y-%m-%d").date()
+        dte = (exp_date - date.today()).days
+    except Exception:
+        pass
+
+    exp_short = ""
+    try:
+        exp_short = datetime.strptime(body.expiration, "%Y-%m-%d").strftime("%b %d")
+    except Exception:
+        exp_short = body.expiration
+
+    idea = {
+        "symbol": body.symbol.upper(),
+        "expiration": body.expiration,
+        "exp_label": f"{exp_short} ({dte}d)",
+        "strike": body.strike,
+        "right": body.right.upper(),
+        "type_label": "CALL" if body.right.upper() == "C" else "PUT",
+        "price": round(body.price, 2),
+        "action": body.action.upper(),
+        "note": body.note,
+        "posted_by": user["display_name"],
+    }
+    result = await _ideas_hub.submit(idea)
+    return {"ok": True, "idea": result}
+
+
+@app.get("/api/ideas")
+async def get_user_ideas():
+    """Get today's user-submitted ideas."""
+    ideas = _ideas_hub.get_ideas()
+    return {"ideas": ideas}
+
+
+# ── Ideas WebSocket (broadcasts new ideas to all clients) ────
+
+@app.websocket("/ws/ideas")
+async def websocket_ideas(ws: WebSocket):
+    await ws.accept()
+    cid, queue = await _ideas_hub.register()
+
+    async def _sender():
+        try:
+            while True:
+                msg = await queue.get()
+                await ws.send_text(msg)
+        except (WebSocketDisconnect, Exception):
+            pass
+
+    sender_task = asyncio.create_task(_sender())
+    try:
+        # Keep alive; client doesn't send messages
+        while True:
+            await ws.receive_text()
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        sender_task.cancel()
+        await _ideas_hub.unregister(cid)
+
+
+# ── OLD algorithmic ideas (kept for reference but endpoint replaced above) ──
+import time as _time
+
+_ideas_cache: dict[str, dict] = {}   # sym → {"ideas": [...], "ts": float}
+_IDEAS_TTL = 300  # 5 minutes
+
+
+@app.get("/api/ideas/scan")
+async def get_trade_ideas_scan(
+    symbols: str = Query("QQQ,SPY,IWM,AAPL,MSFT,NVDA,TSLA,AMD,AMZN,META,GOOGL"),
+    refresh: bool = Query(False, description="Force bypass cache"),
+    poly: PolygonClient = Depends(get_polygon),
+    gengine: GreeksSignalEngine = Depends(get_greeks_engine),
+    engine: VPAEngine = Depends(get_vpa),
+):
+    """
+    Scan watchlist symbols for trade ideas.
+    Results are cached per-symbol for 5 minutes.
+    For each symbol, check nearest expiration chain and find setups
+    where the composite signal is BUY / STRONG_BUY / SELL / STRONG_SELL.
+    Returns top ideas sorted by |score| × confidence.
+    """
+    import asyncio
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    ideas: list[dict] = []
+    now = _time.time()
+
+    # Separate symbols into cached vs need-scan
+    symbols_to_scan: list[str] = []
+    for sym in symbol_list:
+        cached = _ideas_cache.get(sym)
+        if not refresh and cached and (now - cached["ts"]) < _IDEAS_TTL:
+            ideas.extend(cached["ideas"])
+        else:
+            symbols_to_scan.append(sym)
+
+    # Per-symbol results collector for cache storage
+    _sym_ideas: dict[str, list[dict]] = {sym: [] for sym in symbols_to_scan}
+
+    async def scan_symbol(sym: str):
+        try:
+            # Get expirations — use first 2 nearest
+            expirations = await poly.get_expirations(sym)
+            if not expirations:
+                return
+
+            # Get underlying price for ATM calculation
+            price_data = await poly.get_snapshot_prices([sym])
+            snap_data = price_data.get(sym, {})
+            underlying_price = float(snap_data.get("lastPrice", 0) or snap_data.get("prevClose", 0))
+            if underlying_price == 0:
+                return
+
+            # ── Fetch stock bars for VPA bias + underlying trend ──
+            import pandas as pd
+            vpa_bias = None
+            underlying_trend = None
+            vol_regime = None
+            try:
+                stock_df = await poly.get_stock_ohlcv(
+                    symbol=sym,
+                    start_date=date.today(),
+                    end_date=date.today(),
+                    interval_min=5,
+                )
+                if not stock_df.empty and len(stock_df) >= 2:
+                    # VPA bias
+                    vpa_results = engine.analyze(stock_df)
+                    vpa_bias = engine.get_bias(vpa_results)
+
+                    # Underlying trend from open→close
+                    day_open = stock_df.iloc[0]["open"]
+                    day_close = stock_df.iloc[-1]["close"]
+                    pct_change = (day_close - day_open) / day_open * 100 if day_open else 0
+                    if pct_change > 0.15:
+                        underlying_trend = "UP"
+                    elif pct_change < -0.15:
+                        underlying_trend = "DOWN"
+                    else:
+                        underlying_trend = "FLAT"
+
+                    # Volume regime
+                    vol_regime_info = engine.get_volume_regime(stock_df)
+                    vol_regime = vol_regime_info.get("regime") if vol_regime_info else None
+            except Exception as vpa_err:
+                print(f"[IDEAS] VPA/trend fetch failed for {sym}: {vpa_err}")
+
+            for exp in expirations[:2]:  # Check nearest 2 expirations
+                dte = (exp - date.today()).days
+                if dte < 0:
+                    continue
+
+                # Get chain snapshot
+                chain = await poly.get_options_chain_snapshot(sym, exp)
+                if not chain:
+                    continue
+
+                # Find ATM strikes (2 closest to underlying price for calls + puts)
+                strikes_seen = sorted(set(c["strike"] for c in chain if c["strike"] > 0))
+                if not strikes_seen:
+                    continue
+
+                # Find the ATM strike
+                atm_strike = min(strikes_seen, key=lambda s: abs(s - underlying_price))
+                atm_idx = strikes_seen.index(atm_strike)
+
+                # Check ATM and 1 strike OTM for both calls and puts
+                check_strikes = set()
+                check_strikes.add(atm_strike)
+                if atm_idx + 1 < len(strikes_seen):
+                    check_strikes.add(strikes_seen[atm_idx + 1])  # 1 OTM call
+                if atm_idx - 1 >= 0:
+                    check_strikes.add(strikes_seen[atm_idx - 1])  # 1 OTM put
+
+                for strike_val in check_strikes:
+                    for ct in ["call", "put"]:
+                        # Find the contract in chain
+                        contract = next(
+                            (c for c in chain
+                             if c["strike"] == strike_val
+                             and c["contract_type"].lower() == ct),
+                            None,
+                        )
+                        if not contract:
+                            continue
+
+                        # Skip illiquid contracts
+                        if (contract.get("volume", 0) or 0) < 10 and (contract.get("open_interest", 0) or 0) < 50:
+                            continue
+
+                        # Skip too-cheap contracts
+                        last_price = contract.get("last_price", 0) or 0
+                        if last_price < 0.10:
+                            continue
+
+                        # Build snapshot dict for greeks engine
+                        contract_snap = {
+                            "greeks": contract.get("greeks", {}),
+                            "iv": contract.get("iv", 0),
+                            "open_interest": contract.get("open_interest", 0),
+                            "volume": contract.get("volume", 0),
+                            "underlying_price": underlying_price,
+                            "break_even": 0,
+                            "last_price": last_price,
+                        }
+
+                        right = "C" if ct == "call" else "P"
+                        try:
+                            result = gengine.analyze(
+                                contract_snapshot=contract_snap,
+                                chain_data=chain,
+                                vpa_bias=vpa_bias,
+                                contract_type=right,
+                                underlying_trend=underlying_trend,
+                                dte=dte,
+                                volume_regime=vol_regime,
+                            )
+                        except Exception:
+                            continue
+
+                        # Only keep actionable signals (skip neutral)
+                        sig = result.signal.value
+                        if sig == "neutral":
+                            continue
+
+                        # Map signal to action
+                        _call_action = {
+                            "strong_buy": "STRONG BUY", "buy": "BUY",
+                            "lean_bullish": "LEAN BUY",
+                            "strong_sell": "STRONG SELL", "sell": "SELL",
+                            "lean_bearish": "LEAN SELL",
+                        }
+                        _put_action = {
+                            "strong_buy": "STRONG SELL", "buy": "SELL",
+                            "lean_bullish": "LEAN SELL",
+                            "strong_sell": "STRONG BUY", "sell": "BUY",
+                            "lean_bearish": "LEAN BUY",
+                        }
+                        action_map = _put_action if right == "P" else _call_action
+                        action = action_map.get(sig, "HOLD")
+
+                        exp_str = exp.strftime("%Y-%m-%d")
+                        # Friendly exp label
+                        exp_short = exp.strftime("%b %d")
+
+                        idea_dict = {
+                            "symbol": sym,
+                            "expiration": exp_str,
+                            "exp_label": f"{exp_short} ({dte}d)",
+                            "strike": strike_val,
+                            "right": right,
+                            "type_label": "CALL" if right == "C" else "PUT",
+                            "price": round(last_price, 2),
+                            "signal": sig,
+                            "action": action,
+                            "score": result.score,
+                            "confidence": result.confidence,
+                            "archetype": result.trade_archetype.value,
+                            "recommendation": result.recommendation[:120],
+                        }
+                        ideas.append(idea_dict)
+                        _sym_ideas[sym].append(idea_dict)
+
+        except Exception as e:
+            print(f"[IDEAS] Error scanning {sym}: {e}")
+
+    # Scan uncached symbols in parallel (with concurrency limit)
+    if symbols_to_scan:
+        sem = asyncio.Semaphore(3)  # Max 3 concurrent to avoid rate limits
+
+        async def throttled_scan(sym):
+            async with sem:
+                await scan_symbol(sym)
+
+        await asyncio.gather(*(throttled_scan(sym) for sym in symbols_to_scan))
+
+        # Store results in per-symbol cache
+        for sym in symbols_to_scan:
+            _ideas_cache[sym] = {"ideas": _sym_ideas[sym], "ts": _time.time()}
+
+    # Sort by |score| × confidence descending → best ideas first
+    ideas.sort(key=lambda x: abs(x["score"]) * x["confidence"], reverse=True)
+
+    # Return top 20 ideas
+    return {"ideas": ideas[:20]}
 
 
 @app.get("/api/watchlist/prices")
