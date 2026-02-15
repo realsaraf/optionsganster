@@ -2221,7 +2221,7 @@
             <!-- Controls Summary Bar (Mobile only, shown after first analyze) -->
             <div class="controls-summary" id="controls-summary">
                 <span class="summary-text" id="summary-text">SPY $500C 5m</span>
-                <button class="summary-analyze-btn" id="summary-analyze-btn">Analyze</button>
+                <button class="summary-analyze-btn" id="summary-analyze-btn" style="display:none">Analyze</button>
                 <button class="summary-live-btn" id="summary-live-btn">LIVE</button>
                 <button class="controls-chevron" id="controls-chevron">⚙</button>
             </div>
@@ -2275,8 +2275,8 @@
 
                 <!-- Desktop Date Range Buttons -->
                 <div class="desktop-date-range" id="desktop-date-range">
-                    <button class="date-range-btn active" data-range="1">1D</button>
-                    <button class="date-range-btn" data-range="5">5D</button>
+                    <button class="date-range-btn" data-range="1">1D</button>
+                    <button class="date-range-btn active" data-range="5">5D</button>
                     <button class="date-range-btn" data-range="7">1W</button>
                     <button class="date-range-btn" data-range="14">2W</button>
                     <button class="date-range-btn" data-range="30">1M</button>
@@ -2286,7 +2286,7 @@
                 <!-- Mobile Date Range Buttons (replaces From/To on mobile) -->
                 <div class="mobile-date-range" id="mobile-date-range">
                     <div class="date-range-group">
-                        <button class="date-range-btn active" data-range="1">1D</button>
+                        <button class="date-range-btn" data-range="1">1D</button>
                         <button class="date-range-btn" data-range="7">1W</button>
                         <button class="date-range-btn" data-range="14">2W</button>
                         <button class="date-range-btn" data-range="30">1M</button>
@@ -2302,7 +2302,7 @@
                     <button class="interval-btn" data-interval="60">1H</button>
                 </div>
                 
-                <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
+                <button class="analyze-btn" id="analyze-btn" style="display:none">▶ Analyze</button>
                 <button class="live-btn" id="live-btn">⚪ LIVE</button>
                 <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 12px;min-width:auto" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
             </div>
@@ -2756,8 +2756,8 @@
         
         // Default watchlist symbols with metadata
         const defaultWatchlist = [
-            { symbol: 'SPY', name: 'S&P 500 ETF' },
             { symbol: 'QQQ', name: 'Nasdaq 100 ETF' },
+            { symbol: 'SPY', name: 'S&P 500 ETF' },
             { symbol: 'IWM', name: 'Russell 2000 ETF' },
             { symbol: 'AAPL', name: 'Apple Inc' },
             { symbol: 'MSFT', name: 'Microsoft Corp' },
@@ -4534,6 +4534,18 @@
         
         document.getElementById('analyze-btn').addEventListener('click', analyze);
         document.getElementById('summary-analyze-btn').addEventListener('click', analyze);
+
+        // Auto-analyze when date inputs change manually
+        document.getElementById('start-date').addEventListener('change', () => {
+            if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+                analyze().catch(e => console.warn('Auto-analyze on start-date change failed:', e));
+            }
+        });
+        document.getElementById('end-date').addEventListener('change', () => {
+            if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+                analyze().catch(e => console.warn('Auto-analyze on end-date change failed:', e));
+            }
+        });
         
         // Live mode button
         document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
@@ -4736,10 +4748,10 @@
         
         // ===== INITIALIZATION =====
         async function init() {
-            // Set default dates (1 day on both mobile and desktop)
+            // Set default dates (5 days to ensure trading days are included on weekends)
             const today = new Date();
             const startFrom = new Date(today);
-            startFrom.setDate(today.getDate() - 1); // 1D default
+            startFrom.setDate(today.getDate() - 5); // 5D default
             
             document.getElementById('start-date').value = startFrom.toISOString().split('T')[0];
             document.getElementById('end-date').value = today.toISOString().split('T')[0];
@@ -4762,7 +4774,7 @@
             await loadWatchlistPrices();
             
             // Select default symbol (will now have price data for ATM)
-            selectSymbol('SPY');
+            selectSymbol('QQQ');
             
             // Start watchlist WebSocket for 1/sec price streaming
             connectWatchlistWs();
