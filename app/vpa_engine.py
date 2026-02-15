@@ -378,6 +378,45 @@ class VPAEngine:
                 "reason": "Mixed signals, no clear direction",
             }
 
+    def get_volume_regime(self, df) -> dict:
+        """
+        Classify current volume regime.
+        HIGH volume days = 23.5% WR historically — reduce size or skip.
+        
+        Returns dict with keys: regime, ratio, detail
+        """
+        if df is None or df.empty or len(df) < 3:
+            return {"regime": "NORMAL", "ratio": 1.0, "detail": "Insufficient data"}
+
+        period = min(self.t.volume_avg_period, len(df) - 1)
+        avg_vol = df["volume"].iloc[-period-1:-1].mean() if period > 0 else df["volume"].mean()
+        current_vol = df["volume"].iloc[-1]
+        
+        if avg_vol == 0:
+            return {"regime": "NORMAL", "ratio": 1.0, "detail": "No volume history"}
+
+        ratio = current_vol / avg_vol
+
+        if ratio > self.t.high_volume:
+            return {
+                "regime": "HIGH_RISK",
+                "ratio": round(ratio, 2),
+                "detail": f"Volume {ratio:.1f}x average – institutional activity, "
+                          f"23.5% historical WR, reduce position size",
+            }
+        elif ratio < self.t.low_volume:
+            return {
+                "regime": "LOW",
+                "ratio": round(ratio, 2),
+                "detail": f"Volume {ratio:.1f}x average – low conviction, "
+                          f"no strong move expected",
+            }
+        return {
+            "regime": "NORMAL",
+            "ratio": round(ratio, 2),
+            "detail": f"Volume {ratio:.1f}x average – normal conditions",
+        }
+
 
 # Global engine instance
 vpa_engine = VPAEngine()

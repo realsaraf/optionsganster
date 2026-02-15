@@ -2418,6 +2418,12 @@
                             </div>
 
                             <div class="composite-card">
+                                <h4>Recommendation</h4>
+                                <div class="recommendation-box" id="comp-recommendation">Analyze an option to see composite signal</div>
+                                <div id="comp-warnings" style="margin-top:8px"></div>
+                            </div>
+
+                            <div class="composite-card">
                                 <h4>Greeks</h4>
                                 <div class="greeks-grid" id="greeks-grid">
                                     <div class="greek-item"><div class="greek-value neutral-val" id="g-delta">-</div><div class="greek-label">Δ Delta</div></div>
@@ -2449,10 +2455,6 @@
                                 </div>
                             </div>
 
-                            <div class="composite-card">
-                                <h4>Recommendation</h4>
-                                <div class="recommendation-box" id="comp-recommendation">Analyze an option to see composite signal</div>
-                            </div>
                         </div>
 
                         <!-- VPA TAB -->
@@ -4387,7 +4389,10 @@
             }[comp.action] || 'neutral';
             const gauge = document.getElementById('composite-gauge');
             gauge.className = 'composite-signal-gauge ' + actionClass;
-            document.getElementById('comp-action').textContent = comp.action;
+            const isCall = document.getElementById('dcp-call')?.classList?.contains('call-active');
+            const rightLabel = isCall ? 'CALLS' : 'PUTS';
+            const actionSuffix = comp.action !== 'HOLD' ? ' ' + rightLabel : '';
+            document.getElementById('comp-action').textContent = comp.action + actionSuffix;
             document.getElementById('comp-signal-sub').textContent = comp.signal.replace(/_/g, ' ');
             document.getElementById('comp-score').textContent = (comp.score >= 0 ? '+' : '') + comp.score.toFixed(3);
             document.getElementById('comp-conf').textContent = Math.round(comp.confidence * 100) + '%';
@@ -4460,6 +4465,18 @@
 
             // Recommendation
             document.getElementById('comp-recommendation').textContent = comp.recommendation;
+
+            // Warnings
+            const warningsDiv = document.getElementById('comp-warnings');
+            if (comp.warnings && comp.warnings.length > 0) {
+                warningsDiv.innerHTML = comp.warnings.map(w => `
+                    <div style="background:rgba(239,83,80,0.12);border:1px solid #ef5350;border-radius:6px;padding:8px 12px;margin-top:6px;font-size:13px;color:#ef5350;">
+                        ${w}
+                    </div>
+                `).join('');
+            } else {
+                warningsDiv.innerHTML = '';
+            }
 
             // Add BUY/SELL/HOLD marker on the last bar of the chart
             addCompositeMarker(comp);

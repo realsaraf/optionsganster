@@ -293,6 +293,7 @@ class CompositeSignalResponse(BaseModel):
     greeks: GreeksResponse
     chain_metrics: ChainMetricsResponse
     recommendation: str
+    warnings: list[str] = []       # Risk warnings (trend, expiry, premium floor)
 
 
 class AnalysisResponse(BaseModel):
@@ -306,6 +307,7 @@ class AnalysisResponse(BaseModel):
     bias: dict
     composite: Optional[CompositeSignalResponse] = None
     underlying_bars: list[OHLCVBar] = []
+    volume_regime: Optional[dict] = None
 
 
 class ExpirationResponse(BaseModel):
@@ -842,6 +844,27 @@ async def analyze_option(
         vpa_results = engine.analyze(df)
         bias = engine.get_bias(vpa_results)
 
+        # ── Compute underlying trend from stock bars ─────
+        underlying_trend = None
+        if not stock_df.empty and len(stock_df) >= 2:
+            day_open = stock_df.iloc[0]["open"]
+            day_close = stock_df.iloc[-1]["close"]
+            pct_change = (day_close - day_open) / day_open * 100 if day_open else 0
+            if pct_change > 0.15:
+                underlying_trend = "UP"
+            elif pct_change < -0.15:
+                underlying_trend = "DOWN"
+            else:
+                underlying_trend = "FLAT"
+
+        # ── Compute DTE ──────────────────────────────────
+        dte = (exp_date - date.today()).days if exp_date else None
+
+        # ── Volume regime from VPA engine ────────────────
+        vol_regime_info = None
+        if not stock_df.empty:
+            vol_regime_info = engine.get_volume_regime(stock_df)
+
         # ── Composite Greeks analysis ────────────────────
         composite_response = None
         try:
@@ -860,6 +883,9 @@ async def analyze_option(
                     chain_data=chain_snap,
                     vpa_bias=bias,
                     contract_type=right.upper(),
+                    underlying_trend=underlying_trend,
+                    dte=dte,
+                    volume_regime=vol_regime_info["regime"] if vol_regime_info else None,
                 )
                 # Map composite signal → actionable BUY / SELL / HOLD
                 # For calls: bullish underlying = BUY (the call)
@@ -929,6 +955,7 @@ async def analyze_option(
                         weighted_iv=comp_result.chain_metrics.weighted_iv,
                     ),
                     recommendation=comp_result.recommendation,
+                    warnings=comp_result.warnings,
                 )
         except Exception as comp_err:
             print(f"Composite analysis error (non-fatal): {comp_err}")
@@ -983,6 +1010,7 @@ async def analyze_option(
             bias=bias,
             composite=composite_response,
             underlying_bars=underlying_bars,
+            volume_regime=vol_regime_info,
         )
 
     except HTTPException:
@@ -1118,6 +1146,26 @@ async def websocket_live(ws: WebSocket):
                 vpa_results = vpa_engine.analyze(df)
                 bias = vpa_engine.get_bias(vpa_results)
 
+                # ── Underlying trend + volume regime for new engine params
+                underlying_trend = None
+                vol_regime = None
+                try:
+                    stock_df = await polygon_client.get_stock_ohlcv(
+                        symbol=symbol, start_date=start_dt,
+                        end_date=end_dt, interval_min=5,
+                    )
+                    if not stock_df.empty and len(stock_df) >= 2:
+                        day_open = stock_df.iloc[0]["open"]
+                        day_close = stock_df.iloc[-1]["close"]
+                        pct = (day_close - day_open) / day_open * 100 if day_open else 0
+                        underlying_trend = "UP" if pct > 0.15 else "DOWN" if pct < -0.15 else "FLAT"
+                        vol_regime_info = vpa_engine.get_volume_regime(stock_df)
+                        vol_regime = vol_regime_info.get("regime")
+                except Exception:
+                    pass
+
+                dte = (exp_date - date.today()).days
+
                 all_signals = [
                     dict(
                         signal=r.signal.value,
@@ -1157,6 +1205,9 @@ async def websocket_live(ws: WebSocket):
                             chain_data=chain_snap,
                             vpa_bias=bias,
                             contract_type=right,
+                            underlying_trend=underlying_trend,
+                            dte=dte,
+                            volume_regime=vol_regime,
                         )
                         _call_action = {
                             "strong_buy": "STRONG BUY", "buy": "BUY",
@@ -1213,6 +1264,7 @@ async def websocket_live(ws: WebSocket):
                                 "weighted_iv": comp.chain_metrics.weighted_iv,
                             },
                             "recommendation": comp.recommendation,
+                            "warnings": comp.warnings,
                         }
                 except Exception as comp_err:
                     print(f"[WS-Analysis] Composite error (non-fatal): {comp_err}")

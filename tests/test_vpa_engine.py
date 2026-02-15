@@ -267,3 +267,39 @@ class TestBias:
 
         bias = engine.get_bias(results)
         assert bias["bias"] == "bullish"
+
+
+class TestVolumeRegime:
+    """Tests for the new volume regime detector."""
+
+    def test_high_volume_regime(self, engine: VPAEngine):
+        """Volume > 1.5x average → HIGH_RISK."""
+        bars = make_history(12, volume=1000)
+        bars.append({"open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "volume": 3000})
+        df = make_df(bars)
+        result = engine.get_volume_regime(df)
+        assert result["regime"] == "HIGH_RISK"
+        assert result["ratio"] > 1.5
+
+    def test_low_volume_regime(self, engine: VPAEngine):
+        """Volume < 0.7x average → LOW."""
+        bars = make_history(12, volume=1000)
+        bars.append({"open": 10.0, "high": 10.2, "low": 9.9, "close": 10.1, "volume": 300})
+        df = make_df(bars)
+        result = engine.get_volume_regime(df)
+        assert result["regime"] == "LOW"
+        assert result["ratio"] < 0.7
+
+    def test_normal_volume_regime(self, engine: VPAEngine):
+        """Normal volume → NORMAL."""
+        bars = make_history(12, volume=1000)
+        bars.append({"open": 10.0, "high": 10.2, "low": 9.9, "close": 10.1, "volume": 1000})
+        df = make_df(bars)
+        result = engine.get_volume_regime(df)
+        assert result["regime"] == "NORMAL"
+
+    def test_empty_df(self, engine: VPAEngine):
+        import pandas as pd
+        df = pd.DataFrame()
+        result = engine.get_volume_regime(df)
+        assert result["regime"] == "NORMAL"

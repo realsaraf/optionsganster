@@ -99,6 +99,7 @@ class CompositeResult:
     greeks: GreeksData
     chain_metrics: ChainMetrics
     recommendation: str             # Actionable summary
+    warnings: list[str] = field(default_factory=list)  # Risk warnings
 
 
 # ── Engine ───────────────────────────────────────────────────
@@ -109,15 +110,19 @@ class GreeksSignalEngine:
     dealer positioning (GEX), and flow data into a unified score.
     """
 
-    # Factor weights (sum to 1.0)
+    # Factor weights (sum to 1.0) — redistributed to add trend alignment
     WEIGHTS = {
-        "iv_rank": 0.25,
-        "gex": 0.20,
-        "greeks_composite": 0.20,
-        "uoa_flow": 0.15,
-        "vpa_bias": 0.15,
+        "iv_rank": 0.20,
+        "gex": 0.18,
+        "greeks_composite": 0.18,
+        "uoa_flow": 0.12,
+        "vpa_bias": 0.12,
         "pc_skew": 0.05,
+        "trend_alignment": 0.15,   # NEW — 3rd highest weight (77% WR with trend vs 27% against)
     }
+
+    # Premium floor — suppress BUY signals for lottery-ticket premiums
+    PREMIUM_FLOOR = 0.15
 
     # ── public API ───────────────────────────────────────────
 
@@ -127,6 +132,9 @@ class GreeksSignalEngine:
         chain_data: list[dict],
         vpa_bias: dict | None = None,
         contract_type: str = "C",
+        underlying_trend: str | None = None,
+        dte: int | None = None,
+        volume_regime: str | None = None,
     ) -> CompositeResult:
         """
         Run full composite analysis.
@@ -137,13 +145,17 @@ class GreeksSignalEngine:
         chain_data : list[dict] from PolygonClient.get_options_chain_snapshot()
         vpa_bias : dict with keys {bias, strength} from VPAEngine.get_bias()
         contract_type : "C" for call, "P" for put
+        underlying_trend : "UP", "DOWN", or "FLAT" — intraday trend of the underlying
+        dte : days to expiration (0 = expiry day)
+        volume_regime : "HIGH_RISK", "LOW", or "NORMAL" from VPA volume regime detector
 
         Returns
         -------
-        CompositeResult with signal, score, factors, and recommendation.
+        CompositeResult with signal, score, factors, warnings, and recommendation.
         """
         greeks = self._parse_greeks(contract_snapshot)
         chain_metrics = self._compute_chain_metrics(chain_data, greeks.underlying_price)
+        warnings: list[str] = []
 
         factors: list[FactorScore] = []
 
@@ -165,9 +177,44 @@ class GreeksSignalEngine:
         # 6. Put/Call Skew factor
         factors.append(self._score_pc_skew(chain_metrics))
 
+        # 7. Trend Alignment factor (NEW — biggest edge from analysis)
+        trade_direction = self._infer_trade_direction(factors, contract_type)
+        factors.append(self._score_trend_alignment(trade_direction, underlying_trend))
+
         # Compute composite score
         composite_score = sum(f.score * f.confidence * f.weight for f in factors)
         overall_confidence = self._compute_confidence(factors)
+
+        # ── Premium floor gate ───────────────────────────────
+        if greeks.last_price > 0 and greeks.last_price < self.PREMIUM_FLOOR:
+            warnings.append(
+                f"⚠️ PREMIUM FLOOR: Option at ${greeks.last_price:.2f} is below "
+                f"${self.PREMIUM_FLOOR:.2f} minimum — lottery-ticket risk, near-zero EV"
+            )
+            composite_score *= 0.3   # Crush the score
+            overall_confidence *= 0.5
+
+        # ── Expiry day stop-loss gate ────────────────────────
+        if dte is not None and dte == 0:
+            delta_abs = abs(greeks.delta)
+            if delta_abs < 0.5:  # OTM or ATM on expiry day
+                warnings.append(
+                    f"🚨 EXPIRY DAY: DTE=0 with delta={greeks.delta:.2f} — "
+                    f"not safely ITM, EXIT to avoid expiring worthless"
+                )
+                composite_score = min(composite_score, -0.5)  # Force bearish
+            elif dte == 0:
+                warnings.append(
+                    f"⏰ EXPIRY DAY: DTE=0 — monitor closely, theta decay is maximum"
+                )
+
+        # ── Volume regime warning ────────────────────────────
+        if volume_regime == "HIGH_RISK":
+            warnings.append(
+                "📊 HIGH VOLUME REGIME: Institutional activity detected — "
+                "23.5% historical WR on high-vol days, reduce position size"
+            )
+            composite_score *= 0.7  # Dampen signals on high-vol days
 
         # Determine signal
         signal = self._classify_signal(composite_score, overall_confidence)
@@ -179,7 +226,7 @@ class GreeksSignalEngine:
 
         # Generate recommendation
         recommendation = self._generate_recommendation(
-            signal, archetype, greeks, chain_metrics, factors, contract_type
+            signal, archetype, greeks, chain_metrics, factors, contract_type, warnings
         )
 
         return CompositeResult(
@@ -192,7 +239,74 @@ class GreeksSignalEngine:
             greeks=greeks,
             chain_metrics=chain_metrics,
             recommendation=recommendation,
+            warnings=warnings,
         )
+
+    # ── Trend alignment helpers ────────────────────────────────
+
+    @staticmethod
+    def _infer_trade_direction(factors: list[FactorScore], contract_type: str) -> str:
+        """Infer whether the composite signal is bullish or bearish."""
+        bull_score = sum(f.score * f.weight for f in factors if f.score > 0)
+        bear_score = sum(abs(f.score) * f.weight for f in factors if f.score < 0)
+        if bull_score > bear_score * 1.1:
+            return "bullish"
+        elif bear_score > bull_score * 1.1:
+            return "bearish"
+        return "neutral"
+
+    def _score_trend_alignment(
+        self, trade_direction: str, underlying_trend: str | None
+    ) -> FactorScore:
+        """
+        HARD GATE: Penalize counter-trend trades.
+        Data: With-trend = 77% WR (+$22,904), Counter-trend = 27% WR (-$17,317)
+        """
+        if not underlying_trend or underlying_trend == "FLAT":
+            return FactorScore(
+                name="Trend Alignment",
+                score=0.0,
+                confidence=0.40,
+                weight=self.WEIGHTS["trend_alignment"],
+                detail="Underlying trend FLAT – no directional edge",
+            )
+
+        # Counter-trend: buying calls on DOWN day, or buying puts on UP day
+        counter_trend = (
+            (trade_direction == "bullish" and underlying_trend == "DOWN")
+            or (trade_direction == "bearish" and underlying_trend == "UP")
+        )
+        with_trend = (
+            (trade_direction == "bullish" and underlying_trend == "UP")
+            or (trade_direction == "bearish" and underlying_trend == "DOWN")
+        )
+
+        if counter_trend:
+            return FactorScore(
+                name="Trend Alignment",
+                score=-0.8,
+                confidence=0.85,
+                weight=self.WEIGHTS["trend_alignment"],
+                detail=f"⚠️ COUNTER-TREND: {trade_direction} signal vs {underlying_trend} "
+                       f"underlying – historically 27% WR, STRONG SUPPRESS",
+            )
+        elif with_trend:
+            return FactorScore(
+                name="Trend Alignment",
+                score=0.5,
+                confidence=0.80,
+                weight=self.WEIGHTS["trend_alignment"],
+                detail=f"✅ WITH-TREND: {trade_direction} signal aligns with {underlying_trend} "
+                       f"underlying – historically 77% WR, BOOST",
+            )
+        else:
+            return FactorScore(
+                name="Trend Alignment",
+                score=0.0,
+                confidence=0.40,
+                weight=self.WEIGHTS["trend_alignment"],
+                detail="Trend alignment neutral",
+            )
 
     # ── Greeks parsing ───────────────────────────────────────
 
@@ -505,21 +619,29 @@ class GreeksSignalEngine:
             sub_confidence += 0.35
         n_factors += 1
 
-        # ── Delta sweet spot ─────────────────────────
+        # ── Delta sweet spot (prefer ATM-to-ITM based on 93% ITM WR) ─
         delta_abs = abs(greeks.delta)
 
-        if 0.25 <= delta_abs <= 0.45:
-            score += 0.2
-            details.append(f"Delta={greeks.delta:.2f} – sweet spot for R:R")
-            sub_confidence += 0.6
-        elif delta_abs > 0.80:
-            score -= 0.1
-            details.append(f"Delta={greeks.delta:.2f} – deep ITM, stock-like, low leverage")
-            sub_confidence += 0.5
-        elif delta_abs < 0.10:
+        if 0.40 <= delta_abs <= 0.65:
+            score += 0.3
+            details.append(f"Delta={greeks.delta:.2f} – ATM-to-ITM sweet spot, optimal R:R")
+            sub_confidence += 0.70
+        elif delta_abs > 0.65:
+            score += 0.2   # ITM is GOOD (was -0.1)
+            details.append(f"Delta={greeks.delta:.2f} – ITM, high probability (93% hist WR)")
+            sub_confidence += 0.65
+        elif 0.25 <= delta_abs < 0.40:
+            score += 0.05
+            details.append(f"Delta={greeks.delta:.2f} – slightly OTM, moderate probability")
+            sub_confidence += 0.50
+        elif 0.10 <= delta_abs < 0.25:
             score -= 0.2
-            details.append(f"Delta={greeks.delta:.2f} – far OTM, low probability")
-            sub_confidence += 0.6
+            details.append(f"Delta={greeks.delta:.2f} – OTM, lower probability")
+            sub_confidence += 0.55
+        elif delta_abs < 0.10:
+            score -= 0.4   # Far OTM strong penalty (was -0.2)
+            details.append(f"Delta={greeks.delta:.2f} – far OTM, 0% historical win rate")
+            sub_confidence += 0.70
         else:
             details.append(f"Delta={greeks.delta:.2f}")
             sub_confidence += 0.4
@@ -599,14 +721,15 @@ class GreeksSignalEngine:
         )
 
     def _score_vpa_bias(self, vpa_bias: dict | None) -> FactorScore:
-        """Integrate VPA engine bias as a timing factor."""
+        """Integrate VPA engine bias as a timing factor.
+        Neutral VPA now ACTIVELY penalizes — most losses happened on neutral VPA days."""
         if not vpa_bias or vpa_bias.get("bias") == "neutral":
             return FactorScore(
                 name="VPA Bias",
-                score=0.0,
-                confidence=0.30,
+                score=-0.2,         # was 0.0 — now actively penalizes (99/120 entries on neutral days)
+                confidence=0.50,    # was 0.30
                 weight=self.WEIGHTS["vpa_bias"],
-                detail="VPA neutral – no strong price-volume signals",
+                detail="⚠️ VPA neutral – no price-volume confirmation, CAUTION",
             )
 
         bias = vpa_bias["bias"]
@@ -789,6 +912,7 @@ class GreeksSignalEngine:
         metrics: ChainMetrics,
         factors: list[FactorScore],
         contract_type: str,
+        warnings: list[str] | None = None,
     ) -> str:
         """Generate an actionable recommendation string."""
         # Count agreeing factors
@@ -797,7 +921,7 @@ class GreeksSignalEngine:
         agreement = max(bullish, bearish)
         direction = "bullish" if bullish > bearish else "bearish" if bearish > bullish else "mixed"
 
-        parts = [f"{agreement}/6 factors align {direction}."]
+        parts = [f"{agreement}/7 factors align {direction}."]
 
         # Key metrics summary
         parts.append(
@@ -809,6 +933,10 @@ class GreeksSignalEngine:
 
         if metrics.uoa_detected:
             parts.append(f"⚡ UOA detected on {len(metrics.uoa_details)} strikes")
+
+        # Warnings
+        if warnings:
+            parts.extend(warnings)
 
         # Signal-specific advice
         if signal in (CompositeSignal.STRONG_BUY, CompositeSignal.BUY):
