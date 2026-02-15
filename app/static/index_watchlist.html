@@ -646,6 +646,12 @@
             min-height: 0;
         }
         
+        #stock-chart {
+            flex: 1;
+            border-top: 1px solid #2a2e39;
+            min-height: 0;
+        }
+
         #volume-chart {
             flex: 1;
             border-top: 1px solid #2a2e39;
@@ -1883,6 +1889,11 @@
                 min-height: 0;
             }
 
+            #stock-chart {
+                flex: 1;
+                min-height: 0;
+            }
+
             #volume-chart {
                 flex: 1;
                 min-height: 0;
@@ -2377,6 +2388,7 @@
             <div class="chart-area">
                 <div class="charts-container">
                     <div id="price-chart"></div>
+                    <div id="stock-chart"></div>
                     <div id="volume-chart"></div>
                 </div>
                 
@@ -2544,6 +2556,7 @@
     <script>
         // ===== STATE =====
         let priceChart = null;
+        let stockChart = null;
         let volumeChart = null;
         let candlestickSeries = null;
         let volumeSeries = null;
@@ -2869,6 +2882,12 @@
                         document.getElementById('price-chart').clientWidth,
                         document.getElementById('price-chart').clientHeight
                     );
+                    if (stockChart) {
+                        stockChart.resize(
+                            document.getElementById('stock-chart').clientWidth,
+                            document.getElementById('stock-chart').clientHeight
+                        );
+                    }
                     volumeChart.resize(
                         document.getElementById('volume-chart').clientWidth,
                         document.getElementById('volume-chart').clientHeight
@@ -3681,6 +3700,7 @@
         // ===== CHART FUNCTIONS =====
         function initCharts() {
             const priceContainer = document.getElementById('price-chart');
+            const stockContainer = document.getElementById('stock-chart');
             const volumeContainer = document.getElementById('volume-chart');
             
             priceChart = LightweightCharts.createChart(priceContainer, {
@@ -3719,6 +3739,25 @@
                     applyUnderlay();
                 });
             });
+
+            // ── Stock chart (separate narrow chart for underlying) ──
+            stockChart = LightweightCharts.createChart(stockContainer, {
+                layout: {
+                    background: { color: '#131722' },
+                    textColor: '#787b86',
+                },
+                grid: {
+                    vertLines: { color: '#1e222d' },
+                    horzLines: { color: '#1e222d' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: '#758696', width: 1, style: 2 },
+                    horzLine: { color: '#758696', width: 1, style: 2 },
+                },
+                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80 },
+                timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+            });
             
             volumeChart = LightweightCharts.createChart(volumeContainer, {
                 layout: {
@@ -3738,26 +3777,23 @@
                 priceScaleId: '',
             });
             
-            // Sync timescales using logical range (bar-index based) for pixel-perfect alignment.
-            // Volume chart is padded with zero-volume bars to match any extra underlay timestamps.
+            // Sync timescales across all three charts using logical range.
             window._chartDataLoading = false;
             let _syncingChart = false;
-            priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+            function syncRange(source, range) {
                 if (window._chartDataLoading || _syncingChart) return;
-                if (range) {
-                    _syncingChart = true;
-                    try { volumeChart.timeScale().setVisibleLogicalRange(range); } catch(_) {}
-                    _syncingChart = false;
-                }
-            });
-            volumeChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-                if (window._chartDataLoading || _syncingChart) return;
-                if (range) {
-                    _syncingChart = true;
-                    try { priceChart.timeScale().setVisibleLogicalRange(range); } catch(_) {}
-                    _syncingChart = false;
-                }
-            });
+                if (!range) return;
+                _syncingChart = true;
+                [priceChart, stockChart, volumeChart].forEach(c => {
+                    if (c !== source) {
+                        try { c.timeScale().setVisibleLogicalRange(range); } catch(_) {}
+                    }
+                });
+                _syncingChart = false;
+            }
+            priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncRange(priceChart, range));
+            stockChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncRange(stockChart, range));
+            volumeChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncRange(volumeChart, range));
             
             // Resize handler
             const resizeObserver = new ResizeObserver(entries => {
@@ -3766,12 +3802,15 @@
                     if (width === 0 || height === 0) continue;
                     if (entry.target === priceContainer) {
                         priceChart.applyOptions({ width, height });
+                    } else if (entry.target === stockContainer) {
+                        stockChart.applyOptions({ width, height });
                     } else if (entry.target === volumeContainer) {
                         volumeChart.applyOptions({ width, height });
                     }
                 }
             });
             resizeObserver.observe(priceContainer);
+            resizeObserver.observe(stockContainer);
             resizeObserver.observe(volumeContainer);
         }
         
@@ -3904,6 +3943,7 @@
             // Scroll to recent
             if (candleData.length > 0) {
                 priceChart.timeScale().fitContent();
+                stockChart.timeScale().fitContent();
                 volumeChart.timeScale().fitContent();
                 try {
                     const barsToShow = Math.min(100, candleData.length);
@@ -3915,6 +3955,7 @@
                 } catch (_) { /* fitContent already handled it */ }
             } else {
                 priceChart.timeScale().fitContent();
+                stockChart.timeScale().fitContent();
                 volumeChart.timeScale().fitContent();
             }
             window._chartDataLoading = false;
@@ -3985,49 +4026,41 @@
             volumeSeries.setData(merged);
         }
 
-        // ===== UNDERLAY MANAGEMENT =====
+        // ===== STOCK CHART MANAGEMENT =====
         function removeUnderlay() {
             if (underlaySeries) {
-                try { priceChart.removeSeries(underlaySeries); } catch(_) {}
+                try { stockChart.removeSeries(underlaySeries); } catch(_) {}
                 underlaySeries = null;
             }
         }
 
         function applyUnderlay() {
             removeUnderlay();
-            if (underlayMode === 'off' || !underlayBarsData.length || !priceChart) return;
+            if (underlayMode === 'off' || !underlayBarsData.length || !stockChart) return;
 
             if (underlayMode === 'line') {
-                underlaySeries = priceChart.addLineSeries({
-                    color: 'rgba(100, 130, 180, 0.25)',
-                    lineWidth: 1,
+                underlaySeries = stockChart.addLineSeries({
+                    color: 'rgba(100, 130, 180, 0.6)',
+                    lineWidth: 2,
                     lineStyle: 0,
-                    priceScaleId: 'underlay',
-                    lastValueVisible: false,
+                    lastValueVisible: true,
                     priceLineVisible: false,
-                    crosshairMarkerVisible: false,
+                    crosshairMarkerVisible: true,
                 });
                 underlaySeries.setData(underlayBarsData.map(b => ({ time: b.time, value: b.close })));
             } else if (underlayMode === 'candle') {
-                underlaySeries = priceChart.addCandlestickSeries({
-                    upColor: 'rgba(38, 166, 154, 0.12)',
-                    downColor: 'rgba(239, 83, 80, 0.12)',
-                    borderUpColor: 'rgba(38, 166, 154, 0.20)',
-                    borderDownColor: 'rgba(239, 83, 80, 0.20)',
-                    wickUpColor: 'rgba(38, 166, 154, 0.15)',
-                    wickDownColor: 'rgba(239, 83, 80, 0.15)',
-                    priceScaleId: 'underlay',
-                    lastValueVisible: false,
+                underlaySeries = stockChart.addCandlestickSeries({
+                    upColor: 'rgba(38, 166, 154, 0.7)',
+                    downColor: 'rgba(239, 83, 80, 0.7)',
+                    borderUpColor: '#26a69a',
+                    borderDownColor: '#ef5350',
+                    wickUpColor: '#26a69a',
+                    wickDownColor: '#ef5350',
+                    lastValueVisible: true,
                     priceLineVisible: false,
                 });
                 underlaySeries.setData(underlayBarsData);
             }
-
-            // Configure the underlay price scale (right side, hidden)
-            priceChart.priceScale('underlay').applyOptions({
-                scaleMargins: { top: 0.05, bottom: 0.05 },
-                visible: false,
-            });
         }
 
         function updateAnalysis(data) {
