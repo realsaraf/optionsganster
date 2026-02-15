@@ -2601,6 +2601,7 @@
         let underlaySeries = null;
         let underlayBarsData = [];   // raw underlying bars from API
         let pocLine = null;          // Point of Control price line on stock chart
+        let currentPOC = null;       // Current POC price for autoscale
 
         // Unified timestamp data for multi-chart sync (ensures all charts share
         // the same set of timestamps so logical-range sync works perfectly)
@@ -4162,6 +4163,20 @@
             // priceChart and volumeChart.
             const dataToSet = _unifiedUnderlayData.length > 0 ? _unifiedUnderlayData : underlayBarsData;
 
+            // Pre-calculate POC so autoscaleInfoProvider can include it
+            currentPOC = calculatePOC(underlayBarsData);
+
+            // autoscaleInfoProvider ensures the POC price line is always
+            // within the visible Y-axis range (prevents off-screen POC)
+            const pocAutoscale = (original) => {
+                const res = original();
+                if (res !== null && currentPOC !== null) {
+                    res.priceRange.minValue = Math.min(res.priceRange.minValue, currentPOC);
+                    res.priceRange.maxValue = Math.max(res.priceRange.maxValue, currentPOC);
+                }
+                return res;
+            };
+
             if (underlayMode === 'line') {
                 underlaySeries = stockChart.addLineSeries({
                     color: 'rgba(100, 130, 180, 0.6)',
@@ -4170,6 +4185,7 @@
                     lastValueVisible: true,
                     priceLineVisible: false,
                     crosshairMarkerVisible: true,
+                    autoscaleInfoProvider: pocAutoscale,
                 });
                 // For line series, convert OHLC to { time, value } — whitespace
                 // entries (time-only) pass through as-is for alignment.
@@ -4184,14 +4200,15 @@
                     wickDownColor: '#ef5350',
                     lastValueVisible: true,
                     priceLineVisible: false,
+                    autoscaleInfoProvider: pocAutoscale,
                 });
                 underlaySeries.setData(dataToSet);
             }
 
             // ── Point of Control (POC) ──
             // Draw a horizontal line at the price with the highest volume
-            const poc = calculatePOC(underlayBarsData);
-            if (poc !== null && underlaySeries) {
+            if (currentPOC !== null && underlaySeries) {
+                const poc = currentPOC;
                 underlaySeries.createPriceLine({
                     price: poc,
                     color: '#ffeb3b',
