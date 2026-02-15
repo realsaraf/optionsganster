@@ -2601,6 +2601,15 @@
         let underlaySeries = null;
         let underlayBarsData = [];   // raw underlying bars from API
 
+        // Unified timestamp data for multi-chart sync (ensures all charts share
+        // the same set of timestamps so logical-range sync works perfectly)
+        let _unifiedCandleData = [];
+        let _unifiedVolumeData = [];
+        let _unifiedUnderlayData = [];
+        // Lookup maps for crosshair sync (time -> data point)
+        let _volumeByTime = new Map();
+        let _underlayByTime = new Map();
+
         // ===== TIMEZONE HELPER =====
         // Backend sends datetimes already in US/Eastern.
         // We parse them as-is into a Unix timestamp so the chart axis shows ET.
@@ -2615,6 +2624,38 @@
             // Already in Eastern – just reformat
             const d = new Date(datetimeStr.replace(' ', 'T') + 'Z');
             return d.toISOString().replace('T', ' ').replace('Z', '');
+        }
+
+        // ===== MULTI-CHART TIMESTAMP UNIFICATION =====
+        // Ensures all three chart datasets share the exact same set of timestamps.
+        // Missing bars become "whitespace" entries (time only, no value fields)
+        // so logical bar indices stay aligned across all charts.
+        function unifyTimestamps(candleData, volumeData, underlayData) {
+            // Collect every unique timestamp across all datasets
+            const allTimes = new Set();
+            candleData.forEach(d => allTimes.add(d.time));
+            volumeData.forEach(d => allTimes.add(d.time));
+            underlayData.forEach(d => allTimes.add(d.time));
+
+            const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+
+            // Build fast lookup maps
+            const candleMap = new Map(candleData.map(d => [d.time, d]));
+            const volumeMap = new Map(volumeData.map(d => [d.time, d]));
+            const underlayMap = new Map(underlayData.map(d => [d.time, d]));
+
+            // Pad each dataset: real data where it exists, whitespace { time } elsewhere
+            const unified = {
+                candle:   sortedTimes.map(t => candleMap.get(t)   || { time: t }),
+                volume:   sortedTimes.map(t => volumeMap.get(t)   || { time: t }),
+                underlay: sortedTimes.map(t => underlayMap.get(t) || { time: t }),
+            };
+
+            // Store lookup maps for crosshair sync
+            _volumeByTime = volumeMap;
+            _underlayByTime = underlayMap;
+
+            return unified;
         }
 
         // ===== SIGNAL FILTER HELPERS =====
@@ -3777,23 +3818,65 @@
                 priceScaleId: '',
             });
             
-            // Sync timescales across all three charts using logical range.
+            // ── Sync timescales: LOGICAL RANGE (official TradingView pattern) ──
+            // subscribeVisibleLogicalRangeChange + setVisibleLogicalRange is the
+            // canonical way to sync multiple Lightweight Charts instances.
+            // Unlike setVisibleRange (time-based), setVisibleLogicalRange works by
+            // bar index and can extrapolate beyond available data, preventing the
+            // "zoom on pan" artifact.  All datasets are unified to share the same
+            // timestamps (see unifyTimestamps) so index N = same time on all charts.
             window._chartDataLoading = false;
             let _syncingChart = false;
-            function syncRange(source, range) {
+            function syncLogicalRange(source, logicalRange) {
                 if (window._chartDataLoading || _syncingChart) return;
-                if (!range) return;
+                if (!logicalRange) return;
                 _syncingChart = true;
                 [priceChart, stockChart, volumeChart].forEach(c => {
                     if (c !== source) {
-                        try { c.timeScale().setVisibleLogicalRange(range); } catch(_) {}
+                        try { c.timeScale().setVisibleLogicalRange(logicalRange); } catch(_) {}
                     }
                 });
                 _syncingChart = false;
             }
-            priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncRange(priceChart, range));
-            stockChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncRange(stockChart, range));
-            volumeChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncRange(volumeChart, range));
+            priceChart.timeScale().subscribeVisibleLogicalRangeChange(r => syncLogicalRange(priceChart, r));
+            stockChart.timeScale().subscribeVisibleLogicalRangeChange(r => syncLogicalRange(stockChart, r));
+            volumeChart.timeScale().subscribeVisibleLogicalRangeChange(r => syncLogicalRange(volumeChart, r));
+
+            // ── Sync crosshairs across all three charts ──
+            let _syncingCrosshair = false;
+            function syncCrosshairFromChart(sourceChart, sourceSeries, param) {
+                if (_syncingCrosshair) return;
+                _syncingCrosshair = true;
+                const time = param.time;
+                if (time) {
+                    // Sync each OTHER chart's crosshair using its own series + data
+                    const targets = [
+                        { chart: priceChart,  series: candlestickSeries, lookup: null },
+                        { chart: stockChart,  series: underlaySeries,    lookup: _underlayByTime },
+                        { chart: volumeChart, series: volumeSeries,      lookup: _volumeByTime },
+                    ];
+                    for (const t of targets) {
+                        if (t.chart === sourceChart || !t.series) continue;
+                        try {
+                            // Look up the value at this time for the target series
+                            const dp = t.lookup ? t.lookup.get(time) : null;
+                            const val = dp ? (dp.value !== undefined ? dp.value : dp.close) : 0;
+                            t.chart.setCrosshairPosition(val, time, t.series);
+                        } catch(_) {}
+                    }
+                } else {
+                    // Clear crosshairs on the other charts
+                    [priceChart, stockChart, volumeChart].forEach(c => {
+                        if (c !== sourceChart) {
+                            try { c.clearCrosshairPosition(); } catch(_) {}
+                        }
+                    });
+                }
+                _syncingCrosshair = false;
+            }
+            priceChart.subscribeCrosshairMove(p => syncCrosshairFromChart(priceChart, candlestickSeries, p));
+            stockChart.subscribeCrosshairMove(p => syncCrosshairFromChart(stockChart, underlaySeries, p));
+            volumeChart.subscribeCrosshairMove(p => syncCrosshairFromChart(volumeChart, volumeSeries, p));
             
             // Resize handler
             const resizeObserver = new ResizeObserver(entries => {
@@ -3916,11 +3999,6 @@
                 value: bar.volume,
                 color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
             }));
-            
-            // Suppress timescale sync during bulk data load
-            window._chartDataLoading = true;
-            volumeSeries.setData(volumeData);
-            candlestickSeries.setData(candleData);
 
             // ── Underlying underlay ──
             underlayBarsData = (data.underlying_bars || []).map(bar => ({
@@ -3930,29 +4008,41 @@
                 low: bar.low,
                 close: bar.close,
             }));
-            applyUnderlay();
 
-            // Pad volume chart with zero-volume entries for any underlay timestamps
-            // not in the options data so both charts share identical bar indices.
-            padVolumeForUnderlay(volumeData);
+            // Unify timestamps across all three datasets so logical bar indices
+            // stay aligned (enables pixel-perfect pan/zoom/scroll sync).
+            const unified = unifyTimestamps(candleData, volumeData, underlayBarsData);
+            _unifiedCandleData   = unified.candle;
+            _unifiedVolumeData   = unified.volume;
+            _unifiedUnderlayData = unified.underlay;
+
+            // Suppress timescale sync during bulk data load
+            window._chartDataLoading = true;
+            candlestickSeries.setData(_unifiedCandleData);
+            volumeSeries.setData(_unifiedVolumeData);
+            applyUnderlay();
 
             // Store for re-filtering and update markers
             lastAnalysisData = data;
             updateFilteredMarkers(data.signals || []);
             
-            // Scroll to recent
+            // Scroll to show last ~100 bars using logical range (index-based)
             if (candleData.length > 0) {
-                priceChart.timeScale().fitContent();
-                stockChart.timeScale().fitContent();
-                volumeChart.timeScale().fitContent();
-                try {
-                    const barsToShow = Math.min(100, candleData.length);
-                    const fromIndex = Math.max(0, candleData.length - barsToShow);
-                    priceChart.timeScale().setVisibleRange({
-                        from: candleData[fromIndex].time,
-                        to: candleData[candleData.length - 1].time,
-                    });
-                } catch (_) { /* fitContent already handled it */ }
+                const totalBars = _unifiedCandleData.length;
+                const barsToShow = Math.min(100, totalBars);
+                const fromIdx = totalBars - barsToShow;
+                priceChart.timeScale().setVisibleLogicalRange({
+                    from: fromIdx,
+                    to: totalBars - 1,
+                });
+                stockChart.timeScale().setVisibleLogicalRange({
+                    from: fromIdx,
+                    to: totalBars - 1,
+                });
+                volumeChart.timeScale().setVisibleLogicalRange({
+                    from: fromIdx,
+                    to: totalBars - 1,
+                });
             } else {
                 priceChart.timeScale().fitContent();
                 stockChart.timeScale().fitContent();
@@ -3997,7 +4087,6 @@
                     open: bar.open, high: bar.high, low: bar.low, close: bar.close,
                 }));
                 applyUnderlay();
-                padVolumeForUnderlay(volumeData);
             }
             
             window._chartDataLoading = false;
@@ -4012,20 +4101,6 @@
           } catch(chartErr) { console.warn('Chart incremental update warning:', chartErr.message); }
         }
 
-        // Pad volume chart with zero-volume bars for underlay timestamps
-        // so logical-range sync stays pixel-perfect.
-        function padVolumeForUnderlay(existingVolumeData) {
-            if (!underlayBarsData.length || !volumeSeries) return;
-            const existing = new Set(existingVolumeData.map(d => d.time));
-            const padBars = underlayBarsData
-                .filter(b => !existing.has(b.time))
-                .map(b => ({ time: b.time, value: 0, color: 'rgba(0,0,0,0)' }));
-            if (!padBars.length) return;
-            // Merge and sort
-            const merged = existingVolumeData.concat(padBars).sort((a, b) => a.time - b.time);
-            volumeSeries.setData(merged);
-        }
-
         // ===== STOCK CHART MANAGEMENT =====
         function removeUnderlay() {
             if (underlaySeries) {
@@ -4038,6 +4113,11 @@
             removeUnderlay();
             if (underlayMode === 'off' || !underlayBarsData.length || !stockChart) return;
 
+            // Use unified underlay data (padded with whitespace bars) so that
+            // the stockChart has the same logical index -> time mapping as the
+            // priceChart and volumeChart.
+            const dataToSet = _unifiedUnderlayData.length > 0 ? _unifiedUnderlayData : underlayBarsData;
+
             if (underlayMode === 'line') {
                 underlaySeries = stockChart.addLineSeries({
                     color: 'rgba(100, 130, 180, 0.6)',
@@ -4047,7 +4127,9 @@
                     priceLineVisible: false,
                     crosshairMarkerVisible: true,
                 });
-                underlaySeries.setData(underlayBarsData.map(b => ({ time: b.time, value: b.close })));
+                // For line series, convert OHLC to { time, value } — whitespace
+                // entries (time-only) pass through as-is for alignment.
+                underlaySeries.setData(dataToSet.map(b => b.close !== undefined ? { time: b.time, value: b.close } : { time: b.time }));
             } else if (underlayMode === 'candle') {
                 underlaySeries = stockChart.addCandlestickSeries({
                     upColor: 'rgba(38, 166, 154, 0.7)',
@@ -4059,7 +4141,7 @@
                     lastValueVisible: true,
                     priceLineVisible: false,
                 });
-                underlaySeries.setData(underlayBarsData);
+                underlaySeries.setData(dataToSet);
             }
         }
 
@@ -4360,7 +4442,7 @@
         // ===== EVENT LISTENERS =====
         document.getElementById('expiration').addEventListener('change', (e) => {
             if (currentSymbol && e.target.value) {
-                loadStrikes(currentSymbol, e.target.value);
+                loadStrikes(currentSymbol, e.target.value, true);  // auto-analyze after strikes load
             }
             // Stop live mode when expiration changes
             stopLiveMode();
@@ -4369,6 +4451,10 @@
         document.getElementById('strike').addEventListener('change', () => {
             // Stop live mode when strike changes
             stopLiveMode();
+            // Auto-analyze with new strike
+            if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+                analyze().catch(e => console.warn('Auto-analyze on strike change failed:', e));
+            }
         });
         
         document.getElementById('analyze-btn').addEventListener('click', analyze);
@@ -4428,6 +4514,11 @@
                     console.log(`[Interval] Changed to ${currentInterval}m while mock-live active — restarting`);
                     stopLiveMode();
                     setTimeout(() => toggleLiveMode(), 300);
+                } else {
+                    // Auto-analyze with new interval
+                    if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+                        analyze().catch(e => console.warn('Auto-analyze on interval change failed:', e));
+                    }
                 }
             });
         });
@@ -4468,6 +4559,10 @@
                 document.getElementById('dcp-call').className = 'cp-opt';
             }
             stopLiveMode();
+            // Auto-analyze with new call/put
+            if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+                analyze().catch(e => console.warn('Auto-analyze on call/put change failed:', e));
+            }
         }
         // Mobile
         document.getElementById('cp-call').addEventListener('click', () => syncCallPut('C'));
