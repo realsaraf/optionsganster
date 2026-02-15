@@ -2600,6 +2600,7 @@
         let underlayMode = 'line';  // 'off', 'line', 'candle'
         let underlaySeries = null;
         let underlayBarsData = [];   // raw underlying bars from API
+        let pocLine = null;          // Point of Control price line on stock chart
 
         // Unified timestamp data for multi-chart sync (ensures all charts share
         // the same set of timestamps so logical-range sync works perfectly)
@@ -3809,13 +3810,17 @@
                     vertLines: { color: '#1e222d' },
                     horzLines: { color: '#1e222d' },
                 },
-                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80 },
+                rightPriceScale: {
+                    borderColor: '#2a2e39',
+                    minimumWidth: 80,
+                    autoScale: true,
+                    scaleMargins: { top: 0.05, bottom: 0 },
+                },
                 timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
             });
             
             volumeSeries = volumeChart.addHistogramSeries({
                 priceFormat: { type: 'volume' },
-                priceScaleId: '',
             });
             
             // ── Sync timescales: LOGICAL RANGE (official TradingView pattern) ──
@@ -4007,6 +4012,7 @@
                 high: bar.high,
                 low: bar.low,
                 close: bar.close,
+                volume: bar.volume || 0,
             }));
 
             // Unify timestamps across all three datasets so logical bar indices
@@ -4109,8 +4115,46 @@
             }
         }
 
+        // Calculate Point of Control: the price level with the highest traded volume.
+        // We bucket prices by rounding to a sensible tick size and sum volume per bucket.
+        function calculatePOC(bars) {
+            if (!bars || bars.length === 0) return null;
+            // Determine tick size based on price magnitude
+            const avgPrice = bars.reduce((s, b) => s + (b.close || 0), 0) / bars.length;
+            let tick;
+            if (avgPrice >= 500) tick = 1;
+            else if (avgPrice >= 100) tick = 0.5;
+            else if (avgPrice >= 20) tick = 0.25;
+            else tick = 0.1;
+
+            const volumeByPrice = new Map();
+            for (const bar of bars) {
+                if (bar.volume === undefined || bar.close === undefined) continue;
+                // Use the typical price (H+L+C)/3 for a more representative level
+                const typical = (bar.high + bar.low + bar.close) / 3;
+                const bucket = Math.round(typical / tick) * tick;
+                const key = bucket.toFixed(4);
+                volumeByPrice.set(key, (volumeByPrice.get(key) || 0) + bar.volume);
+            }
+            if (volumeByPrice.size === 0) return null;
+
+            let maxVol = 0, pocPrice = 0;
+            for (const [price, vol] of volumeByPrice) {
+                if (vol > maxVol) {
+                    maxVol = vol;
+                    pocPrice = parseFloat(price);
+                }
+            }
+            return pocPrice;
+        }
+
         function applyUnderlay() {
             removeUnderlay();
+            // Remove previous POC line
+            if (pocLine) {
+                try { stockChart.removeSeries(pocLine); } catch(_) {}
+                pocLine = null;
+            }
             if (underlayMode === 'off' || !underlayBarsData.length || !stockChart) return;
 
             // Use unified underlay data (padded with whitespace bars) so that
@@ -4142,6 +4186,20 @@
                     priceLineVisible: false,
                 });
                 underlaySeries.setData(dataToSet);
+            }
+
+            // ── Point of Control (POC) ──
+            // Draw a horizontal line at the price with the highest volume
+            const poc = calculatePOC(underlayBarsData);
+            if (poc !== null && underlaySeries) {
+                underlaySeries.createPriceLine({
+                    price: poc,
+                    color: '#ffeb3b',
+                    lineWidth: 2,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true,
+                    title: 'POC',
+                });
             }
         }
 
