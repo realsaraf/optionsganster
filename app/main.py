@@ -1274,17 +1274,28 @@ async def websocket_live(ws: WebSocket):
                             ticker, interval_minutes=interval_min, num_candles=50
                         )
 
+                        # Build mock metadata so frontend can display correct info
+                        mock_meta = {"mock": True}
+                        if sow_bars:
+                            mock_meta["first_dt"] = sow_bars[0]["datetime"]
+                            mock_meta["last_dt"] = sow_bars[-1]["datetime"]
+                            mock_meta["last_price"] = sow_bars[-1]["close"]
+                            mock_meta["first_price"] = sow_bars[0]["open"]
+                            mock_meta["interval"] = interval_min
+
                         # Send SOW so the chart has data immediately
                         if sow_bars:
                             await ws.send_text(json.dumps({
                                 "type": "sow",
                                 "ticker": ticker,
                                 "bars": sow_bars,
+                                **mock_meta,
                             }))
 
                         task = asyncio.create_task(
                             mock_csv_playback(ticker, queue, interval_minutes=interval_min,
-                                              start_index=start_idx)
+                                              start_index=start_idx,
+                                              sow_bars=sow_bars)
                         )
                         mock_tasks[ticker] = task
                         subscribed_tickers.add(ticker)

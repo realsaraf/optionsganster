@@ -266,6 +266,7 @@ class _MassiveUpstreamWS:
         self._on_message = on_message   # async callback(msg_dict)
         self._feed = feed
         self._market = market
+        self._is_launchpad = (feed == Feed.Launchpad)
         self.authenticated = False
         self._auth_failed_permanent = False
         self._conn_limit_hit = False  # True when connection limit exceeded
@@ -275,6 +276,9 @@ class _MassiveUpstreamWS:
         self._client: Optional[WebSocketClient] = None
         # Expose ws-like attribute for get_status compat
         self.ws = None
+        # Per-ticker aggregation for LaunchpadValue ticks (no OHLCV)
+        # Builds per-second OHLCV candles from single-value FMV ticks.
+        self._lv_candles: dict[str, dict] = {}  # {sym: {sec, o, h, l, c}}
 
     async def ensure_started(self):
         """Start the massive WS loop if not already running."""
@@ -309,7 +313,11 @@ class _MassiveUpstreamWS:
         if self._client and self.authenticated:
             try:
                 self._client.subscribe(f"A.{ticker}")
-                _log(f"[{self.label}] Upstream subscribe: A.{ticker}")
+                if self._is_launchpad:
+                    self._client.subscribe(f"LV.{ticker}")
+                    _log(f"[{self.label}] Upstream subscribe: A.{ticker} + LV.{ticker}")
+                else:
+                    _log(f"[{self.label}] Upstream subscribe: A.{ticker}")
             except Exception as e:
                 _log(f"[{self.label}] Failed to subscribe {ticker}: {e}")
         else:
@@ -320,7 +328,11 @@ class _MassiveUpstreamWS:
         if self._client and self.authenticated:
             try:
                 self._client.unsubscribe(f"A.{ticker}")
-                _log(f"[{self.label}] Upstream unsubscribe: A.{ticker}")
+                if self._is_launchpad:
+                    self._client.unsubscribe(f"LV.{ticker}")
+                    _log(f"[{self.label}] Upstream unsubscribe: A.{ticker} + LV.{ticker}")
+                else:
+                    _log(f"[{self.label}] Upstream unsubscribe: A.{ticker}")
             except Exception as e:
                 _log(f"[{self.label}] Failed to unsubscribe {ticker}: {e}")
 
@@ -337,7 +349,13 @@ class _MassiveUpstreamWS:
                 _log(f"[{self.label}] Connecting via massive (key: {masked}, feed={self._feed.name}, market={self._market.name})")
 
                 # Build initial subscriptions from active tickers
+                # Always subscribe to A.* (per-second aggregates)
                 initial_subs = [f"A.{t}" for t in self._active_tickers]
+                # On Launchpad feed, ALSO subscribe to LV.* (LaunchpadValue)
+                # because Launchpad may only serve FMV data via LV.* channel
+                if self._is_launchpad:
+                    initial_subs += [f"LV.{t}" for t in self._active_tickers]
+                    _log(f"[{self.label}] Launchpad mode: subscribing to both A.* and LV.* channels")
 
                 self._client = WebSocketClient(
                     api_key=api_key,
@@ -352,25 +370,101 @@ class _MassiveUpstreamWS:
                 self.ws = True   # truthy sentinel for get_status
                 _log(f"[{self.label}] ✅ CONNECTED (massive) – subscribed {', '.join(self._active_tickers)}")
 
+                # ── Message processor ──
+                # Handles EquityAgg (full OHLCV), LaunchpadValue (FMV),
+                # and FairMarketValue with per-message error handling.
+                _lv_candles = self._lv_candles  # local ref for closure
+
                 async def _processor(msgs):
                     for m in msgs:
-                        # Convert EquityAgg to raw dict matching Polygon format
-                        msg_dict = {
-                            "ev": str(m.event_type) if m.event_type else "A",
-                            "sym": m.symbol or "",
-                            "v": m.volume or 0,
-                            "av": m.accumulated_volume or 0,
-                            "op": m.official_open_price or 0,
-                            "vw": m.aggregate_vwap or m.vwap or 0,
-                            "o": m.open or 0,
-                            "c": m.close or 0,
-                            "h": m.high or 0,
-                            "l": m.low or 0,
-                            "a": m.average_size or 0,
-                            "s": m.start_timestamp or 0,
-                            "e": m.end_timestamp or 0,
-                        }
-                        await self._on_message(msg_dict)
+                        try:
+                            msg_dict = None
+
+                            # ── LaunchpadValue: only has .value (Fair Market Value) ──
+                            if hasattr(m, 'value') and m.value is not None and not hasattr(m, 'open'):
+                                val = float(m.value)
+                                sym = getattr(m, 'symbol', '') or ''
+                                ts = getattr(m, 'timestamp', 0) or 0
+                                # Normalize timestamp to milliseconds
+                                if ts > 1e16:      # nanoseconds
+                                    ts = int(ts // 1_000_000)
+                                elif ts > 1e13:    # microseconds
+                                    ts = int(ts // 1_000)
+                                else:
+                                    ts = int(ts)
+
+                                # Aggregate into per-second OHLCV candle
+                                sec = ts // 1000
+                                candle = _lv_candles.get(sym)
+                                if candle is None or candle["sec"] != sec:
+                                    _lv_candles[sym] = {"sec": sec, "o": val, "h": val, "l": val, "c": val}
+                                else:
+                                    candle["h"] = max(candle["h"], val)
+                                    candle["l"] = min(candle["l"], val)
+                                    candle["c"] = val
+
+                                c = _lv_candles[sym]
+                                msg_dict = {
+                                    "ev": "A", "sym": sym,
+                                    "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"],
+                                    "v": 1, "vw": val,
+                                    "s": sec * 1000, "e": sec * 1000,
+                                    "av": 0, "op": 0, "a": 0,
+                                }
+
+                            # ── FairMarketValue: only has .fmv ──
+                            elif hasattr(m, 'fmv') and m.fmv is not None:
+                                val = float(m.fmv)
+                                sym = getattr(m, 'ticker', '') or getattr(m, 'symbol', '') or ''
+                                ts = getattr(m, 'timestamp', 0) or 0
+                                if ts > 1e16:
+                                    ts = int(ts // 1_000_000)
+                                elif ts > 1e13:
+                                    ts = int(ts // 1_000)
+                                else:
+                                    ts = int(ts)
+
+                                sec = ts // 1000
+                                candle = _lv_candles.get(sym)
+                                if candle is None or candle["sec"] != sec:
+                                    _lv_candles[sym] = {"sec": sec, "o": val, "h": val, "l": val, "c": val}
+                                else:
+                                    candle["h"] = max(candle["h"], val)
+                                    candle["l"] = min(candle["l"], val)
+                                    candle["c"] = val
+
+                                c = _lv_candles[sym]
+                                msg_dict = {
+                                    "ev": "A", "sym": sym,
+                                    "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"],
+                                    "v": 1, "vw": val,
+                                    "s": sec * 1000, "e": sec * 1000,
+                                    "av": 0, "op": 0, "a": 0,
+                                }
+
+                            # ── EquityAgg: full OHLCV aggregate data ──
+                            else:
+                                msg_dict = {
+                                    "ev": str(getattr(m, 'event_type', 'A') or 'A'),
+                                    "sym": getattr(m, 'symbol', '') or '',
+                                    "v": getattr(m, 'volume', 0) or 0,
+                                    "av": getattr(m, 'accumulated_volume', 0) or 0,
+                                    "op": getattr(m, 'official_open_price', 0) or 0,
+                                    "vw": getattr(m, 'aggregate_vwap', None) or getattr(m, 'vwap', 0) or 0,
+                                    "o": getattr(m, 'open', 0) or 0,
+                                    "c": getattr(m, 'close', 0) or 0,
+                                    "h": getattr(m, 'high', 0) or 0,
+                                    "l": getattr(m, 'low', 0) or 0,
+                                    "a": getattr(m, 'average_size', 0) or 0,
+                                    "s": getattr(m, 'start_timestamp', 0) or 0,
+                                    "e": getattr(m, 'end_timestamp', 0) or 0,
+                                }
+
+                            if msg_dict:
+                                await self._on_message(msg_dict)
+
+                        except Exception as proc_err:
+                            _log(f"[{self.label}] Processor error for {type(m).__name__}: {proc_err}")
 
                 await self._client.connect(_processor)
 
@@ -416,6 +510,68 @@ def _base_symbol(ticker: str) -> str:
         m = re.match(r'^([A-Z]+)', ticker[2:])
         return m.group(1).lower() if m else ticker[2:].lower()
     return ticker.lower()
+
+
+def _csv_row_to_msg_dict(row: dict, ticker: str | None = None) -> dict:
+    """Convert a CSV row to Polygon-compatible aggregate message dict.
+
+    CSV columns: ticker, volume, open, close, high, low, window_start, transactions
+    Returns the same dict format as Polygon WebSocket A.* messages:
+      {ev, sym, v, av, op, vw, o, c, h, l, a, s, e}
+
+    This ensures CSV mock data flows through the same processing
+    pipeline as live WebSocket data from Polygon.
+    """
+    ws_ns = int(row["window_start"])    # nanoseconds in CSV
+    start_ms = ws_ns // 1_000_000       # Polygon uses milliseconds
+
+    o = float(row["open"])
+    c = float(row["close"])
+    h = float(row["high"])
+    l = float(row["low"])
+    v = int(row["volume"])
+
+    return {
+        "ev": "A",
+        "sym": ticker or row.get("ticker", ""),
+        "v": v,
+        "av": 0,
+        "op": 0,
+        "vw": round((h + l) / 2, 4),
+        "o": o,
+        "c": c,
+        "h": h,
+        "l": l,
+        "a": int(row.get("transactions", 0)),
+        "s": start_ms,
+        "e": start_ms + 60_000,  # 1-minute bar
+    }
+
+
+def _msg_dict_to_bar(msg: dict) -> dict:
+    """Convert a Polygon-format msg_dict to our internal bar format.
+
+    This is the single authoritative conversion used by both
+    live feed (_handle_aggregate) and mock CSV playback.
+    Ensures bars always have the same shape regardless of source.
+    """
+    start_ms = msg.get("s", 0) or 0
+    if start_ms == 0:
+        # No timestamp provided – use current time as fallback
+        start_ms = int(datetime.now(tz=ZoneInfo("UTC")).timestamp() * 1000)
+    dt_utc = datetime.fromtimestamp(start_ms / 1000, tz=ZoneInfo("UTC"))
+    dt_et = dt_utc.astimezone(_ET).replace(tzinfo=None)
+
+    return {
+        "datetime": dt_et.strftime("%Y-%m-%d %H:%M:%S"),
+        "open": msg.get("o", 0),
+        "high": msg.get("h", 0),
+        "low": msg.get("l", 0),
+        "close": msg.get("c", 0),
+        "volume": msg.get("v", 0),
+        "vwap": msg.get("vw", 0),
+        "accumulated_volume": msg.get("av", 0),
+    }
 
 
 def _load_csv_bars(symbol_lower: str) -> list[dict]:
@@ -607,11 +763,13 @@ def build_mock_sow(ticker: str, interval_minutes: int = 5, num_candles: int = 50
         chunk_start = ci * rows_per_candle
         chunk = raw_slice[chunk_start:chunk_start + rows_per_candle]
 
-        o_vals = [float(r["open"]) for r in chunk]
-        c_vals = [float(r["close"]) for r in chunk]
-        h_vals = [float(r["high"]) for r in chunk]
-        l_vals = [float(r["low"]) for r in chunk]
-        v_vals = [int(r["volume"]) for r in chunk]
+        # Convert CSV rows to Polygon-format msg_dicts for format consistency
+        msgs = [_csv_row_to_msg_dict(r) for r in chunk]
+        o_vals = [m["o"] for m in msgs]
+        c_vals = [m["c"] for m in msgs]
+        h_vals = [m["h"] for m in msgs]
+        l_vals = [m["l"] for m in msgs]
+        v_vals = [m["v"] for m in msgs]
 
         o = o_vals[0]
         c = c_vals[-1]
@@ -646,118 +804,129 @@ def build_mock_sow(ticker: str, interval_minutes: int = 5, num_candles: int = 50
 
 
 async def mock_csv_playback(ticker: str, queue: asyncio.Queue, interval_minutes: int = 5,
-                            start_index: int = 0):
+                            start_index: int = 0,
+                            sow_bars: list[dict] | None = None):
     """
-    Per-client CSV playback coroutine.
-    Loads historical CSV data for the ticker's underlying symbol and pushes
-    aggregated candles into the provided asyncio.Queue, formatted identically
-    to real-feed bar payloads.
+    Per-client CSV playback coroutine — *time-lapse* replay.
 
-    Ticks arrive every 1s but are aggregated into the selected interval
-    (e.g. 1m, 5m, 15m).  Each tick updates the current candle's OHLCV.
-    A new candle starts when the interval window advances.
+    Replays historical CSV data at accelerated speed:
+    • Each CSV row = 1 minute of real market data
+    • ``rows_per_candle`` consecutive rows (e.g. 5 for 5-min interval)
+      are aggregated into one candle
+    • Within each candle the chart updates every second as individual
+      rows are folded in (mimics a live intra-candle update)
+    • A **new candle** starts every ``rows_per_candle`` seconds of
+      wall-clock time, giving realistic volume and rapid signal flow
 
-    *start_index* lets the playback resume after SOW rows that were already
-    consumed by build_mock_sow().
+    Previous design used ``floor(now, interval)`` for candle boundaries,
+    which meant a 5-minute interval needed 5 minutes of real waiting and
+    crammed hundreds of CSV rows into a single candle — breaking volume
+    ratios and suppressing all signal detection.
+
+    *sow_bars* should be the list returned by ``build_mock_sow()``
+    so the playback history is pre-seeded and signal detection works
+    from the very first bar.
     """
     base_sym = _base_symbol(ticker)
     bars = _load_csv_bars(base_sym)
     if not bars:
         return
 
-    interval_sec = max(interval_minutes, 1) * 60
-    _log(f"[MockPlayback] interval={interval_minutes}m ({interval_sec}s) for {ticker}, start_index={start_index}")
+    rows_per_candle = max(interval_minutes, 1)
+    _log(f"[MockPlayback] interval={interval_minutes}m, rows_per_candle={rows_per_candle} "
+         f"for {ticker}, start_index={start_index}")
 
     is_option = ticker.startswith("O:")
-    base_stock_price = float(bars[0]["close"]) if is_option and float(bars[0]["close"]) > 0 else 0
+    base_stock_price = (float(bars[0]["close"])
+                        if is_option and float(bars[0]["close"]) > 0 else 0)
 
-    history: list[dict] = []
-    idx = start_index % len(bars)  # Resume from where SOW left off
+    # ── Seed history from SOW bars so signals fire immediately ──
+    history: list[dict] = list(sow_bars) if sow_bars else []
+    if len(history) > 100:
+        history = history[-100:]
 
-    # Current candle accumulator
-    candle_dt: str | None = None     # floored datetime string for current candle
-    candle_open = 0.0
-    candle_high = 0.0
-    candle_low = 0.0
-    candle_close = 0.0
-    candle_volume = 0
+    idx = start_index % len(bars)
+
+    # Running candle timestamp — advances with every completed candle.
+    # Start just after the last SOW candle.
+    now_utc = datetime.now(tz=ZoneInfo("UTC"))
+    now_et = now_utc.astimezone(_ET).replace(tzinfo=None)
+    interval_sec = max(interval_minutes, 1) * 60
+    candle_base_dt = _floor_dt(now_et, interval_sec)
+    candle_counter = 0  # how many candles we've started
 
     try:
         while True:
-            row = bars[idx]
+            # ── Build one candle from rows_per_candle CSV rows ──
+            candle_dt = candle_base_dt + timedelta(seconds=candle_counter * interval_sec)
+            candle_dt_str = candle_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            o = float(row["open"])
-            c = float(row["close"])
-            h = float(row["high"])
-            lo = float(row["low"])
-            v = int(row["volume"])
+            candle_open = candle_high = candle_low = candle_close = 0.0
+            candle_volume = 0
 
-            if is_option and base_stock_price > 0:
-                o  = _scale_to_option(o, base_stock_price)
-                c  = _scale_to_option(c, base_stock_price)
-                h  = _scale_to_option(h, base_stock_price)
-                lo = _scale_to_option(lo, base_stock_price)
+            for tick_i in range(rows_per_candle):
+                row = bars[idx]
+                msg = _csv_row_to_msg_dict(row, ticker)
+                o, c, h, lo, v = msg["o"], msg["c"], msg["h"], msg["l"], msg["v"]
 
-            # Floor current time to the interval boundary
-            now_utc = datetime.now(tz=ZoneInfo("UTC"))
-            now_et = now_utc.astimezone(_ET).replace(tzinfo=None)
-            floored = _floor_dt(now_et, interval_sec)
-            floored_str = floored.strftime("%Y-%m-%d %H:%M:%S")
+                if is_option and base_stock_price > 0:
+                    o  = _scale_to_option(o, base_stock_price)
+                    c  = _scale_to_option(c, base_stock_price)
+                    h  = _scale_to_option(h, base_stock_price)
+                    lo = _scale_to_option(lo, base_stock_price)
 
-            if floored_str != candle_dt:
-                # New candle window — start fresh
-                candle_dt = floored_str
-                candle_open = o
-                candle_high = h
-                candle_low = lo
-                candle_close = c
-                candle_volume = v
-            else:
-                # Same candle window — aggregate
-                candle_high = max(candle_high, h)
-                candle_low = min(candle_low, lo)
+                if tick_i == 0:
+                    candle_open = o
+                    candle_high = h
+                    candle_low = lo
+                else:
+                    candle_high = max(candle_high, h)
+                    candle_low = min(candle_low, lo)
                 candle_close = c
                 candle_volume += v
 
-            bar = {
-                "datetime": candle_dt,
-                "open": candle_open,
-                "high": candle_high,
-                "low": candle_low,
-                "close": candle_close,
-                "volume": candle_volume,
-                "vwap": round((candle_high + candle_low) / 2, 4),
-                "accumulated_volume": 0,
-            }
+                bar = {
+                    "datetime": candle_dt_str,
+                    "open": candle_open,
+                    "high": candle_high,
+                    "low": candle_low,
+                    "close": candle_close,
+                    "volume": candle_volume,
+                    "vwap": round((candle_high + candle_low) / 2, 4),
+                    "accumulated_volume": 0,
+                }
 
-            # Only add to history when a new candle starts (for signal detection)
-            if len(history) == 0 or history[-1]["datetime"] != candle_dt:
-                history.append(bar)
-                if len(history) > 100:
-                    history = history[-100:]
-            else:
-                history[-1] = bar  # update current candle in history
+                # Keep history in sync — add new, or update current candle
+                if len(history) == 0 or history[-1]["datetime"] != candle_dt_str:
+                    history.append(bar)
+                    if len(history) > 100:
+                        history = history[-100:]
+                else:
+                    history[-1] = bar
 
-            signals = _detect_bar_signals(history, bar)
+                signals = _detect_bar_signals(history, bar)
 
-            payload = json.dumps({
-                "type": "bar",
-                "ticker": ticker,
-                "bar": bar,
-                "signals": signals,
-            })
+                payload = json.dumps({
+                    "type": "bar",
+                    "ticker": ticker,
+                    "bar": bar,
+                    "signals": signals,
+                })
 
-            try:
-                queue.put_nowait(payload)
-            except asyncio.QueueFull:
                 try:
-                    queue.get_nowait()
                     queue.put_nowait(payload)
-                except Exception:
-                    pass
+                except asyncio.QueueFull:
+                    try:
+                        queue.get_nowait()
+                        queue.put_nowait(payload)
+                    except Exception:
+                        pass
 
-            idx = (idx + 1) % len(bars)
-            await asyncio.sleep(1)
+                idx = (idx + 1) % len(bars)
+                await asyncio.sleep(1)   # 1 second per CSV row
+
+            candle_counter += 1
+
     except asyncio.CancelledError:
         _log(f"[MockPlayback] Stopped playback for {ticker}")
         return
@@ -780,11 +949,18 @@ class LiveFeedManager:
         self._running = False
 
         # Two upstream connections (lazy – created on first subscribe)
-        # Options: use Massive client with Launchpad feed (realtime)
-        self._options_upstream = _MassiveUpstreamWS(
-            "options", self._handle_aggregate,
+        # Options: try raw WebSocket first (gives proper OHLCV aggregates),
+        # with Massive Launchpad as fallback (gives FMV values)
+        self._options_raw = _UpstreamWS(
+            "options-raw", OPTIONS_WS_DELAYED, self._handle_aggregate,
+        )
+        self._options_launchpad = _MassiveUpstreamWS(
+            "options-lp", self._handle_aggregate,
             feed=Feed.Launchpad, market=Market.Options,
         )
+        # Track which options upstream is active
+        self._options_upstream_active = None  # will be set on first subscribe
+
         # Stocks: use Massive client with Delayed feed
         self._stocks_upstream = _MassiveUpstreamWS(
             "stocks", self._handle_aggregate,
@@ -801,7 +977,9 @@ class LiveFeedManager:
         self._bar_history: dict[str, list[dict]] = defaultdict(list)
 
     def _upstream_for(self, ticker: str):
-        return self._options_upstream if _is_option_ticker(ticker) else self._stocks_upstream
+        if _is_option_ticker(ticker):
+            return self._options_upstream_active or self._options_raw
+        return self._stocks_upstream
 
     # ── Lifecycle ────────────────────────────────────────────
 
@@ -813,7 +991,8 @@ class LiveFeedManager:
 
     async def stop(self):
         self._running = False
-        await self._options_upstream.stop()
+        await self._options_raw.stop()
+        await self._options_launchpad.stop()
         await self._stocks_upstream.stop()
         for t in self._unsub_timers.values():
             t.cancel()
@@ -835,21 +1014,8 @@ class LiveFeedManager:
         if hist_len == 0 or hist_len % 10 == 0:
             _log(f"[{market}] bar #{hist_len+1} {sym}: c={msg.get('c')} v={msg.get('v')} subs={len(self._subscribers.get(sym, set()))}")
 
-        # Convert Polygon agg → our bar format
-        start_ms = msg.get("s", 0)
-        dt_utc = datetime.fromtimestamp(start_ms / 1000, tz=ZoneInfo("UTC"))
-        dt_et = dt_utc.astimezone(_ET).replace(tzinfo=None)
-
-        bar = {
-            "datetime": dt_et.strftime("%Y-%m-%d %H:%M:%S"),
-            "open": msg.get("o", 0),
-            "high": msg.get("h", 0),
-            "low": msg.get("l", 0),
-            "close": msg.get("c", 0),
-            "volume": msg.get("v", 0),
-            "vwap": msg.get("vw", 0),
-            "accumulated_volume": msg.get("av", 0),
-        }
+        # Convert Polygon agg → our bar format (shared conversion function)
+        bar = _msg_dict_to_bar(msg)
 
         # Accumulate for VPA analysis
         history = self._bar_history[sym]
@@ -901,6 +1067,9 @@ class LiveFeedManager:
         Subscribe a client queue to a ticker (option or stock).
         Returns (bar_history, error_string_or_None).
         error is non-None when upstream hit connection limit or auth failed.
+
+        For option tickers, tries the raw WebSocket (delayed OHLCV) first.
+        If that auth-fails, falls back to Massive Launchpad (FMV values).
         """
         # Cancel any pending unsubscribe timer
         timer = self._unsub_timers.pop(ticker, None)
@@ -908,7 +1077,13 @@ class LiveFeedManager:
             timer.cancel()
             _log(f"Cancelled unsub timer for {ticker}")
 
-        upstream = self._upstream_for(ticker)
+        # Determine the upstream to use
+        if _is_option_ticker(ticker):
+            upstream = await self._resolve_options_upstream(ticker)
+            if upstream is None:
+                return [], "auth_failed"
+        else:
+            upstream = self._stocks_upstream
 
         # Check if upstream is in connection-limit backoff BEFORE subscribing
         if upstream._conn_limit_hit:
@@ -945,10 +1120,51 @@ class LiveFeedManager:
                 # and sends the WS subscribe command
                 await upstream.subscribe(ticker)
             elif upstream._auth_failed_permanent:
-                self._subscribers[ticker].discard(queue)
-                return [], "auth_failed"
+                # If the raw websocket auth failed, try fallback to Launchpad
+                if upstream is self._options_raw and not self._options_launchpad._auth_failed_permanent:
+                    _log(f"Raw options WS auth failed, falling back to Launchpad for {ticker}")
+                    upstream._active_tickers.discard(ticker)
+                    self._options_upstream_active = self._options_launchpad
+                    upstream = self._options_launchpad
+                    upstream._active_tickers.add(ticker)
+                    await upstream.ensure_started()
+                    for _ in range(50):
+                        if upstream.authenticated or upstream._auth_failed_permanent:
+                            break
+                        await asyncio.sleep(0.1)
+                    if upstream.authenticated:
+                        await upstream.subscribe(ticker)
+                    elif upstream._auth_failed_permanent:
+                        self._subscribers[ticker].discard(queue)
+                        return [], "auth_failed"
+                else:
+                    self._subscribers[ticker].discard(queue)
+                    return [], "auth_failed"
 
         return list(self._bar_history.get(ticker, [])), None
+
+    async def _resolve_options_upstream(self, ticker: str):
+        """Determine which options upstream to use.
+        Tries raw WebSocket first, falls back to Launchpad if auth fails."""
+        if self._options_upstream_active is not None:
+            return self._options_upstream_active
+
+        # Try raw WebSocket first (gives proper OHLCV aggregates)
+        raw = self._options_raw
+        if not raw._auth_failed_permanent:
+            self._options_upstream_active = raw
+            _log(f"Using raw options WebSocket (delayed) for {ticker}")
+            return raw
+
+        # Raw WS not available → try Launchpad
+        lp = self._options_launchpad
+        if not lp._auth_failed_permanent:
+            self._options_upstream_active = lp
+            _log(f"Using Launchpad options feed for {ticker}")
+            return lp
+
+        _log(f"No options upstream available for {ticker}")
+        return None
 
     async def unsubscribe(self, ticker: str, queue: asyncio.Queue):
         """
@@ -981,11 +1197,13 @@ class LiveFeedManager:
 
     def get_status(self) -> dict:
         """Return current feed manager status."""
-        opts = self._options_upstream
+        opts = self._options_upstream_active or self._options_raw
         stks = self._stocks_upstream
+        opts_type = "raw" if opts is self._options_raw else "launchpad" if opts is self._options_launchpad else "none"
         return {
             "options_connected": opts.ws is not None and opts.authenticated,
             "options_plan_ok": not opts._auth_failed_permanent,
+            "options_upstream_type": opts_type,
             "stocks_connected": stks.ws is not None and stks.authenticated,
             "stocks_plan_ok": not stks._auth_failed_permanent,
             "subscriptions": {

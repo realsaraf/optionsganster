@@ -3123,10 +3123,47 @@
                         lastAnalysisData.bars = lastAnalysisData.bars.concat(bars);
                     }
 
-                    // Update price header
+                    // Update price header from last SOW bar
                     const lastBar = bars[bars.length - 1];
+                    const firstBar = bars[0];
                     document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
                     document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : bars.length;
+
+                    // ── Mock-mode: update contract header & date range ──
+                    if (msg.mock && msg.ticker) {
+                        // Parse OCC ticker: O:QQQ260213C00601000
+                        const occRaw = msg.ticker.replace('O:', '');
+                        const occMatch = occRaw.match(/^([A-Z]+)(\d{6})([CP])(\d{8})$/);
+                        if (occMatch) {
+                            const sym = occMatch[1];
+                            const dtStr = occMatch[2]; // YYMMDD
+                            const right = occMatch[3];
+                            const strike = parseInt(occMatch[4]) / 1000;
+                            const expStr = `20${dtStr.slice(0,2)}-${dtStr.slice(2,4)}-${dtStr.slice(4,6)}`;
+                            const rightLabel = right === 'C' ? 'Call' : 'Put';
+
+                            document.getElementById('contract-symbol').textContent = `${sym} $${strike} ${rightLabel}`;
+                            document.getElementById('contract-details').textContent = `Exp: ${expStr} (MOCK ${msg.interval || currentInterval}m)`;
+                        }
+
+                        // Show price change from mock data
+                        const change = lastBar.close - firstBar.open;
+                        const changePct = firstBar.open !== 0 ? (change / firstBar.open * 100) : 0;
+                        document.getElementById('contract-change').textContent = 
+                            `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)`;
+                        document.getElementById('contract-change').className = 
+                            `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
+
+                        // Update date inputs to reflect mock data range
+                        if (msg.first_dt) {
+                            const mockStartDate = msg.first_dt.split(' ')[0];
+                            document.getElementById('start-date').value = mockStartDate;
+                        }
+                        if (msg.last_dt) {
+                            const mockEndDate = msg.last_dt.split(' ')[0];
+                            document.getElementById('end-date').value = mockEndDate;
+                        }
+                    }
                 }
 
             } else if (type === 'bar') {
