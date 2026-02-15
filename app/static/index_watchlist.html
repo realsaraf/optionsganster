@@ -4399,7 +4399,7 @@
             });
         });
 
-        // ===== MOBILE DATE RANGE BUTTONS =====
+        // ===== DATE RANGE BUTTONS (auto-analyze on change) =====
         document.querySelectorAll('.date-range-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 // Sync all date-range-btn across mobile and desktop
@@ -4413,6 +4413,10 @@
                 from.setDate(today.getDate() - days);
                 document.getElementById('start-date').value = from.toISOString().split('T')[0];
                 document.getElementById('end-date').value = today.toISOString().split('T')[0];
+                // Auto-analyze with new date range if a symbol is selected
+                if (currentSymbol && document.getElementById('expiration').value && document.getElementById('strike').value) {
+                    analyze().catch(e => console.warn('Auto-analyze on date range change failed:', e));
+                }
             });
         });
 
