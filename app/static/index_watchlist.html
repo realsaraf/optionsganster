@@ -491,6 +491,10 @@
             background: rgba(41, 98, 255, 0.1);
         }
         
+        .watchlist-header .sheet-done-btn {
+            display: none;
+        }
+        
         .watchlist-search {
             padding: 8px 12px;
             border-bottom: 1px solid #2a2e39;
@@ -1113,6 +1117,10 @@
             overflow: hidden;
         }
         
+        .analysis-sheet-header {
+            display: none;
+        }
+
         .sidebar-tabs {
             display: flex;
             border-bottom: 1px solid #2a2e39;
@@ -1875,6 +1883,33 @@
             display: block;
         }
 
+        /* ===== SETTINGS SHEET (wrapper for mobile bottom-sheet) ===== */
+        .settings-sheet {
+            display: contents; /* Transparent on desktop */
+        }
+        .settings-sheet-header {
+            display: none;
+        }
+        .settings-sheet-body {
+            display: contents;
+        }
+        .mobile-section-label {
+            display: none;
+        }
+
+        /* Desktop: unwrap mobile-contract-row so Exp + Strike flow inline */
+        .mobile-contract-row {
+            display: contents;
+        }
+
+        /* Desktop: hide strike matrix trigger + modal (only for mobile) */
+        .strike-matrix-trigger {
+            display: none !important;
+        }
+        .strike-modal-overlay {
+            display: none;
+        }
+
         /* ===== DATE RANGE BUTTONS ===== */
         .mobile-date-range {
             display: none; /* shown on mobile via controls-bar grid */
@@ -2133,22 +2168,59 @@
             /* ---- Watchlist sidebar overlay ---- */
             .watchlist-sidebar {
                 position: fixed;
-                top: 0;
+                top: 10vh;
                 left: 0;
-                bottom: 0;
-                width: 300px;
-                max-width: 85vw;
-                transform: translateX(-100%);
-                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                right: 0;
+                bottom: 56px;
+                width: 100% !important;
+                max-width: 100%;
+                min-width: 100% !important;
+                border-radius: 16px 16px 0 0;
+                transform: translateY(100%);
+                transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
                 z-index: 1002;
+                border-top: 1px solid #2a2e39;
+                border-right: none !important;
+            }
+
+            .watchlist-sidebar.collapsed .watchlist-header,
+            .watchlist-sidebar.collapsed .watchlist-search,
+            .watchlist-sidebar.collapsed .watchlist-items,
+            .watchlist-sidebar.collapsed .watchlist-tabs,
+            .watchlist-sidebar.collapsed .ideas-panel {
+                opacity: 1;
+                pointer-events: auto;
             }
 
             .watchlist-sidebar.mobile-open {
-                transform: translateX(0);
+                transform: translateY(0);
             }
 
             .watchlist-sidebar .mobile-close-btn {
+                display: none;
+            }
+
+            .watchlist-header {
+                padding: 14px 16px 10px;
+                border-bottom: 1px solid #2a2e39;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .watchlist-header h2 {
+                font-size: 15px;
+                font-weight: 700;
+                color: #d1d4dc;
+                letter-spacing: 0.3px;
+                text-transform: none;
+            }
+            .watchlist-header .sheet-done-btn {
                 display: block;
+            }
+
+            .watchlist-sidebar::before {
+                content: '';
+                display: none;
             }
 
             /* ---- Analysis sidebar: bottom sheet ---- */
@@ -2157,7 +2229,7 @@
                 top: 10vh;
                 left: 0;
                 right: 0;
-                bottom: 0;
+                bottom: 56px;
                 width: 100%;
                 max-width: 100%;
                 border-radius: 16px 16px 0 0;
@@ -2172,14 +2244,29 @@
                 transform: translateY(0);
             }
 
+            .analysis-sheet-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 16px 10px;
+                border-bottom: 1px solid #2a2e39;
+                flex-shrink: 0;
+            }
+            .analysis-sheet-header .sheet-title {
+                font-size: 15px;
+                font-weight: 700;
+                color: #d1d4dc;
+                letter-spacing: 0.3px;
+            }
+
             .analysis-sidebar .mobile-close-btn {
-                display: block;
+                display: none;
             }
 
             /* Bottom sheet drag handle */
             .analysis-sidebar::before {
                 content: '';
-                display: block;
+                display: none;
                 width: 36px;
                 height: 4px;
                 background: #4a4e59;
@@ -2218,7 +2305,8 @@
 
             .mobile-underlying-price {
                 font-size: 15px;
-                font-weight: 700;
+                padding: 6px 12px;
+                font-weight: 800;
                 font-family: 'SF Mono', 'Monaco', monospace;
                 color: #d1d4dc;
                 transition: color 0.3s;
@@ -2256,7 +2344,7 @@
                 font-size: 11px;
             }
 
-            /* Hide logout in header on mobile — it's in settings */
+            /* Hide desktop logout, show mobile sign-out in header */
             .logout-btn {
                 display: none !important;
             }
@@ -2265,34 +2353,95 @@
                 display: none !important;
             }
 
-            /* Mobile logout in settings */
-            .mobile-logout-row {
-                display: flex !important;
-                padding: 8px 0;
-                margin-top: 4px;
-                border-top: 1px solid #2a2e39;
-            }
-
-            .mobile-logout-btn {
-                display: flex !important;
+            /* Mobile sign-out button in header top row */
+            .mobile-signout-header {
+                display: inline-flex !important;
                 align-items: center;
-                gap: 6px;
+                gap: 4px;
+                padding: 3px 10px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
                 color: #ef5350;
                 background: rgba(239, 83, 80, 0.08);
                 border: 1px solid rgba(239, 83, 80, 0.2);
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: 600;
                 cursor: pointer;
                 text-decoration: none;
-                width: 100%;
-                justify-content: center;
                 transition: all 0.15s;
+                white-space: nowrap;
+                margin-left: 4px;
+            }
+            .mobile-signout-header:hover {
+                background: rgba(239, 83, 80, 0.15);
             }
 
-            .mobile-logout-btn:hover {
-                background: rgba(239, 83, 80, 0.15);
+            /* Mobile submit idea icon button — compact, next to sign out */
+            .mobile-submit-idea-btn {
+                display: inline-flex !important;
+                align-items: center;
+                justify-content: center;
+                width: 30px;
+                height: 23px;
+                padding: 0;
+                margin-left: auto;
+                border-radius: 4px;
+                font-size: 14px;
+                background: linear-gradient(135deg, #d4a017, #b8860b);
+                border: none;
+                cursor: pointer;
+                transition: all 0.15s;
+                box-shadow: 0 1px 4px rgba(212, 160, 23, 0.25);
+                line-height: 1;
+            }
+            .mobile-submit-idea-btn:hover {
+                background: linear-gradient(135deg, #e6b422, #c99700);                
+            }
+
+            /* Hide original submit idea btn on mobile (use mobile version) */
+            .submit-idea-btn {
+                display: none !important;
+            }
+
+            /* Hide the old mobile logout row in settings */
+            .mobile-logout-row {
+                display: none !important;
+            }
+
+            .mobile-logout-btn {
+                display: none !important;
+            }
+
+            /* ---- Toast notifications: bottom-right above tab menu on mobile ---- */
+            .toast-container {
+                top: auto !important;
+                bottom: 66px; /* 56px nav + 10px gap */
+                right: 10px;
+                left: 10px;
+                flex-direction: column-reverse;
+            }
+            .toast-container .toast {
+                max-width: 100%;
+                animation: mobileToastIn .35s ease-out;
+            }
+            .toast-container .toast.fade-out {
+                animation: mobileToastOut .3s ease-in forwards;
+            }
+            .ideas-toast {
+                top: auto !important;
+                bottom: 66px;
+                right: 10px;
+                left: 10px;
+                flex-direction: column-reverse;
+            }
+            .ideas-toast-item {
+                transform: translateY(100px);
+                animation: mobileToastIn 0.4s ease-out forwards, mobileToastOut 0.4s ease-in 4.6s forwards;
+            }
+            @keyframes mobileToastIn {
+                to { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes mobileToastOut {
+                to { opacity: 0; transform: translateY(100px); }
             }
 
             /* ---- Controls Summary: hidden on mobile ---- */
@@ -2337,32 +2486,115 @@
             /* ---- Show analyze-btn on mobile ---- */
             .analyze-btn {
                 display: flex !important;
-                grid-column: 1 / -1;
                 justify-content: center;
                 align-items: center;
-                padding: 10px;
+                padding: 12px;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 700;
                 background: #2962ff;
                 color: #fff;
                 border: none;
-                border-radius: 6px;
+                border-radius: 8px;
                 cursor: pointer;
+                width: 100%;
             }
             .analyze-btn:hover {
                 background: #1e88e5;
             }
 
-            /* ---- Controls Bar: 2-column grid ---- */
+            /* ===== SETTINGS SHEET: Mobile Bottom Sheet ===== */
+            .settings-sheet {
+                display: flex;
+                flex-direction: column;
+                position: fixed;
+                top: 10vh;
+                left: 0;
+                right: 0;
+                bottom: 56px;
+                background: #1a1e2e;
+                border-radius: 16px 16px 0 0;
+                border-top: 1px solid #363a45;
+                z-index: 1100;
+                transform: translateY(100%);
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 0 -8px 32px rgba(0,0,0,0.6);
+                overflow: hidden;
+            }
+            .settings-sheet.open {
+                transform: translateY(0);
+            }
+
+            .settings-sheet-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 16px 10px;
+                border-bottom: 1px solid #2a2e39;
+                flex-shrink: 0;
+                position: relative;
+            }
+            .sheet-drag-handle {
+                position: absolute;
+                top: 6px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 36px;
+                height: 4px;
+                background: #4a4e59;
+                border-radius: 2px;
+            }
+            .sheet-title {
+                font-size: 15px;
+                font-weight: 700;
+                color: #d1d4dc;
+                letter-spacing: 0.3px;
+            }
+            .sheet-done-btn {
+                background: none;
+                border: none;
+                color: #2962ff;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                padding: 4px 2px;
+                letter-spacing: 0.2px;
+            }
+            .sheet-done-btn:active {
+                opacity: 0.7;
+            }
+
+            .settings-sheet-body {
+                display: flex;
+                flex-direction: column;
+                overflow-y: auto;
+                flex: 1;
+                min-height: 0;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Section labels inside the sheet */
+            .mobile-section-label {
+                display: block;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1.2px;
+                text-transform: uppercase;
+                color: #636983;
+                padding: 14px 6px 6px;
+            }
+
+            /* ---- Controls Bar: vertical flex inside sheet ---- */
             .controls-bar {
-                padding: 10px 12px;
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
+                padding: 0 6px 8px;
+                display: flex !important;
+                flex-direction: column;
+                gap: 10px;
+                background: transparent;
+                border-bottom: none;
             }
 
             .controls-bar.collapsed {
-                display: none;
+                display: flex !important; /* Sheet controls visibility, not collapsed class */
             }
 
             /* Hide desktop From/To/Type/desktop toggles on mobile */
@@ -2371,19 +2603,222 @@
                 display: none !important;
             }
 
+            /* Contract row: Exp + Strike side by side, full width like Call/Put */
+            .mobile-contract-row {
+                display: flex;
+                gap: 8px;
+                width: 100%;
+            }
+            .mobile-contract-row .control-group {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 8px;
+                min-width: 0;
+                width: auto;
+            }
+            .mobile-contract-row .control-group:first-child {
+                flex: 1;
+            }
+            /* Show strike control group, but hide the native select */
+            .mobile-contract-row .control-group:last-child {
+                flex: 1;
+            }
+            .mobile-contract-row .control-group select,
+            .mobile-contract-row .exp-calendar-trigger {
+                padding: 12px 10px;
+                font-size: 14px;
+                height: 44px;
+                flex: 1;
+                min-width: 0;
+            }
+
+            /* ---- Strike Matrix Trigger Button (mobile) ---- */
+            .strike-matrix-trigger {
+                display: flex !important;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 10px;
+                font-size: 14px;
+                height: 44px;
+                flex: 1;
+                min-width: 0;
+                background: #1e222d;
+                border: 1px solid #363a45;
+                border-radius: 8px;
+                color: #d1d4dc;
+                cursor: pointer;
+                font-family: inherit;
+                font-weight: 600;
+            }
+            .strike-matrix-trigger:active {
+                background: #2a2e39;
+            }
+            .strike-trigger-chevron {
+                font-size: 10px;
+                color: #787b86;
+                margin-left: 6px;
+            }
+
+            /* Hide native select on mobile, show trigger */
+            .mobile-contract-row .control-group:last-child select#strike {
+                display: none;
+            }
+
+            /* ---- Strike Modal Overlay ---- */
+            .strike-modal-overlay {
+                display: none;
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                z-index: 10000;
+                background: rgba(0, 0, 0, 0.6);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                align-items: flex-end;
+                justify-content: center;
+            }
+            .strike-modal-overlay.open {
+                display: flex;
+            }
+            .strike-modal {
+                width: 100%;
+                max-height: 70vh;
+                background: #131722;
+                border-radius: 16px 16px 0 0;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                animation: strikeModalSlideUp 0.25s ease-out;
+            }
+            @keyframes strikeModalSlideUp {
+                from { transform: translateY(100%); }
+                to { transform: translateY(0); }
+            }
+            .strike-modal-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 16px 16px 12px;
+                border-bottom: 1px solid #2a2e39;
+            }
+            .strike-modal-title {
+                font-size: 16px;
+                font-weight: 700;
+                color: #d1d4dc;
+            }
+            .strike-modal-close {
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                border: none;
+                background: #2a2e39;
+                color: #d1d4dc;
+                font-size: 20px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+                line-height: 1;
+            }
+            .strike-modal-close:active {
+                background: #363a45;
+            }
+
+            /* Strike matrix inside modal */
+            .strike-matrix {
+                width: 100%;
+                flex: 1;
+                overflow-y: auto;
+                overflow-x: hidden;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                scroll-behavior: smooth;
+                padding: 12px;
+            }
+            .strike-matrix::-webkit-scrollbar {
+                display: none;
+            }
+            .strike-matrix-inner {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+                padding: 0;
+            }
+            .strike-cell {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 52px;
+                padding: 4px 6px;
+                border-radius: 10px;
+                background: #1e222d;
+                border: 1px solid #2a2e39;
+                cursor: pointer;
+                transition: all 0.15s;
+            }
+            .strike-cell:active {
+                transform: scale(0.95);
+            }
+            .strike-cell .strike-val {
+                font-size: 15px;
+                font-weight: 700;
+                color: #d1d4dc;
+                line-height: 1.2;
+            }
+            .strike-cell .strike-tag {
+                font-size: 9px;
+                color: #787b86;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                margin-top: 2px;
+            }
+            .strike-cell.atm {
+                background: rgba(41, 98, 255, 0.15);
+                border-color: #2962ff;
+            }
+            .strike-cell.atm .strike-val {
+                color: #5b8af5;
+            }
+            .strike-cell.atm .strike-tag {
+                color: #2962ff;
+                font-weight: 700;
+            }
+            .strike-cell.selected {
+                background: #2962ff;
+                border-color: #2962ff;
+            }
+            .strike-cell.selected .strike-val {
+                color: #fff;
+            }
+            .strike-cell.selected .strike-tag {
+                color: rgba(255, 255, 255, 0.7);
+            }
+            .strike-cell.itm .strike-tag {
+                color: #26a69a;
+            }
+            .strike-cell.otm .strike-tag {
+                color: #ef5350;
+            }
+
             /* Show mobile replacements */
             .mobile-cp-switch {
                 display: block !important;
-                grid-column: 1 / -1;
+                width: 100%;
             }
 
             .mobile-date-range {
                 display: block !important;
-                grid-column: 1 / -1;
+                width: 100%;
             }
 
             .control-group {
+                display: flex;
+                flex-direction: column;
                 width: 100%;
+                flex: 1;
+                min-width: 0;
             }
 
             .control-group select,
@@ -2393,48 +2828,255 @@
                 min-width: 0;
                 padding: 10px 8px;
                 font-size: 13px;
+                border-radius: 8px;
+                background: #131722;
+                border: 1px solid #363a45;
             }
 
             .control-group label {
-                min-width: 36px;
+                min-width: 0;
                 font-size: 10px;
+                color: #636983;
+                margin-bottom: 2px;
             }
 
-            .interval-buttons {
-                grid-column: 1 / -1;
-                width: 100%;
+            /* Show Exp/Strike labels inside contract row — left of control */
+            .mobile-contract-row .control-group label {
+                display: block;
+                font-size: 10px;
+                color: #636983;
+                text-transform: uppercase;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                margin-bottom: 0;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+
+            /* ---- Exp Calendar Picker ---- */
+            .exp-calendar-trigger {
+                display: flex;
+                align-items: center;
                 justify-content: space-between;
+                width: 100%;
+                padding: 10px 8px;
+                font-size: 13px;
+                border-radius: 8px;
+                background: #131722;
+                border: 1px solid #363a45;
+                color: #d1d4dc;
+                cursor: pointer;
+                font-family: inherit;
+            }
+            .exp-calendar-trigger .cal-icon {
+                font-size: 14px;
+                color: #636983;
+            }
+            .exp-calendar-overlay {
+                display: none;
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.6);
+                z-index: 2000;
+                align-items: center;
+                justify-content: center;
+            }
+            .exp-calendar-overlay.open {
+                display: flex;
+            }
+            .exp-calendar-card {
+                background: #1a1e2e;
+                border-radius: 16px;
+                border: 1px solid #2a2e39;
+                width: 320px;
+                max-width: 92vw;
+                box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+                overflow: hidden;
+            }
+            .exp-cal-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 16px;
+                border-bottom: 1px solid #2a2e39;
+            }
+            .exp-cal-header .cal-title {
+                font-size: 15px;
+                font-weight: 700;
+                color: #d1d4dc;
+            }
+            .exp-cal-header button {
+                background: none;
+                border: none;
+                color: #9ca3af;
+                font-size: 20px;
+                cursor: pointer;
+                padding: 0 6px;
+                line-height: 1;
+            }
+            .exp-cal-header button:active { opacity: 0.6; }
+            .exp-cal-grid {
+                padding: 8px 12px 14px;
+            }
+            .exp-cal-weekdays {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+                text-align: center;
+                font-size: 10px;
+                font-weight: 700;
+                color: #636983;
+                letter-spacing: 0.8px;
+                margin-bottom: 4px;
+            }
+            .exp-cal-days {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+                gap: 2px;
+            }
+            .exp-cal-day {
+                text-align: center;
+                padding: 8px 0;
+                font-size: 13px;
+                border-radius: 8px;
+                color: #363a45;
+                cursor: default;
+            }
+            .exp-cal-day.valid {
+                color: #d1d4dc;
+                background: #1e222d;
+                cursor: pointer;
+                font-weight: 700;
+            }
+            .exp-cal-day.valid:active {
+                background: #2962ff;
+                color: #fff;
+            }
+            .exp-cal-day.selected {
+                background: #2962ff;
+                color: #fff;
+                font-weight: 700;
+            }
+            .exp-cal-day.today {
+                border: 1px solid #636983;
+            }
+            .exp-cal-day.empty {
+                visibility: hidden;
             }
 
+            /* Call/Put toggle - clean full-width */
+            .cp-toggle {
+                width: 100%;
+                height: 42px;
+                border-radius: 8px;
+                background: #131722;
+                border: 1px solid #363a45;
+            }
+            .cp-toggle-option {
+                font-size: 14px;
+                font-weight: 700;
+                border-radius: 6px;
+            }
+
+            /* Date range buttons */
+            .date-range-group {
+                width: 100%;
+                display: flex;
+                gap: 3px;
+                background: #131722;
+                padding: 3px;
+                border-radius: 8px;
+                border: 1px solid #2a2e39;
+            }
+            .date-range-btn {
+                flex: 1;
+                padding: 9px 0;
+                min-height: 38px;
+                font-size: 12px;
+                font-weight: 700;
+                border-radius: 6px;
+                text-align: center;
+                background: #1e222d;
+                color: #c8cad0;
+                border: none;
+            }
+            .date-range-btn.active {
+                background: #2962ff;
+                color: #fff;
+            }
+
+            /* Interval buttons */
+            .interval-buttons {
+                width: 100%;
+                display: flex;
+                gap: 3px;
+                background: #131722;
+                padding: 3px;
+                border-radius: 8px;
+                border: 1px solid #2a2e39;
+            }
             .interval-btn {
                 flex: 1;
-                padding: 10px 6px;
-                min-height: 40px;
-                font-size: 13px;
+                padding: 9px 0;
+                min-height: 38px;
+                font-size: 12px;
+                font-weight: 700;
+                border-radius: 6px;
+                text-align: center;
+                background: #1e222d;
+                color: #c8cad0;
+                border: none;
+            }
+            .interval-btn.active {
+                background: #2962ff;
+                color: #fff;
             }
 
-            .analyze-btn {
-                grid-column: 1 / -1;
+            /* Action row */
+            .mobile-action-row {
+                display: flex !important;
+                gap: 8px;
                 width: 100%;
-                padding: 12px 20px;
+                padding: 8px 16px 12px;
+                background: #1a1e2e;
+                border-top: 1px solid #2a2e39;
+                flex-shrink: 0;
+            }
+            .mobile-action-row .analyze-btn {
+                flex: 2;
+                width: auto;
+                padding: 12px 6px;
                 min-height: 44px;
                 font-size: 14px;
+                font-weight: 700;
+                border-radius: 8px;
+            }
+            .mobile-action-row .live-btn {
+                flex: 1;
+                width: auto;
+                padding: 10px 6px;
+                min-height: 44px;
+                font-size: 12px;
+                font-weight: 600;
+                border-radius: 8px;
             }
 
             .live-btn {
-                grid-column: 1 / -1;
                 width: 100%;
-                padding: 10px 16px;
-                min-height: 40px;
-                font-size: 13px;
+                padding: 8px 12px;
+                min-height: 36px;
+                font-size: 12px;
             }
 
-            /* ---- Filter bar: wrap on mobile ---- */
+            /* ---- Filter bar inside sheet ---- */
             .filter-bar {
                 flex-wrap: wrap;
                 overflow-x: visible;
-                padding: 6px 12px;
-                gap: 8px;
+                padding: 0 16px 4px;
+                gap: 10px;
+                flex-direction: column;
+                align-items: stretch;
+                background: transparent;
+                border-bottom: none;
             }
 
             .filter-bar::-webkit-scrollbar {
@@ -2443,6 +3085,105 @@
 
             .filter-bar .filter-label {
                 display: none;
+            }
+
+            /* Chart type + confidence as separate rows */
+            .mobile-chart-conf-row {
+                display: flex !important;
+                flex-direction: column;
+                gap: 10px;
+                width: 100%;
+            }
+            .mobile-chart-conf-row .underlay-toggle {
+                border-right: none;
+                padding-right: 0;
+                margin-right: 0;
+                width: 100%;
+            }
+            .mobile-chart-conf-row .underlay-label {
+                display: none;
+            }
+            .mobile-chart-conf-row .underlay-btn-group {
+                display: flex;
+                gap: 3px;
+                background: #131722;
+                padding: 3px;
+                border-radius: 8px;
+                border: 1px solid #2a2e39;
+                width: 100%;
+            }
+            .mobile-chart-conf-row .underlay-btn {
+                flex: 1;
+                padding: 9px 0;
+                font-size: 12px;
+                font-weight: 700;
+                border-radius: 6px;
+                text-align: center;
+                background: #1e222d;
+                color: #c8cad0;
+                border: none;
+            }
+            .mobile-chart-conf-row .underlay-btn.active {
+                background: #2962ff;
+                color: #fff;
+            }
+            .mobile-chart-conf-row .conf-toggle-group {
+                border-left: none !important;
+                padding-left: 0 !important;
+                margin-left: 0;
+                width: 100%;
+            }
+            .mobile-chart-conf-row .conf-btn-group {
+                display: flex;
+                gap: 3px;
+                background: #131722;
+                padding: 3px;
+                border-radius: 8px;
+                border: 1px solid #2a2e39;
+                width: 100%;
+            }
+            .mobile-chart-conf-row .conf-label {
+                display: block;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1.2px;
+                text-transform: uppercase;
+                color: #636983;
+                margin-bottom: 6px;
+            }
+            .mobile-chart-conf-row .conf-btn {
+                flex: 1;
+                padding: 9px 0;
+                font-size: 11px;
+                font-weight: 700;
+                border-radius: 6px;
+                text-align: center;
+                background: #1e222d;
+                color: #c8cad0;
+                border: none;
+            }
+            .mobile-chart-conf-row .conf-btn.active {
+                background: #2962ff;
+                color: #fff;
+            }
+
+            /* Signal toggles as clean 2-column grid */
+            .mobile-signals-grid {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                width: 100%;
+                padding: 4px 0 8px;
+            }
+            .mobile-signals-grid .toggle-group {
+                flex-shrink: 0;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 0;
+            }
+            .mobile-signals-grid .toggle-text {
+                font-size: 12px;
             }
 
             .toggle-group {
@@ -2455,6 +3196,11 @@
                 padding-right: 0;
                 margin-right: 0;
                 flex-shrink: 0;
+            }
+
+            /* Hide desktop filter items on mobile, show mobile versions */
+            .desktop-filter-item {
+                display: none !important;
             }
 
             /* ---- Chart: fill available space ---- */
@@ -2798,8 +3544,7 @@
         <div class="watchlist-sidebar" id="watchlist-sidebar">
             <div class="watchlist-header">
                 <h2>Watchlist</h2>
-                <button class="mobile-close-btn" id="watchlist-close-btn" aria-label="Close Watchlist">×</button>
-                <button class="watchlist-add-btn" title="Add Symbol">+</button>
+                <button class="sheet-done-btn" id="watchlist-done-btn">Done</button>
             </div>
 
             <!-- Sidebar tabs (hidden on mobile — bottom nav controls which panel shows) -->
@@ -2819,7 +3564,6 @@
 
             <!-- Tab: Ideas -->
             <div class="ideas-panel" id="ideas-panel">
-                <div class="ideas-panel-title" style="display:none;">Trade Ideas</div>
                 <div class="watchlist-search">
                     <input type="text" id="ideas-search" placeholder="Filter by symbol...">
                 </div>
@@ -2837,10 +3581,12 @@
         <!-- MAIN: Chart & Controls -->
         <div class="main-panel">
             <div class="header">
-                <!-- Mobile top row: underlying symbol + ticking price -->
+                <!-- Mobile top row: underlying symbol + ticking price + sign out -->
                 <div class="mobile-header-top" id="mobile-header-top" style="display:none;">
-                    <span class="mobile-underlying-symbol" id="mobile-underlying-symbol">SPY</span>
+                    <span class="mobile-underlying-symbol" id="mobile-underlying-symbol">-</span>
                     <span class="mobile-underlying-price" id="mobile-underlying-price">-</span>
+                    <button class="mobile-submit-idea-btn" id="mobile-submit-idea-btn" style="display:none;" title="Submit Trade Idea">💡</button>
+                    <a href="/api/logout" class="mobile-signout-header" style="display:none;" title="Sign Out">Sign Out</a>
                 </div>
                 <div class="header-logo">
                     <h1>Options<span>Ganster</span></h1>
@@ -2868,12 +3614,24 @@
                 <button class="controls-chevron" id="controls-chevron">⚙</button>
             </div>
             
+            <div class="settings-sheet" id="settings-sheet">
+            <div class="settings-sheet-header">
+                <span class="sheet-title">Settings</span>
+                <button class="sheet-done-btn" id="settings-done-btn">Done</button>
+            </div>
+            <div class="settings-sheet-body">
             <div class="controls-bar" id="controls-bar">
+                <div class="mobile-section-label">Contract</div>
+                <div class="mobile-contract-row">
                 <div class="control-group">
                     <label>Exp</label>
                     <select id="expiration" style="min-width: 140px;">
                         <option value="">Loading...</option>
                     </select>
+                    <button type="button" class="exp-calendar-trigger" id="exp-calendar-trigger" style="display:none;">
+                        <span id="exp-cal-display">Select date</span>
+                        <span class="cal-icon">📅</span>
+                    </button>
                 </div>
                 
                 <div class="control-group">
@@ -2881,6 +3639,26 @@
                     <select id="strike" style="min-width: 100px;">
                         <option value="">-</option>
                     </select>
+                    <button type="button" class="strike-matrix-trigger" id="strike-matrix-trigger" style="display:none;">
+                        <span id="strike-trigger-display">-</span>
+                        <span class="strike-trigger-chevron">▼</span>
+                    </button>
+                </div>
+                </div>
+
+                <!-- Strike Matrix Modal (popup on mobile) -->
+                <div class="strike-modal-overlay" id="strike-modal-overlay">
+                    <div class="strike-modal">
+                        <div class="strike-modal-header">
+                            <span class="strike-modal-title">Select Strike</span>
+                            <button type="button" class="strike-modal-close" id="strike-modal-close">&times;</button>
+                        </div>
+                        <div class="strike-matrix" id="strike-matrix">
+                            <div class="strike-matrix-inner" id="strike-matrix-inner">
+                                <!-- populated by JS -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="control-group" id="type-group">
@@ -2905,6 +3683,7 @@
                     </div>
                 </div>
                 
+                <div class="mobile-section-label">Time Range</div>
                 <div class="control-group" id="from-group">
                     <label>From</label>
                     <input type="date" id="start-date" style="width: 130px;">
@@ -2929,44 +3708,90 @@
                 <div class="mobile-date-range" id="mobile-date-range">
                     <div class="date-range-group">
                         <button class="date-range-btn" data-range="1">1D</button>
+                        <button class="date-range-btn" data-range="5">5D</button>
                         <button class="date-range-btn" data-range="7">1W</button>
                         <button class="date-range-btn" data-range="14">2W</button>
                         <button class="date-range-btn" data-range="30">1M</button>
                         <button class="date-range-btn" data-range="90">3M</button>
-                        <button class="date-range-btn" data-range="180">6M</button>
                     </div>
                 </div>
                 
+                <div class="mobile-section-label">Interval</div>
                 <div class="interval-buttons">
                     <button class="interval-btn" data-interval="1">1m</button>
                     <button class="interval-btn active" data-interval="5">5m</button>
                     <button class="interval-btn" data-interval="15">15m</button>
                     <button class="interval-btn" data-interval="60">1H</button>
                 </div>
-                
-                <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
-                <button class="live-btn" id="live-btn">⚪ LIVE</button>
-                <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 12px;min-width:auto" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
-                <!-- Mobile logout row (hidden on desktop, shown on mobile via CSS) -->
-                <div class="mobile-logout-row" style="display:none;">
-                    <a href="/api/logout" class="mobile-logout-btn">⏻ Sign Out</a>
-                </div>
             </div>
 
             <div class="filter-bar" id="filter-bar">
-                <div class="underlay-toggle">
+                <div class="mobile-section-label">Chart Overlay</div>
+                <!-- Mobile: chart type + confidence on same row -->
+                <div class="mobile-chart-conf-row" style="display:none;">
+                    <div class="underlay-toggle">
+                        <span class="underlay-label">Stock:</span>
+                        <div class="underlay-btn-group">
+                            <button class="underlay-btn" data-underlay="off">OFF</button>
+                            <button class="underlay-btn" data-underlay="line">LINE</button>
+                            <button class="underlay-btn active" data-underlay="candle">CANDLE</button>
+                        </div>
+                    </div>
+                    <div class="conf-toggle-group" style="border-left:1px solid #2a2e39;padding-left:10px;margin-left:0;">
+                        <span class="conf-label">Confidence:</span>
+                        <div class="conf-btn-group">
+                            <button class="conf-btn" data-conf="50">50%</button>
+                            <button class="conf-btn" data-conf="60">60%</button>
+                            <button class="conf-btn" data-conf="70">70%</button>
+                            <button class="conf-btn active" data-conf="80">80%</button>
+                            <button class="conf-btn" data-conf="90">90%</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mobile: signal toggles in 2x2 grid -->
+                <div class="mobile-section-label">Signal Filters</div>
+                <div class="mobile-signals-grid" style="display:none;">
+                    <div class="toggle-group bullish-color">
+                        <label class="toggle-switch"><input type="checkbox" class="filter-mirror" data-mirror="filter-strong_bullish"><span class="toggle-slider"></span></label>
+                        <span class="toggle-text">Strong Bullish</span>
+                    </div>
+                    <div class="toggle-group bearish-color">
+                        <label class="toggle-switch"><input type="checkbox" class="filter-mirror" data-mirror="filter-strong_bearish"><span class="toggle-slider"></span></label>
+                        <span class="toggle-text">Strong Bearish</span>
+                    </div>
+                    <div class="toggle-group bullish-color">
+                        <label class="toggle-switch"><input type="checkbox" class="filter-mirror" data-mirror="filter-test_support"><span class="toggle-slider"></span></label>
+                        <span class="toggle-text">Test Support</span>
+                    </div>
+                    <div class="toggle-group bearish-color">
+                        <label class="toggle-switch"><input type="checkbox" class="filter-mirror" data-mirror="filter-test_resistance"><span class="toggle-slider"></span></label>
+                        <span class="toggle-text">Test Resistance</span>
+                    </div>
+                    <div class="toggle-group bullish-color">
+                        <label class="toggle-switch"><input type="checkbox" class="filter-mirror" data-mirror="filter-climax_bottom"><span class="toggle-slider"></span></label>
+                        <span class="toggle-text">Climax Bottom</span>
+                    </div>
+                    <div class="toggle-group bearish-color">
+                        <label class="toggle-switch"><input type="checkbox" class="filter-mirror" data-mirror="filter-climax_top"><span class="toggle-slider"></span></label>
+                        <span class="toggle-text">Climax Top</span>
+                    </div>
+                </div>
+
+                <!-- Desktop: original layout (hidden on mobile) -->
+                <div class="underlay-toggle desktop-filter-item">
                     <span class="underlay-label" id="underlay-label">Stock:</span>
                     <div class="underlay-btn-group">
                         <button class="underlay-btn" data-underlay="off" id="underlay-off">OFF</button>
-                        <button class="underlay-btn active" data-underlay="line" id="underlay-line">LINE</button>
-                        <button class="underlay-btn" data-underlay="candle" id="underlay-candle">CANDLE</button>
+                        <button class="underlay-btn" data-underlay="line" id="underlay-line">LINE</button>
+                        <button class="underlay-btn active" data-underlay="candle" id="underlay-candle">CANDLE</button>
                     </div>
                 </div>
 
                 <span class="filter-label">Signals:</span>
 
-                <div class="conf-toggle-group">
-                    <span class="conf-label">Min Conf:</span>
+                <div class="conf-toggle-group desktop-filter-item">
+                    <span class="conf-label">Confidence:</span>
                     <div class="conf-btn-group">
                         <button class="conf-btn" data-conf="50">50%</button>
                         <button class="conf-btn" data-conf="60">60%</button>
@@ -2976,71 +3801,79 @@
                     </div>
                 </div>
 
-                <div class="toggle-group bullish-color">
+                <div class="toggle-group bullish-color desktop-filter-item">
                     <label class="toggle-switch"><input type="checkbox" id="filter-strong_bullish"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-strong_bullish">Strong Bullish</span>
                 </div>
 
-                <div class="toggle-group bearish-color">
+                <div class="toggle-group bearish-color desktop-filter-item">
                     <label class="toggle-switch"><input type="checkbox" id="filter-strong_bearish"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-strong_bearish">Strong Bearish</span>
                 </div>
 
-                <div class="toggle-group bullish-color">
+                <div class="toggle-group bullish-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-accumulation"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-accumulation">Accumulation</span>
                 </div>
 
-                <div class="toggle-group bearish-color">
+                <div class="toggle-group bearish-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-distribution"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-distribution">Distribution</span>
                 </div>
 
-                <div class="toggle-group bullish-color">
+                <div class="toggle-group bullish-color desktop-filter-item">
                     <label class="toggle-switch"><input type="checkbox" id="filter-test_support"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-test_support">Test Support</span>
                 </div>
 
-                <div class="toggle-group bearish-color">
+                <div class="toggle-group bearish-color desktop-filter-item">
                     <label class="toggle-switch"><input type="checkbox" id="filter-test_resistance"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-test_resistance">Test Resistance</span>
                 </div>
 
-                <div class="toggle-group bullish-color">
+                <div class="toggle-group bullish-color desktop-filter-item">
                     <label class="toggle-switch"><input type="checkbox" id="filter-climax_bottom"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-climax_bottom">Climax Bottom</span>
                 </div>
 
-                <div class="toggle-group bearish-color">
+                <div class="toggle-group bearish-color desktop-filter-item">
                     <label class="toggle-switch"><input type="checkbox" id="filter-climax_top"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-climax_top">Climax Top</span>
                 </div>
 
-                <div class="toggle-group bullish-color">
+                <div class="toggle-group bullish-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-weak_down"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-weak_down">Weak Down</span>
                 </div>
 
-                <div class="toggle-group bearish-color">
+                <div class="toggle-group bearish-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-weak_up"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-weak_up">Weak Up</span>
                 </div>
 
-                <div class="toggle-group bullish-color">
+                <div class="toggle-group bullish-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-no_supply"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-no_supply">No Supply</span>
                 </div>
 
-                <div class="toggle-group bearish-color">
+                <div class="toggle-group bearish-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-no_demand"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-no_demand">No Demand</span>
                 </div>
 
-                <div class="toggle-group neutral-color">
+                <div class="toggle-group neutral-color" style="display:none">
                     <label class="toggle-switch"><input type="checkbox" id="filter-neutral"><span class="toggle-slider"></span></label>
                     <span class="toggle-text" data-for="filter-neutral">Neutral</span>
                 </div>
             </div>
+            </div><!-- /.settings-sheet-body -->
+            <!-- Mobile: Analyze + LIVE + MOCK sticky footer -->
+            <div class="mobile-action-row" style="display:none;">
+                <button class="analyze-btn" id="analyze-btn">▶ Analyze</button>
+                <button class="live-btn" id="live-btn">⚪ LIVE</button>
+                <button class="live-btn" id="mock-btn" style="background:#2a2e39;color:#787b86;font-size:11px;padding:6px 8px;min-width:auto" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
+            </div>
+            </div><!-- /.settings-sheet -->
             
             <div class="chart-area">
                 <div class="charts-container">
@@ -3051,11 +3884,14 @@
                 
                 <!-- RIGHT: Analysis Sidebar -->
                 <div class="analysis-sidebar" id="analysis-sidebar">
+                    <div class="analysis-sheet-header">
+                        <span class="sheet-title">Analysis</span>
+                        <button class="sheet-done-btn" id="analysis-done-btn">Done</button>
+                    </div>
                     <div class="sidebar-tabs">
                         <button class="sidebar-tab active" data-tab="composite">Composite</button>
                         <button class="sidebar-tab" data-tab="analysis">VPA</button>
                         <button class="sidebar-tab" data-tab="signals">Signals</button>
-                        <button class="mobile-close-btn" id="analysis-close-btn" aria-label="Close Analysis">×</button>
                     </div>
                     
                     <div class="sidebar-content" id="sidebar-content">
@@ -3215,6 +4051,23 @@
             <span class="nav-badge" id="nav-analysis-badge"></span>
         </button>
     </nav>
+
+    <!-- Exp Calendar Overlay (mobile) -->
+    <div class="exp-calendar-overlay" id="exp-calendar-overlay">
+        <div class="exp-calendar-card">
+            <div class="exp-cal-header">
+                <button id="exp-cal-prev">‹</button>
+                <span class="cal-title" id="exp-cal-month-label">February 2026</span>
+                <button id="exp-cal-next">›</button>
+            </div>
+            <div class="exp-cal-grid">
+                <div class="exp-cal-weekdays">
+                    <span>SU</span><span>MO</span><span>TU</span><span>WE</span><span>TH</span><span>FR</span><span>SA</span>
+                </div>
+                <div class="exp-cal-days" id="exp-cal-days"></div>
+            </div>
+        </div>
+    </div>
     
     <script>
         // ===== STATE =====
@@ -3301,7 +4154,7 @@
         let lastVpaAction = null;
 
         // Underlying underlay state
-        let underlayMode = 'line';  // 'off', 'line', 'candle'
+        let underlayMode = 'candle';  // 'off', 'line', 'candle'
 
         // User role/auth info
         let currentUser = null; // {email, role, display_name}
@@ -3448,6 +4301,36 @@
             });
         });
 
+        // Sync mobile mirror checkboxes with desktop originals
+        document.querySelectorAll('.filter-mirror').forEach(mirror => {
+            const targetId = mirror.dataset.mirror;
+            const target = document.getElementById(targetId);
+            if (!target) return;
+            // Mirror → Desktop
+            mirror.addEventListener('change', () => {
+                target.checked = mirror.checked;
+                target.dispatchEvent(new Event('change'));
+            });
+            // Desktop → Mirror (keep in sync)
+            target.addEventListener('change', () => {
+                mirror.checked = target.checked;
+            });
+        });
+
+        // Mobile signals grid toggle-text click
+        document.querySelectorAll('.mobile-signals-grid .toggle-text').forEach(label => {
+            const cb = label.closest('.toggle-group').querySelector('input[type=checkbox]');
+            if (cb) {
+                label.addEventListener('click', () => {
+                    cb.checked = !cb.checked;
+                    cb.dispatchEvent(new Event('change'));
+                });
+                cb.addEventListener('change', () => {
+                    label.classList.toggle('active', cb.checked);
+                });
+            }
+        });
+
         // Signal type constants
         const BULLISH_SIGNALS = [
             'strong_bullish', 'accumulation', 'test_support', 'climax_bottom', 
@@ -3528,12 +4411,13 @@
 
         function openWatchlist() {
             if (isMobile()) {
+                closeAnalysis();
+                collapseControls();
                 const sidebar = document.getElementById('watchlist-sidebar');
-                sidebar.classList.remove('collapsed');   // collapsed sets width:0, must remove
+                sidebar.classList.remove('collapsed');
                 sidebar.classList.add('mobile-open');
                 document.getElementById('backdrop').classList.add('active');
                 document.getElementById('mobile-action-banner').classList.remove('visible');
-                setActiveNav('nav-watchlist');
             }
         }
 
@@ -3592,13 +4476,12 @@
 
         function openAnalysis() {
             if (isMobile()) {
+                closeWatchlist();
+                collapseControls();
                 document.getElementById('analysis-sidebar').classList.add('mobile-open');
                 document.getElementById('backdrop').classList.add('active');
-                // Hide signal peek and action banner when analysis is open
                 document.getElementById('signal-peek').classList.remove('visible');
                 document.getElementById('mobile-action-banner').classList.remove('visible');
-                // Update nav highlight
-                setActiveNav('nav-analysis');
             }
         }
 
@@ -3632,6 +4515,7 @@
         function closeAllMobilePanels() {
             closeWatchlist();
             closeAnalysis();
+            collapseControls();
         }
 
         function handleResize() {
@@ -3684,18 +4568,21 @@
         // ===== CONTROLS COLLAPSE FUNCTIONS =====
         function collapseControls() {
             if (isMobile()) {
-                document.getElementById('controls-bar').classList.add('collapsed');
-                document.getElementById('controls-summary').classList.add('active');
-                document.getElementById('filter-bar').style.display = 'none';
+                document.getElementById('settings-sheet').classList.remove('open');
+                // Restore action banner if it was visible
+                const banner = document.getElementById('mobile-action-banner');
+                if (banner && lastCompositeResult) banner.classList.add('visible');
                 controlsCollapsed = true;
             }
         }
         
         function expandControls() {
             if (isMobile()) {
-                document.getElementById('controls-bar').classList.remove('collapsed');
-                document.getElementById('controls-summary').classList.remove('active');
-                document.getElementById('filter-bar').style.display = '';
+                closeWatchlist();
+                closeAnalysis();
+                document.getElementById('settings-sheet').classList.add('open');
+                const banner = document.getElementById('mobile-action-banner');
+                if (banner) banner.classList.remove('visible');
                 controlsCollapsed = false;
             }
         }
@@ -4472,9 +5359,11 @@
         }
         
         // ===== EXPIRATIONS & STRIKES =====
+        let cachedExpirations = []; // Store raw exp dates for calendar
         async function loadExpirations(symbol, autoAnalyze = false) {
             const select = document.getElementById('expiration');
             select.innerHTML = '<option value="">Loading...</option>';
+            cachedExpirations = [];
             
             const maxRetries = 3;
             for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -4489,6 +5378,7 @@
                     
                     const data = await res.json();
                     const today = new Date();
+                    cachedExpirations = data.expirations || [];
                     
                     select.innerHTML = data.expirations.map(exp => {
                         const expDate = new Date(exp + 'T00:00:00');
@@ -4500,6 +5390,10 @@
                     
                     if (data.expirations.length > 0) {
                         await loadStrikes(symbol, data.expirations[0], autoAnalyze);
+                    }
+                    // Init mobile calendar picker
+                    if (isMobile()) {
+                        initExpCalendar();
                     }
                     return;  // success
                 } catch (e) {
@@ -4527,10 +5421,160 @@
             });
             document.getElementById('expiration').parentNode.appendChild(btn);
         }
+
+        // ===== EXP CALENDAR PICKER (Mobile) =====
+        let calViewDate = new Date(); // Current month being shown in calendar
+
+        function initExpCalendar() {
+            if (!isMobile()) return;
+            const select = document.getElementById('expiration');
+            const trigger = document.getElementById('exp-calendar-trigger');
+            if (!trigger) return;
+            // On mobile, hide the native select, show calendar trigger
+            select.style.display = 'none';
+            trigger.style.display = 'flex';
+            // Sync display text with current select value
+            syncExpCalDisplay();
+        }
+
+        function syncExpCalDisplay() {
+            const select = document.getElementById('expiration');
+            const display = document.getElementById('exp-cal-display');
+            if (!display) return;
+            const opt = select.options[select.selectedIndex];
+            if (opt && opt.value) {
+                display.textContent = opt.textContent;
+            } else {
+                display.textContent = 'Select date';
+            }
+        }
+
+        function openExpCalendar() {
+            const overlay = document.getElementById('exp-calendar-overlay');
+            // Set view month to current selection or today
+            const select = document.getElementById('expiration');
+            if (select.value) {
+                calViewDate = new Date(select.value + 'T00:00:00');
+            } else {
+                calViewDate = new Date();
+            }
+            renderExpCalendar();
+            overlay.classList.add('open');
+        }
+
+        function closeExpCalendar() {
+            document.getElementById('exp-calendar-overlay').classList.remove('open');
+        }
+
+        function renderExpCalendar() {
+            const container = document.getElementById('exp-cal-days');
+            const label = document.getElementById('exp-cal-month-label');
+            const year = calViewDate.getFullYear();
+            const month = calViewDate.getMonth();
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const selectedVal = document.getElementById('expiration').value;
+
+            label.textContent = calViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+            // Build set of valid dates in this month
+            const validDates = new Set();
+            cachedExpirations.forEach(exp => {
+                const d = new Date(exp + 'T00:00:00');
+                if (d.getFullYear() === year && d.getMonth() === month) {
+                    validDates.add(d.getDate());
+                }
+            });
+
+            // First day of month and number of days
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            let html = '';
+            // Empty cells for offset
+            for (let i = 0; i < firstDay; i++) {
+                html += '<div class="exp-cal-day empty"></div>';
+            }
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                const isValid = validDates.has(d);
+                const isSelected = dateStr === selectedVal;
+                const isToday = (d === today.getDate() && month === today.getMonth() && year === today.getFullYear());
+                let cls = 'exp-cal-day';
+                if (isValid) cls += ' valid';
+                if (isSelected) cls += ' selected';
+                if (isToday) cls += ' today';
+                html += `<div class="${cls}" data-date="${dateStr}">${d}</div>`;
+            }
+            container.innerHTML = html;
+
+            // Attach click handlers to valid days
+            container.querySelectorAll('.exp-cal-day.valid').forEach(el => {
+                el.addEventListener('click', () => {
+                    const date = el.dataset.date;
+                    const select = document.getElementById('expiration');
+                    select.value = date;
+                    select.dispatchEvent(new Event('change'));
+                    syncExpCalDisplay();
+                    closeExpCalendar();
+                });
+            });
+        }
+
+        // Calendar trigger and nav button event setup (called after DOM ready)
+        function setupExpCalendarEvents() {
+            const trigger = document.getElementById('exp-calendar-trigger');
+            if (trigger) {
+                trigger.addEventListener('click', () => openExpCalendar());
+            }
+            const overlay = document.getElementById('exp-calendar-overlay');
+            if (overlay) {
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) closeExpCalendar();
+                });
+            }
+            document.getElementById('exp-cal-prev')?.addEventListener('click', () => {
+                calViewDate.setMonth(calViewDate.getMonth() - 1);
+                renderExpCalendar();
+            });
+            document.getElementById('exp-cal-next')?.addEventListener('click', () => {
+                calViewDate.setMonth(calViewDate.getMonth() + 1);
+                renderExpCalendar();
+            });
+        }
         
+        // Sync strike matrix selection to match the hidden select value
+        function syncStrikeMatrix(scrollIntoView = true) {
+            const select = document.getElementById('strike');
+            const val = select?.value;
+            const matrixInner = document.getElementById('strike-matrix-inner');
+            // Update trigger button display
+            const triggerDisplay = document.getElementById('strike-trigger-display');
+            if (triggerDisplay) {
+                triggerDisplay.textContent = val || '-';
+            }
+            if (!matrixInner || !val) return;
+            matrixInner.querySelectorAll('.strike-cell').forEach(c => c.classList.remove('selected'));
+            const target = matrixInner.querySelector(`.strike-cell[data-strike="${val}"]`);
+            if (target) {
+                target.classList.add('selected');
+                if (scrollIntoView) {
+                    requestAnimationFrame(() => {
+                        const wrapper = document.getElementById('strike-matrix');
+                        if (wrapper) {
+                            const offset = target.offsetTop - wrapper.offsetHeight / 2 + target.offsetHeight / 2;
+                            wrapper.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+                        }
+                    });
+                }
+            }
+        }
+
         async function loadStrikes(symbol, expiration, autoAnalyze = false) {
             const select = document.getElementById('strike');
             select.innerHTML = '<option value="">Loading...</option>';
+            const matrixInner = document.getElementById('strike-matrix-inner');
+            if (matrixInner) matrixInner.innerHTML = '';
             
             try {
                 // Use watchlistData price if available (no extra API call)
@@ -4551,6 +5595,7 @@
                 if (!res.ok) throw new Error('Failed to load');
                 
                 const data = await res.json();
+                const right = document.getElementById('right')?.value || 'C';
                 
                 // Find ATM strike
                 let atmStrike = data.strikes.reduce((prev, curr) => 
@@ -4562,6 +5607,37 @@
                     return `<option value="${strike}" ${isATM ? 'selected' : ''}>${strike}${isATM ? ' (ATM)' : ''}</option>`;
                 }).join('');
 
+                // Update trigger display
+                const triggerDisplay = document.getElementById('strike-trigger-display');
+                if (triggerDisplay) {
+                    triggerDisplay.textContent = atmStrike || '-';
+                }
+
+                // Build strike matrix for mobile
+                if (matrixInner) {
+                    matrixInner.innerHTML = data.strikes.map(strike => {
+                        const isATM = strike === atmStrike;
+                        const isITM = right === 'C' ? strike < underlyingPrice : strike > underlyingPrice;
+                        const isOTM = right === 'C' ? strike > underlyingPrice : strike < underlyingPrice;
+                        let tag = isATM ? 'ATM' : (isITM ? 'ITM' : 'OTM');
+                        let cls = isATM ? 'atm selected' : (isITM ? 'itm' : 'otm');
+                        return `<div class="strike-cell ${cls}" data-strike="${strike}">
+                            <span class="strike-val">${strike}</span>
+                            <span class="strike-tag">${tag}</span>
+                        </div>`;
+                    }).join('');
+                    
+                    // Scroll ATM into center of grid
+                    requestAnimationFrame(() => {
+                        const wrapper = document.getElementById('strike-matrix');
+                        const atmCell = matrixInner.querySelector('.strike-cell.atm');
+                        if (wrapper && atmCell) {
+                            const offset = atmCell.offsetTop - wrapper.offsetHeight / 2 + atmCell.offsetHeight / 2;
+                            wrapper.scrollTop = Math.max(0, offset);
+                        }
+                    });
+                }
+
                 // Auto-analyze with ATM strike + default settings
                 if (autoAnalyze && atmStrike) {
                     analyze().catch(e => console.warn('Auto-analyze failed:', e));
@@ -4569,6 +5645,7 @@
                 
             } catch (e) {
                 select.innerHTML = '<option value="">Error</option>';
+                if (matrixInner) matrixInner.innerHTML = '<div style="color:#787b86;font-size:12px;padding:8px;">Error loading strikes</div>';
             }
         }
         
@@ -4611,6 +5688,15 @@
                     document.querySelectorAll('.underlay-btn').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     underlayMode = btn.dataset.underlay;
+                    // Collapse/expand stock chart section based on mode
+                    const stockEl = document.getElementById('stock-chart');
+                    if (stockEl) {
+                        if (underlayMode === 'off') {
+                            stockEl.style.display = 'none';
+                        } else {
+                            stockEl.style.display = '';
+                        }
+                    }
                     applyUnderlay();
                 });
             });
@@ -5164,7 +6250,7 @@
             showToast(
                 `<span class="toast-icon">${icon}</span>` +
                 `<div class="toast-body">` +
-                `<span class="toast-title">VPA Signal: ${oldAction} → ${newAction}</span>` +
+                `<span class="toast-title">Signal: ${oldAction} → ${newAction}</span>` +
                 `<span class="toast-detail">${sigName} · Conf ${conf} · $${signal.price.toFixed(2)}</span>` +
                 `</div>`,
                 cls, 6000
@@ -5378,6 +6464,8 @@
             }
             // Stop live mode when expiration changes
             stopLiveMode();
+            // Sync mobile calendar display
+            syncExpCalDisplay();
         });
         
         document.getElementById('strike').addEventListener('change', () => {
@@ -5388,6 +6476,66 @@
                 analyze().catch(e => console.warn('Auto-analyze on strike change failed:', e));
             }
         });
+
+        // Strike modal open/close helpers
+        function openStrikeModal() {
+            const overlay = document.getElementById('strike-modal-overlay');
+            if (overlay) {
+                overlay.classList.add('open');
+                // Delay scroll so the modal is rendered first
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        const val = document.getElementById('strike')?.value;
+                        const matrixInner = document.getElementById('strike-matrix-inner');
+                        const wrapper = document.getElementById('strike-matrix');
+                        if (!matrixInner || !wrapper || !val) return;
+                        const target = matrixInner.querySelector(`.strike-cell[data-strike="${val}"]`);
+                        if (target) {
+                            const offset = target.offsetTop - wrapper.clientHeight / 2 + target.offsetHeight / 2;
+                            wrapper.scrollTop = Math.max(0, offset);
+                        }
+                    }, 50);
+                });
+            }
+        }
+        function closeStrikeModal() {
+            const overlay = document.getElementById('strike-modal-overlay');
+            if (overlay) overlay.classList.remove('open');
+        }
+
+        // Trigger button opens modal
+        document.getElementById('strike-matrix-trigger')?.addEventListener('click', openStrikeModal);
+
+        // Close button
+        document.getElementById('strike-modal-close')?.addEventListener('click', closeStrikeModal);
+
+        // Backdrop click closes modal
+        document.getElementById('strike-modal-overlay')?.addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeStrikeModal();
+        });
+
+        // Strike matrix click handler (mobile)
+        document.getElementById('strike-matrix-inner')?.addEventListener('click', (e) => {
+            const cell = e.target.closest('.strike-cell');
+            if (!cell) return;
+            const val = cell.dataset.strike;
+            // Update hidden select
+            const select = document.getElementById('strike');
+            select.value = val;
+            select.dispatchEvent(new Event('change'));
+            // Update matrix selection visuals
+            document.querySelectorAll('#strike-matrix-inner .strike-cell').forEach(c => {
+                c.classList.remove('selected');
+            });
+            cell.classList.add('selected');
+            // Update trigger display
+            const triggerDisplay = document.getElementById('strike-trigger-display');
+            if (triggerDisplay) triggerDisplay.textContent = val;
+            // Close modal after selection
+            closeStrikeModal();
+        });
+
+        // (nav buttons removed — modal uses full scroll)
         
         document.getElementById('analyze-btn').addEventListener('click', analyze);
         document.getElementById('summary-analyze-btn').addEventListener('click', analyze);
@@ -5625,6 +6773,11 @@
                         if (submitBtn && currentUser.role === 'admin') {
                             submitBtn.classList.add('visible');
                         }
+                        // Also show mobile submit idea btn for admin
+                        const mobileSubmitBtn = document.getElementById('mobile-submit-idea-btn');
+                        if (mobileSubmitBtn && currentUser.role === 'admin') {
+                            mobileSubmitBtn.style.display = 'inline-flex';
+                        }
                     }
                 } catch (e) {
                     console.warn('Could not fetch user role:', e);
@@ -5646,6 +6799,17 @@
             // Open modal — populate with current contract info
             if (submitBtn) {
                 submitBtn.addEventListener('click', () => {
+                    openIdeaModal();
+                });
+            }
+            // Mobile submit idea button — same action
+            const mobileSubmitBtnEl = document.getElementById('mobile-submit-idea-btn');
+            if (mobileSubmitBtnEl) {
+                mobileSubmitBtnEl.addEventListener('click', () => {
+                    openIdeaModal();
+                });
+            }
+            function openIdeaModal() {
                     const sym = currentSymbol || '-';
                     const strike = document.getElementById('strike')?.value || '-';
                     const right = document.querySelector('.call-put-btn.active')?.dataset?.right || 'C';
@@ -5666,7 +6830,6 @@
                     ideaNoteEl.value = '';
 
                     modalOverlay.classList.add('open');
-                });
             }
 
             // Close modal
@@ -5951,6 +7114,7 @@
                 const strikeSelect = document.getElementById('strike');
                 if (strikeSelect.querySelector(`option[value="${idea.strike}"]`)) {
                     strikeSelect.value = String(idea.strike);
+                    syncStrikeMatrix();
                 }
 
                 // Analyze
@@ -5969,8 +7133,8 @@
         document.getElementById('mobile-analysis-toggle').addEventListener('click', toggleAnalysis);
 
         // Mobile close buttons
-        document.getElementById('watchlist-close-btn').addEventListener('click', closeWatchlist);
-        document.getElementById('analysis-close-btn').addEventListener('click', closeAnalysis);
+        document.getElementById('watchlist-done-btn').addEventListener('click', closeWatchlist);
+        document.getElementById('analysis-done-btn').addEventListener('click', closeAnalysis);
 
         // Backdrop click to close
         document.getElementById('backdrop').addEventListener('click', closeAllMobilePanels);
@@ -5983,8 +7147,8 @@
             const sidebar = document.getElementById('watchlist-sidebar');
             if (sidebar.classList.contains('mobile-open') && !document.querySelector('.watchlist-tab[data-tab="ideas"].active')) {
                 closeWatchlist();
+                setActiveNav('nav-chart');
             } else {
-                closeAnalysis();
                 if (window.switchSidebarTab) window.switchSidebarTab('watchlist');
                 openWatchlist();
                 setActiveNav('nav-watchlist');
@@ -6000,24 +7164,29 @@
 
         document.getElementById('nav-settings').addEventListener('click', () => {
             if (!controlsCollapsed) {
-                // Settings already open — close it and go back to chart
-                closeAllMobilePanels();
-                setActiveNav('nav-chart');
                 collapseControls();
+                setActiveNav('nav-chart');
             } else {
-                closeAllMobilePanels();
-                setActiveNav('nav-settings');
-                // Expand controls for editing
                 expandControls();
+                setActiveNav('nav-settings');
             }
         });
+
+        // Done button in settings sheet header
+        document.getElementById('settings-done-btn').addEventListener('click', () => {
+            collapseControls();
+            setActiveNav('nav-chart');
+        });
+
+        // Setup mobile exp calendar
+        setupExpCalendarEvents();
 
         document.getElementById('nav-ideas').addEventListener('click', () => {
             const sidebar = document.getElementById('watchlist-sidebar');
             if (sidebar.classList.contains('mobile-open') && document.querySelector('.watchlist-tab[data-tab="ideas"].active')) {
                 closeWatchlist();
+                setActiveNav('nav-chart');
             } else {
-                closeAnalysis();
                 if (window.switchSidebarTab) window.switchSidebarTab('ideas');
                 openWatchlist();
                 setActiveNav('nav-ideas');
@@ -6028,9 +7197,10 @@
             const sidebar = document.getElementById('analysis-sidebar');
             if (sidebar.classList.contains('mobile-open')) {
                 closeAnalysis();
+                setActiveNav('nav-chart');
             } else {
-                closeWatchlist();
                 openAnalysis();
+                setActiveNav('nav-analysis');
             }
         });
 
@@ -6124,6 +7294,7 @@
                 const strikeSelect = document.getElementById('strike');
                 if (strikeSelect.querySelector(`option[value="${urlP.strike}"]`)) {
                     strikeSelect.value = urlP.strike;
+                    syncStrikeMatrix();
                 }
                 // Now analyze with all params set
                 analyze().catch(e => console.warn('URL-param auto-analyze failed:', e));
