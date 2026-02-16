@@ -2110,6 +2110,11 @@
             color: #d1d4dc;
         }
 
+        /* Hide mobile-only elements on desktop */
+        .exp-calendar-overlay {
+            display: none !important;
+        }
+
         /* ===== MOBILE RESPONSIVE (≤768px) ===== */
         @media (max-width: 768px) {
             /* Hide sidebar tab bar on mobile — bottom nav controls which panel shows */
@@ -2873,7 +2878,6 @@
                 color: #636983;
             }
             .exp-calendar-overlay {
-                display: none;
                 position: fixed;
                 top: 0; left: 0; right: 0; bottom: 0;
                 background: rgba(0,0,0,0.6);
@@ -2882,7 +2886,7 @@
                 justify-content: center;
             }
             .exp-calendar-overlay.open {
-                display: flex;
+                display: flex !important;
             }
             .exp-calendar-card {
                 background: #1a1e2e;
@@ -6812,7 +6816,7 @@
             function openIdeaModal() {
                     const sym = currentSymbol || '-';
                     const strike = document.getElementById('strike')?.value || '-';
-                    const right = document.querySelector('.call-put-btn.active')?.dataset?.right || 'C';
+                    const right = document.getElementById('right')?.value || 'C';
                     const exp = document.getElementById('expiration')?.value || '-';
                     const priceText = document.getElementById('contract-price')?.textContent || '0';
                     const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || 0;
@@ -6862,7 +6866,7 @@
                     submitFinalBtn.textContent = 'Submitting...';
 
                     const strike = parseFloat(document.getElementById('strike')?.value) || 0;
-                    const right = document.querySelector('.call-put-btn.active')?.dataset?.right || 'C';
+                    const right = document.getElementById('right')?.value || 'C';
                     const exp = document.getElementById('expiration')?.value || '';
                     const priceText = document.getElementById('contract-price')?.textContent || '0';
                     const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || 0;
