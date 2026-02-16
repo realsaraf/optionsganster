@@ -701,7 +701,105 @@
             color: #ef5350;
             background: rgba(239, 83, 80, 0.1);
         }
-        
+
+        /* ===== FAIR VALUE CARD ===== */
+        .fv-verdict-badge {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
+        .fv-verdict-badge.cheap {
+            background: rgba(38, 166, 154, 0.2);
+            color: #26a69a;
+        }
+        .fv-verdict-badge.expensive {
+            background: rgba(239, 83, 80, 0.2);
+            color: #ef5350;
+        }
+        .fv-verdict-badge.fair {
+            background: rgba(255, 193, 7, 0.15);
+            color: #ffc107;
+        }
+        .fv-verdict-badge.nomarket {
+            background: rgba(139, 148, 158, 0.15);
+            color: #8b949e;
+        }
+        .fv-card-body {
+            margin-top: 6px;
+        }
+        .fv-card-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .fv-main-row .fv-card-col {
+            flex: 1;
+            background: #0d1117;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .fv-vol-row .fv-card-col {
+            flex: 1;
+            background: #0d1117;
+            padding: 8px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .fv-card-label {
+            font-size: 10px;
+            color: #787b86;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            letter-spacing: 0.3px;
+        }
+        .fv-card-value {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d1d4dc;
+        }
+        .fv-card-value.positive { color: #26a69a; }
+        .fv-card-value.negative { color: #ef5350; }
+        .fv-card-details {
+            font-size: 11px;
+            color: #8b949e;
+            padding: 6px 0 2px;
+            line-height: 1.5;
+        }
+        .fv-card-extra {
+            border-top: 1px solid #2a2e39;
+            padding-top: 8px;
+            margin-top: 4px;
+        }
+        .fv-card-extra .fv-card-col {
+            flex: 1;
+            background: #0d1117;
+            padding: 8px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .fv-toggle-btn {
+            display: block;
+            width: 100%;
+            background: none;
+            border: 1px solid #2a2e39;
+            border-radius: 4px;
+            color: #787b86;
+            font-size: 10px;
+            padding: 4px 0;
+            cursor: pointer;
+            margin-top: 6px;
+            text-align: center;
+        }
+        .fv-toggle-btn:hover {
+            color: #d1d4dc;
+            border-color: #363a45;
+        }
+
         /* ===== CONTROLS BAR ===== */
         /* Hide old dropdowns replaced by toggle buttons */
         #type-group, #from-group, #to-group {
@@ -3606,6 +3704,7 @@
                     </div>
                     <div class="contract-details" id="contract-details">Select a symbol</div>
                 </div>
+
                 <button class="submit-idea-btn" id="submit-idea-btn" title="Share this contract as a trade idea">💡 Submit Idea</button>
                 <a href="/api/logout" class="logout-btn" title="Sign Out">⏻ Logout</a>
             </div>
@@ -3918,6 +4017,54 @@
                                 <h4>Recommendation</h4>
                                 <div class="recommendation-box" id="comp-recommendation">Analyze an option to see composite signal</div>
                                 <div id="comp-warnings" style="margin-top:8px"></div>
+                            </div>
+
+                            <div class="composite-card" id="fv-card" style="display:none;">
+                                <h4>Fair Value <span class="fv-verdict-badge" id="fv-verdict"></span></h4>
+                                <div class="fv-card-body">
+                                    <div class="fv-card-row fv-main-row">
+                                        <div class="fv-card-col">
+                                            <div class="fv-card-label">Theoretical</div>
+                                            <div class="fv-card-value" id="fv-theo">-</div>
+                                        </div>
+                                        <div class="fv-card-col">
+                                            <div class="fv-card-label">Market</div>
+                                            <div class="fv-card-value" id="fv-market">-</div>
+                                        </div>
+                                        <div class="fv-card-col">
+                                            <div class="fv-card-label">Diff</div>
+                                            <div class="fv-card-value" id="fv-diff">-</div>
+                                        </div>
+                                    </div>
+                                    <div class="fv-card-row fv-vol-row">
+                                        <div class="fv-card-col">
+                                            <div class="fv-card-label">Hist Vol</div>
+                                            <div class="fv-card-value" id="fv-hv">-</div>
+                                        </div>
+                                        <div class="fv-card-col">
+                                            <div class="fv-card-label">Impl Vol</div>
+                                            <div class="fv-card-value" id="fv-iv">-</div>
+                                        </div>
+                                        <div class="fv-card-col">
+                                            <div class="fv-card-label">HV - IV</div>
+                                            <div class="fv-card-value" id="fv-hviv">-</div>
+                                        </div>
+                                    </div>
+                                    <div class="fv-card-details" id="fv-details"></div>
+                                    <div class="fv-card-extra" id="fv-extra" style="display:none;">
+                                        <div class="fv-card-row">
+                                            <div class="fv-card-col"><div class="fv-card-label">d₁</div><div class="fv-card-value" id="fv-d1">-</div></div>
+                                            <div class="fv-card-col"><div class="fv-card-label">d₂</div><div class="fv-card-value" id="fv-d2">-</div></div>
+                                            <div class="fv-card-col"><div class="fv-card-label">DTE</div><div class="fv-card-value" id="fv-dte">-</div></div>
+                                        </div>
+                                        <div class="fv-card-row">
+                                            <div class="fv-card-col"><div class="fv-card-label">Bid</div><div class="fv-card-value" id="fv-bid">-</div></div>
+                                            <div class="fv-card-col"><div class="fv-card-label">Ask</div><div class="fv-card-value" id="fv-ask">-</div></div>
+                                            <div class="fv-card-col"><div class="fv-card-label">Spread</div><div class="fv-card-value" id="fv-spread">-</div></div>
+                                        </div>
+                                    </div>
+                                    <button class="fv-toggle-btn" id="fv-toggle-btn" onclick="document.getElementById('fv-extra').style.display = document.getElementById('fv-extra').style.display === 'none' ? 'block' : 'none'; this.textContent = document.getElementById('fv-extra').style.display === 'none' ? 'Show Details ▾' : 'Hide Details ▴';">Show Details ▾</button>
+                                </div>
                             </div>
 
                             <div class="composite-card">
@@ -5883,6 +6030,9 @@
                     document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
                 }
                 
+                // Update fair value banner
+                updateFairValue(data.fair_value);
+                
                 // In mock-live mode, only update analysis panels — chart is fed by WS SOW/bars
                 if (!(liveMode && mockMode)) {
                     updateCharts(data);
@@ -5911,6 +6061,59 @@
                     chartsContainer.classList.remove('live-refreshing');
                 }
             }
+        }
+        
+        // Update fair value card in sidebar
+        function updateFairValue(fv) {
+            const card = document.getElementById('fv-card');
+            if (!fv) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = 'block';
+            
+            let cls = 'fair';
+            if (fv.verdict === 'CHEAP') cls = 'cheap';
+            else if (fv.verdict === 'EXPENSIVE') cls = 'expensive';
+            else if (fv.verdict === 'NO MARKET') cls = 'nomarket';
+            
+            // Verdict badge
+            const verdictEl = document.getElementById('fv-verdict');
+            verdictEl.textContent = fv.verdict;
+            verdictEl.className = `fv-verdict-badge ${cls}`;
+            
+            // Main prices
+            document.getElementById('fv-theo').textContent = `$${fv.theoretical_price.toFixed(2)}`;
+            document.getElementById('fv-market').textContent = fv.market_price > 0 ? `$${fv.market_price.toFixed(2)}` : '-';
+            
+            const diffEl = document.getElementById('fv-diff');
+            if (fv.market_price > 0) {
+                const sign = fv.pct_difference >= 0 ? '+' : '';
+                diffEl.textContent = `${sign}${fv.pct_difference.toFixed(1)}%`;
+                diffEl.className = `fv-card-value ${fv.pct_difference >= 0 ? 'positive' : 'negative'}`;
+            } else {
+                diffEl.textContent = '-';
+                diffEl.className = 'fv-card-value';
+            }
+            
+            // Volatility row
+            document.getElementById('fv-hv').textContent = `${(fv.historical_vol * 100).toFixed(1)}%`;
+            document.getElementById('fv-iv').textContent = `${(fv.market_iv * 100).toFixed(1)}%`;
+            const hvivEl = document.getElementById('fv-hviv');
+            hvivEl.textContent = `${fv.hv_vs_iv >= 0 ? '+' : ''}${(fv.hv_vs_iv * 100).toFixed(1)}%`;
+            hvivEl.className = `fv-card-value ${fv.hv_vs_iv >= 0 ? 'positive' : 'negative'}`;
+            
+            // Detail text
+            document.getElementById('fv-details').textContent = fv.detail;
+            
+            // Extra details
+            const dte = fv.time_to_expiry > 0 ? Math.round(fv.time_to_expiry * 365.25) : 0;
+            document.getElementById('fv-d1').textContent = fv.d1.toFixed(4);
+            document.getElementById('fv-d2').textContent = fv.d2.toFixed(4);
+            document.getElementById('fv-dte').textContent = `${dte}d`;
+            document.getElementById('fv-bid').textContent = `$${fv.bid.toFixed(2)}`;
+            document.getElementById('fv-ask').textContent = `$${fv.ask.toFixed(2)}`;
+            document.getElementById('fv-spread').textContent = `$${fv.spread.toFixed(2)}`;
         }
         
         function updateCharts(data) {

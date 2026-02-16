@@ -83,6 +83,111 @@
             color: #ef5350;
             background: rgba(239, 83, 80, 0.1);
         }
+
+        /* Fair Value Banner */
+        .fair-value-banner {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            margin-left: auto;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .fair-value-banner.visible {
+            display: flex;
+        }
+        .fair-value-banner.cheap {
+            background: rgba(38, 166, 154, 0.15);
+            border: 1px solid rgba(38, 166, 154, 0.4);
+        }
+        .fair-value-banner.expensive {
+            background: rgba(239, 83, 80, 0.15);
+            border: 1px solid rgba(239, 83, 80, 0.4);
+        }
+        .fair-value-banner.fair {
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
+        .fair-value-banner.nomarket {
+            background: rgba(139, 148, 158, 0.1);
+            border: 1px solid rgba(139, 148, 158, 0.3);
+        }
+        .fv-verdict {
+            font-weight: 700;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        .fv-verdict.cheap { color: #26a69a; }
+        .fv-verdict.expensive { color: #ef5350; }
+        .fv-verdict.fair { color: #ffc107; }
+        .fv-verdict.nomarket { color: #8b949e; }
+        .fv-prices {
+            display: flex;
+            gap: 10px;
+            color: #d1d4dc;
+        }
+        .fv-prices .fv-label {
+            color: #8b949e;
+            margin-right: 2px;
+        }
+        .fv-diff {
+            font-weight: 600;
+        }
+        .fv-diff.positive { color: #26a69a; }
+        .fv-diff.negative { color: #ef5350; }
+        .fv-vol-info {
+            color: #8b949e;
+            font-size: 11px;
+            border-left: 1px solid #363a45;
+            padding-left: 10px;
+        }
+        
+        /* Fair Value tooltip */
+        .fv-tooltip-trigger {
+            position: relative;
+            cursor: help;
+        }
+        .fv-tooltip-trigger:hover .fv-tooltip {
+            display: block;
+        }
+        .fv-tooltip {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            z-index: 1000;
+            background: #1e222d;
+            border: 1px solid #363a45;
+            border-radius: 6px;
+            padding: 12px;
+            min-width: 320px;
+            font-size: 12px;
+            color: #d1d4dc;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            white-space: normal;
+            line-height: 1.6;
+            margin-top: 4px;
+        }
+        .fv-tooltip .fv-tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+        .fv-tooltip .fv-tooltip-row .fv-tooltip-label {
+            color: #8b949e;
+        }
+        .fv-tooltip .fv-tooltip-divider {
+            border-top: 1px solid #2a2e39;
+            margin: 6px 0;
+        }
+        .fv-tooltip .fv-tooltip-detail {
+            color: #adb5bd;
+            font-style: italic;
+            margin-top: 6px;
+            font-size: 11px;
+        }
         
         /* Toolbar */
         .toolbar {
@@ -458,6 +563,18 @@
                 <div class="current-price" id="current-price">-</div>
                 <div class="price-change up" id="price-change">-</div>
             </div>
+        </div>
+        <div class="fair-value-banner" id="fair-value-banner">
+            <div class="fv-tooltip-trigger">
+                <span class="fv-verdict" id="fv-verdict">-</span>
+                <div class="fv-tooltip" id="fv-tooltip"></div>
+            </div>
+            <div class="fv-prices">
+                <span><span class="fv-label">Theo:</span> <span id="fv-theo">-</span></span>
+                <span><span class="fv-label">Mkt:</span> <span id="fv-market">-</span></span>
+                <span class="fv-diff" id="fv-diff">-</span>
+            </div>
+            <div class="fv-vol-info" id="fv-vol-info">-</div>
         </div>
     </div>
     
@@ -866,6 +983,114 @@
                 changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePct}%)`;
                 changeEl.className = `price-change ${change >= 0 ? 'up' : 'down'}`;
             }
+
+            // Update fair value banner
+            updateFairValue(data.fair_value);
+        }
+        
+        // Update fair value banner in header
+        function updateFairValue(fv) {
+            const banner = document.getElementById('fair-value-banner');
+            if (!fv) {
+                banner.classList.remove('visible');
+                return;
+            }
+            
+            // Determine CSS class from verdict
+            let cls = 'fair';
+            if (fv.verdict === 'CHEAP') cls = 'cheap';
+            else if (fv.verdict === 'EXPENSIVE') cls = 'expensive';
+            else if (fv.verdict === 'NO MARKET') cls = 'nomarket';
+            
+            banner.className = `fair-value-banner visible ${cls}`;
+            
+            // Verdict label
+            const verdictEl = document.getElementById('fv-verdict');
+            verdictEl.textContent = fv.verdict;
+            verdictEl.className = `fv-verdict ${cls}`;
+            
+            // Prices
+            document.getElementById('fv-theo').textContent = `$${fv.theoretical_price.toFixed(2)}`;
+            document.getElementById('fv-market').textContent = fv.market_price > 0 ? `$${fv.market_price.toFixed(2)}` : '-';
+            
+            // Diff
+            const diffEl = document.getElementById('fv-diff');
+            if (fv.market_price > 0) {
+                const sign = fv.pct_difference >= 0 ? '+' : '';
+                diffEl.textContent = `${sign}${fv.pct_difference.toFixed(1)}%`;
+                diffEl.className = `fv-diff ${fv.pct_difference >= 0 ? 'positive' : 'negative'}`;
+            } else {
+                diffEl.textContent = '-';
+                diffEl.className = 'fv-diff';
+            }
+            
+            // Vol info
+            const volInfo = document.getElementById('fv-vol-info');
+            volInfo.textContent = `HV ${(fv.historical_vol * 100).toFixed(1)}% | IV ${(fv.market_iv * 100).toFixed(1)}%`;
+            
+            // Tooltip with full details
+            const tooltip = document.getElementById('fv-tooltip');
+            const dte = fv.time_to_expiry > 0 ? Math.round(fv.time_to_expiry * 365.25) : 0;
+            tooltip.innerHTML = `
+                <div style="font-weight:700;margin-bottom:6px;color:#fff;">Black-Scholes Fair Value</div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Underlying (S)</span>
+                    <span>$${fv.underlying_price.toFixed(2)}</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Strike (K)</span>
+                    <span>$${fv.strike.toFixed(2)}</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">DTE</span>
+                    <span>${dte}d (T=${fv.time_to_expiry.toFixed(4)})</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Risk-Free Rate</span>
+                    <span>${(fv.risk_free_rate * 100).toFixed(2)}%</span>
+                </div>
+                <div class="fv-tooltip-divider"></div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Historical Vol (σ)</span>
+                    <span>${(fv.historical_vol * 100).toFixed(1)}%</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Market IV</span>
+                    <span>${(fv.market_iv * 100).toFixed(1)}%</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">HV − IV</span>
+                    <span style="color:${fv.hv_vs_iv >= 0 ? '#26a69a' : '#ef5350'}">${fv.hv_vs_iv >= 0 ? '+' : ''}${(fv.hv_vs_iv * 100).toFixed(1)}%</span>
+                </div>
+                <div class="fv-tooltip-divider"></div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">d₁</span>
+                    <span>${fv.d1.toFixed(4)}</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">d₂</span>
+                    <span>${fv.d2.toFixed(4)}</span>
+                </div>
+                <div class="fv-tooltip-divider"></div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Theoretical</span>
+                    <span style="font-weight:600">$${fv.theoretical_price.toFixed(4)}</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Market (mid)</span>
+                    <span>$${fv.market_price.toFixed(4)}</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Bid / Ask</span>
+                    <span>$${fv.bid.toFixed(2)} / $${fv.ask.toFixed(2)}</span>
+                </div>
+                <div class="fv-tooltip-row">
+                    <span class="fv-tooltip-label">Spread</span>
+                    <span>$${fv.spread.toFixed(2)} (${fv.spread_pct.toFixed(1)}%)</span>
+                </div>
+                <div class="fv-tooltip-divider"></div>
+                <div class="fv-tooltip-detail">${fv.detail}</div>
+            `;
         }
         
         // Update analysis panel

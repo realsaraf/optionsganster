@@ -28,6 +28,7 @@ from app.polygon_client import PolygonClient, polygon_client
 from app.vpa_engine import VPAEngine, VPASignal, VPAResult, vpa_engine
 from app.greeks_engine import GreeksSignalEngine, greeks_engine
 from app.live_feed import LiveFeedManager, live_feed_manager, mock_csv_playback, build_mock_sow
+from app.fair_value_engine import FairValueEngine, fair_value_engine
 
 logger = logging.getLogger("optionsganster")
 
@@ -371,6 +372,32 @@ class CompositeSignalResponse(BaseModel):
     warnings: list[str] = []       # Risk warnings (trend, expiry, premium floor)
 
 
+class FairValueResponse(BaseModel):
+    underlying_price: float
+    strike: float
+    time_to_expiry: float
+    risk_free_rate: float
+    historical_vol: float
+    dividend_yield: float
+    contract_type: str
+    theoretical_price: float
+    d1: float
+    d2: float
+    market_price: float
+    market_iv: float
+    price_difference: float
+    pct_difference: float
+    is_cheap: bool
+    is_expensive: bool
+    verdict: str
+    detail: str
+    bid: float
+    ask: float
+    spread: float
+    spread_pct: float
+    hv_vs_iv: float
+
+
 class AnalysisResponse(BaseModel):
     symbol: str
     expiration: str
@@ -383,6 +410,7 @@ class AnalysisResponse(BaseModel):
     composite: Optional[CompositeSignalResponse] = None
     underlying_bars: list[OHLCVBar] = []
     volume_regime: Optional[dict] = None
+    fair_value: Optional[FairValueResponse] = None
 
 
 class ExpirationResponse(BaseModel):
@@ -959,6 +987,7 @@ async def analyze_option(
 
         # ── Composite Greeks analysis ────────────────────
         composite_response = None
+        contract_snap = None
         try:
             import asyncio
             contract_snap, chain_snap = await asyncio.gather(
@@ -1052,6 +1081,68 @@ async def analyze_option(
         except Exception as comp_err:
             print(f"Composite analysis error (non-fatal): {comp_err}")
 
+        # ── Fair Value (Black-Scholes) ───────────────────
+        fair_value_response = None
+        try:
+            # Fetch daily closes for historical vol (30-day window needs ~45 daily prices)
+            daily_closes = await poly.get_stock_daily_ohlcv(symbol.upper(), num_days=45)
+
+            # Get bid/ask from contract snapshot (already fetched above)
+            fv_bid = 0.0
+            fv_ask = 0.0
+            fv_iv = 0.0
+            fv_underlying = 0.0
+            if contract_snap:
+                fv_bid = float(contract_snap.get("bid", 0) or 0)
+                fv_ask = float(contract_snap.get("ask", 0) or 0)
+                fv_iv = float(contract_snap.get("iv", 0) or 0)
+                fv_underlying = float(contract_snap.get("underlying_price", 0) or 0)
+            # Fallback underlying price from price cache
+            if fv_underlying <= 0:
+                try:
+                    fv_underlying = await poly.get_underlying_price(symbol.upper())
+                except Exception:
+                    pass
+
+            if daily_closes and fv_underlying > 0:
+                fv_result = fair_value_engine.analyze(
+                    underlying_price=fv_underlying,
+                    strike=strike,
+                    expiration=exp_date,
+                    contract_type=right.upper(),
+                    daily_closes=daily_closes,
+                    market_bid=fv_bid,
+                    market_ask=fv_ask,
+                    market_iv=fv_iv,
+                )
+                fair_value_response = FairValueResponse(
+                    underlying_price=fv_result.underlying_price,
+                    strike=fv_result.strike,
+                    time_to_expiry=fv_result.time_to_expiry,
+                    risk_free_rate=fv_result.risk_free_rate,
+                    historical_vol=fv_result.historical_vol,
+                    dividend_yield=fv_result.dividend_yield,
+                    contract_type=fv_result.contract_type,
+                    theoretical_price=fv_result.theoretical_price,
+                    d1=fv_result.d1,
+                    d2=fv_result.d2,
+                    market_price=fv_result.market_price,
+                    market_iv=fv_result.market_iv,
+                    price_difference=fv_result.price_difference,
+                    pct_difference=fv_result.pct_difference,
+                    is_cheap=fv_result.is_cheap,
+                    is_expensive=fv_result.is_expensive,
+                    verdict=fv_result.verdict,
+                    detail=fv_result.detail,
+                    bid=fv_result.bid,
+                    ask=fv_result.ask,
+                    spread=fv_result.spread,
+                    spread_pct=fv_result.spread_pct,
+                    hv_vs_iv=fv_result.hv_vs_iv,
+                )
+        except Exception as fv_err:
+            print(f"Fair value analysis error (non-fatal): {fv_err}")
+
         bars = [
             OHLCVBar(
                 datetime=str(row["datetime"]),
@@ -1103,6 +1194,7 @@ async def analyze_option(
             composite=composite_response,
             underlying_bars=underlying_bars,
             volume_regime=vol_regime_info,
+            fair_value=fair_value_response,
         )
 
     except HTTPException:

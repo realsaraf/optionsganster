@@ -239,6 +239,47 @@ class PolygonClient:
         else:
             self._stock_ohlcv_cache.clear()
 
+    # ── Stock daily bars (for historical volatility) ─────────
+
+    _stock_daily_cache: dict = {}
+
+    async def get_stock_daily_ohlcv(
+        self,
+        symbol: str,
+        num_days: int = 60,
+    ) -> list[float]:
+        """
+        Fetch daily closing prices for the underlying stock/ETF.
+        Returns a list of close prices (oldest first) for HV calculation.
+        Uses Polygon aggregates with 1-day interval.
+        """
+        cache_key = (symbol.upper(), num_days)
+        if cache_key in self._stock_daily_cache:
+            return self._stock_daily_cache[cache_key]
+
+        end_dt = date.today()
+        # Fetch extra calendar days to account for weekends/holidays
+        from datetime import timedelta
+        start_dt = end_dt - timedelta(days=int(num_days * 1.6))
+
+        url = (
+            f"{self.BASE_URL}/v2/aggs/ticker/{symbol.upper()}"
+            f"/range/1/day/{start_dt}/{end_dt}"
+        )
+        params = {"limit": 5000, "sort": "asc"}
+
+        try:
+            data = await self._get_json(url, params)
+            bars = data.get("results", [])
+            closes = [float(bar["c"]) for bar in bars if "c" in bar]
+            # Keep only the most recent num_days+1 closes
+            closes = closes[-(num_days + 1):]
+            self._stock_daily_cache[cache_key] = closes
+            return closes
+        except Exception as e:
+            print(f"[DailyOHLCV] Error fetching daily bars for {symbol}: {e}")
+            return []
+
     # ── Expirations ──────────────────────────────────────────
 
     async def get_expirations(self, symbol: str) -> list[date]:
@@ -494,6 +535,7 @@ class PolygonClient:
                     pass
 
             day = result.get("day", {})
+            last_quote = result.get("last_quote", {})
             parsed = {
                 "greeks": result.get("greeks", {}),
                 "iv": result.get("implied_volatility", 0),
@@ -503,6 +545,8 @@ class PolygonClient:
                 "break_even": result.get("break_even_price", 0) or 0,
                 "underlying_price": underlying_price,
                 "change_to_break_even": 0,
+                "bid": last_quote.get("bid", 0) or day.get("close", 0) or 0,
+                "ask": last_quote.get("ask", 0) or day.get("close", 0) or 0,
             }
             self._contract_snapshot_cache[cache_key] = parsed
             return parsed
