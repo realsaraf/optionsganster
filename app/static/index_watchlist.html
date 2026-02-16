@@ -4092,6 +4092,12 @@
                                 <div id="uoa-container"></div>
                             </div>
 
+                            <div class="composite-card" id="sr-card" style="display:none">
+                                <h4>Support / Resistance</h4>
+                                <div id="sr-summary"></div>
+                                <div id="sr-levels-list" style="margin-top:8px"></div>
+                            </div>
+
                             <div class="composite-card">
                                 <h4>Factor Breakdown</h4>
                                 <div class="factor-list" id="factor-list">
@@ -4319,6 +4325,8 @@
         let underlayBarsData = [];   // raw underlying bars from API
         let pocLine = null;          // Point of Control price line on stock chart
         let currentPOC = null;       // Current POC price for autoscale
+        let _srPriceLines = [];      // S/R price lines on stock chart
+        let _srData = null;          // support_resistance data from API
 
         // Unified timestamp data for multi-chart sync (ensures all charts share
         // the same set of timestamps so logical-range sync works perfectly)
@@ -6153,6 +6161,10 @@
             window._chartDataLoading = true;
             candlestickSeries.setData(_unifiedCandleData);
             volumeSeries.setData(_unifiedVolumeData);
+
+            // Store S/R data before applying underlay (which draws the lines)
+            _srData = data.support_resistance || null;
+
             applyUnderlay();
 
             // Store for re-filtering and update markers
@@ -6344,6 +6356,101 @@
                     title: 'POC',
                 });
             }
+
+            // ── S/R, Fibonacci, Volume Profile levels ──
+            applySRLines();
+        }
+
+        function applySRLines() {
+            // Remove previous S/R price lines
+            _srPriceLines.forEach(pl => {
+                try { if (underlaySeries) underlaySeries.removePriceLine(pl); } catch(_) {}
+            });
+            _srPriceLines = [];
+
+            if (!_srData || !_srData.levels || !underlaySeries) return;
+
+            // Color scheme per source
+            const sourceColors = {
+                swing:   { support: '#26a69a', resistance: '#ef5350' },
+                fib_ret: { support: '#42a5f5', resistance: '#ab47bc' },
+                fib_ext: { support: '#29b6f6', resistance: '#8e24aa' },
+                poc:     { support: '#ffeb3b', resistance: '#ffeb3b' },
+                round:   { support: 'rgba(255,255,255,0.25)', resistance: 'rgba(255,255,255,0.25)' },
+            };
+            const lineStyles = {
+                swing:   LightweightCharts.LineStyle.Solid,
+                fib_ret: LightweightCharts.LineStyle.Dashed,
+                fib_ext: LightweightCharts.LineStyle.Dotted,
+                poc:     LightweightCharts.LineStyle.Dashed,
+                round:   LightweightCharts.LineStyle.Dotted,
+            };
+
+            // Show up to 15 most relevant levels (sorted by proximity in API)
+            const levels = _srData.levels.slice(0, 15);
+
+            for (const lvl of levels) {
+                const colors = sourceColors[lvl.source] || sourceColors.swing;
+                const color = colors[lvl.kind] || '#787b86';
+                const style = lineStyles[lvl.source] || LightweightCharts.LineStyle.Dashed;
+                // Only show axis label for strong levels to reduce clutter
+                const showLabel = lvl.strength >= 0.5;
+
+                try {
+                    const pl = underlaySeries.createPriceLine({
+                        price: lvl.price,
+                        color: color,
+                        lineWidth: lvl.strength >= 0.7 ? 2 : 1,
+                        lineStyle: style,
+                        axisLabelVisible: showLabel,
+                        title: showLabel ? lvl.label : '',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) { /* ignore if chart not ready */ }
+            }
+
+            // Draw server-side POC if available and different from client POC
+            if (_srData.poc && Math.abs(_srData.poc - (currentPOC || 0)) > 0.5) {
+                try {
+                    const pl = underlaySeries.createPriceLine({
+                        price: _srData.poc,
+                        color: '#ffa726',
+                        lineWidth: 2,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true,
+                        title: 'POC (20d)',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
+
+            // VAH / VAL lines
+            if (_srData.vah) {
+                try {
+                    const pl = underlaySeries.createPriceLine({
+                        price: _srData.vah,
+                        color: 'rgba(255, 167, 38, 0.5)',
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        axisLabelVisible: false,
+                        title: 'VAH',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
+            if (_srData.val) {
+                try {
+                    const pl = underlaySeries.createPriceLine({
+                        price: _srData.val,
+                        color: 'rgba(255, 167, 38, 0.5)',
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        axisLabelVisible: false,
+                        title: 'VAL',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
         }
 
         function updateAnalysis(data) {
@@ -6417,6 +6524,9 @@
             if (data.composite) {
                 updateComposite(data.composite);
             }
+
+            // S/R card
+            updateSRCard(data.support_resistance);
         }
         
         // ===== TOAST NOTIFICATIONS =====
@@ -6462,6 +6572,57 @@
                 `</div>`,
                 cls, 6000
             );
+        }
+
+        function updateSRCard(sr) {
+            const card = document.getElementById('sr-card');
+            const summary = document.getElementById('sr-summary');
+            const list = document.getElementById('sr-levels-list');
+            if (!sr || !sr.levels || sr.levels.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = 'block';
+
+            // Summary row: nearest S/R + proximity
+            const proxCls = sr.proximity_score > 0.1 ? 'positive' : sr.proximity_score < -0.1 ? 'negative' : '';
+            const proxSign = sr.proximity_score >= 0 ? '+' : '';
+            summary.innerHTML = `
+                <div class="chain-grid" style="grid-template-columns:1fr 1fr 1fr">
+                    <div class="chain-item">
+                        <div class="chain-value" style="color:#26a69a">${sr.nearest_support ? '$' + sr.nearest_support.toFixed(2) : '—'}</div>
+                        <div class="chain-label">Support</div>
+                    </div>
+                    <div class="chain-item">
+                        <div class="chain-value" style="color:#ef5350">${sr.nearest_resistance ? '$' + sr.nearest_resistance.toFixed(2) : '—'}</div>
+                        <div class="chain-label">Resistance</div>
+                    </div>
+                    <div class="chain-item">
+                        <div class="chain-value ${proxCls}">${proxSign}${sr.proximity_score.toFixed(2)}</div>
+                        <div class="chain-label">S/R Score</div>
+                    </div>
+                </div>
+                ${sr.poc ? `<div style="font-size:11px;color:#787b86;margin-top:6px">POC $${sr.poc.toFixed(2)}${sr.vah ? ' · VAH $' + sr.vah.toFixed(2) : ''}${sr.val ? ' · VAL $' + sr.val.toFixed(2) : ''}</div>` : ''}
+                <div style="font-size:11px;color:#5d606b;margin-top:4px">${sr.proximity_detail}</div>
+            `;
+
+            // Key levels list (top 8)
+            const keyLevels = sr.levels
+                .filter(l => l.strength >= 0.4)
+                .slice(0, 8);
+            if (keyLevels.length === 0) {
+                list.innerHTML = '';
+                return;
+            }
+            const sourceIcon = { swing: '📊', fib_ret: '📐', fib_ext: '📐', poc: '🎯', round: '🔵' };
+            list.innerHTML = keyLevels.map(l => {
+                const color = l.kind === 'support' ? '#26a69a' : '#ef5350';
+                const icon = sourceIcon[l.source] || '•';
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;border-bottom:1px solid #1e222d">
+                    <span>${icon} <span style="color:${color};font-weight:600">$${l.price.toFixed(2)}</span> <span style="color:#787b86">${l.label}</span></span>
+                    <span style="color:#5d606b">${Math.round(l.strength * 100)}%</span>
+                </div>`;
+            }).join('');
         }
 
         function updateComposite(comp) {

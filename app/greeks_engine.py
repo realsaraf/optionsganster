@@ -110,15 +110,16 @@ class GreeksSignalEngine:
     dealer positioning (GEX), and flow data into a unified score.
     """
 
-    # Factor weights (sum to 1.0) — redistributed to add trend alignment
+    # Factor weights (sum to 1.0) — 8 factors with S/R proximity
     WEIGHTS = {
-        "iv_rank": 0.20,
-        "gex": 0.18,
-        "greeks_composite": 0.18,
-        "uoa_flow": 0.12,
-        "vpa_bias": 0.12,
+        "trend_alignment": 0.22,  # #1 — 77% WR with trend vs 27% against
+        "iv_rank": 0.15,
+        "sr_proximity": 0.13,     # NEW — S/R, Fib, POC proximity
+        "greeks_composite": 0.15,
+        "gex": 0.10,
+        "uoa_flow": 0.10,
+        "vpa_bias": 0.10,
         "pc_skew": 0.05,
-        "trend_alignment": 0.15,   # NEW — 3rd highest weight (77% WR with trend vs 27% against)
     }
 
     # Premium floor — suppress BUY signals for lottery-ticket premiums
@@ -135,6 +136,7 @@ class GreeksSignalEngine:
         underlying_trend: str | None = None,
         dte: int | None = None,
         volume_regime: str | None = None,
+        sr_result: object | None = None,
     ) -> CompositeResult:
         """
         Run full composite analysis.
@@ -148,6 +150,7 @@ class GreeksSignalEngine:
         underlying_trend : "UP", "DOWN", or "FLAT" — intraday trend of the underlying
         dte : days to expiration (0 = expiry day)
         volume_regime : "HIGH_RISK", "LOW", or "NORMAL" from VPA volume regime detector
+        sr_result : SRResult from SREngine.analyze() — S/R proximity data
 
         Returns
         -------
@@ -177,9 +180,12 @@ class GreeksSignalEngine:
         # 6. Put/Call Skew factor
         factors.append(self._score_pc_skew(chain_metrics))
 
-        # 7. Trend Alignment factor (NEW — biggest edge from analysis)
+        # 7. Trend Alignment factor (biggest edge from analysis)
         trade_direction = self._infer_trade_direction(factors, contract_type)
         factors.append(self._score_trend_alignment(trade_direction, underlying_trend))
+
+        # 8. S/R Proximity factor
+        factors.append(self._score_sr_proximity(sr_result))
 
         # Compute composite score
         composite_score = sum(f.score * f.confidence * f.weight for f in factors)
@@ -208,13 +214,22 @@ class GreeksSignalEngine:
                     f"⏰ EXPIRY DAY: DTE=0 — monitor closely, theta decay is maximum"
                 )
 
+        # ── Continuous DTE decay ──────────────────────────────
+        if dte is not None and 0 < dte <= 5:
+            dte_mult = 0.5 + (dte / 5) * 0.5   # DTE=1 → 0.6, DTE=5 → 1.0
+            composite_score *= dte_mult
+            warnings.append(
+                f"⏳ SHORT DTE: {dte} days — score dampened by {1 - dte_mult:.0%} "
+                f"(theta acceleration)"
+            )
+
         # ── Volume regime warning ────────────────────────────
         if volume_regime == "HIGH_RISK":
             warnings.append(
                 "📊 HIGH VOLUME REGIME: Institutional activity detected — "
                 "23.5% historical WR on high-vol days, reduce position size"
             )
-            composite_score *= 0.7  # Dampen signals on high-vol days
+            composite_score *= 0.4  # Stronger dampening (was 0.7)
 
         # Determine signal
         signal = self._classify_signal(composite_score, overall_confidence)
@@ -240,6 +255,41 @@ class GreeksSignalEngine:
             chain_metrics=chain_metrics,
             recommendation=recommendation,
             warnings=warnings,
+        )
+
+    # ── S/R Proximity scoring ─────────────────────────────────
+
+    def _score_sr_proximity(self, sr_result: object | None) -> FactorScore:
+        """
+        Score based on S/R, Fibonacci, and Volume POC proximity.
+        Uses pre-computed proximity_score from SREngine.
+        """
+        if sr_result is None:
+            return FactorScore(
+                name="S/R Proximity",
+                score=0.0,
+                confidence=0.20,
+                weight=self.WEIGHTS["sr_proximity"],
+                detail="No S/R data available",
+            )
+
+        prox_score = getattr(sr_result, 'proximity_score', 0.0)
+        prox_detail = getattr(sr_result, 'proximity_detail', 'S/R analysis complete')
+
+        # Confidence scales with how close we are to a level
+        if abs(prox_score) > 0.3:
+            confidence = 0.75
+        elif abs(prox_score) > 0.1:
+            confidence = 0.55
+        else:
+            confidence = 0.35
+
+        return FactorScore(
+            name="S/R Proximity",
+            score=round(prox_score, 3),
+            confidence=confidence,
+            weight=self.WEIGHTS["sr_proximity"],
+            detail=prox_detail,
         )
 
     # ── Trend alignment helpers ────────────────────────────────
@@ -540,23 +590,29 @@ class GreeksSignalEngine:
         GEX regime determines market character:
         Positive GEX → mean-reverting, low vol, pinning
         Negative GEX → trending, high vol, breakouts
+
+        Now provides directional bias instead of always 0.0:
+        Positive GEX near max pain → slightly bearish for breakout buyers
+        Negative GEX → slightly bullish for directional buyers
         """
         regime = metrics.gex_regime
 
         if regime == "positive":
-            score = 0.0  # Neutral direction; but regime matters for archetype
+            # Positive GEX = mean-reverting. Slightly negative for directional buyers.
+            score = -0.25
             detail = (
                 f"Positive GEX ({metrics.net_gex:,.0f}) – dealers long gamma, "
-                f"expect mean-reversion & lower realized vol"
+                f"expect mean-reversion & pinning – fade breakouts"
             )
-            confidence = 0.70
+            confidence = 0.65
         elif regime == "negative":
-            score = 0.0
+            # Negative GEX = trending / volatile. Good for directional plays.
+            score = 0.25
             detail = (
                 f"Negative GEX ({metrics.net_gex:,.0f}) – dealers short gamma, "
-                f"expect amplified moves & higher realized vol"
+                f"expect amplified moves – directional setups favored"
             )
-            confidence = 0.70
+            confidence = 0.65
         else:
             score = 0.0
             detail = f"Neutral GEX ({metrics.net_gex:,.0f}) – no strong dealer positioning"
@@ -921,7 +977,7 @@ class GreeksSignalEngine:
         agreement = max(bullish, bearish)
         direction = "bullish" if bullish > bearish else "bearish" if bearish > bullish else "mixed"
 
-        parts = [f"{agreement}/7 factors align {direction}."]
+        parts = [f"{agreement}/8 factors align {direction}."]
 
         # Key metrics summary
         parts.append(

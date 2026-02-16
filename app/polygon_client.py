@@ -280,6 +280,70 @@ class PolygonClient:
             print(f"[DailyOHLCV] Error fetching daily bars for {symbol}: {e}")
             return []
 
+    # ── Stock daily bars (full OHLCV for S/R engine) ────────
+
+    _stock_daily_bars_cache: dict = {}
+
+    async def get_stock_daily_bars(
+        self,
+        symbol: str,
+        num_days: int = 90,
+    ) -> pd.DataFrame:
+        """
+        Fetch daily OHLCV bars (full candles) for S/R, Fibonacci, and Volume Profile.
+        Returns DataFrame with columns: date, open, high, low, close, volume.
+        Separate from get_stock_daily_ohlcv() which returns closes only.
+        """
+        cache_key = (symbol.upper(), num_days)
+        if cache_key in self._stock_daily_bars_cache:
+            return self._stock_daily_bars_cache[cache_key]
+
+        end_dt = date.today()
+        from datetime import timedelta
+        start_dt = end_dt - timedelta(days=int(num_days * 1.6))
+
+        url = (
+            f"{self.BASE_URL}/v2/aggs/ticker/{symbol.upper()}"
+            f"/range/1/day/{start_dt}/{end_dt}"
+        )
+        params = {"limit": 5000, "sort": "asc"}
+
+        try:
+            data = await self._get_json(url, params)
+            bars = data.get("results", [])
+
+            if not bars:
+                empty = pd.DataFrame(
+                    columns=["date", "open", "high", "low", "close", "volume"]
+                )
+                self._stock_daily_bars_cache[cache_key] = empty
+                return empty
+
+            records = []
+            for bar in bars:
+                dt_utc = datetime.fromtimestamp(bar["t"] / 1000, tz=ZoneInfo("UTC"))
+                dt_et = dt_utc.astimezone(_ET).date()
+                records.append({
+                    "date": dt_et,
+                    "open": float(bar["o"]),
+                    "high": float(bar["h"]),
+                    "low": float(bar["l"]),
+                    "close": float(bar["c"]),
+                    "volume": int(bar.get("v", 0)),
+                })
+
+            df = pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+            # Keep only the most recent num_days bars
+            df = df.tail(num_days).reset_index(drop=True)
+            self._stock_daily_bars_cache[cache_key] = df
+            return df
+
+        except Exception as e:
+            print(f"[DailyBars] Error fetching daily bars for {symbol}: {e}")
+            return pd.DataFrame(
+                columns=["date", "open", "high", "low", "close", "volume"]
+            )
+
     # ── Expirations ──────────────────────────────────────────
 
     async def get_expirations(self, symbol: str) -> list[date]:

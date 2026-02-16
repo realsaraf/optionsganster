@@ -29,6 +29,8 @@ from app.vpa_engine import VPAEngine, VPASignal, VPAResult, vpa_engine
 from app.greeks_engine import GreeksSignalEngine, greeks_engine
 from app.live_feed import LiveFeedManager, live_feed_manager, mock_csv_playback, build_mock_sow
 from app.fair_value_engine import FairValueEngine, fair_value_engine
+from app.sr_engine import SREngine, sr_engine, SRResult
+from app.data_layer import DataLayer
 
 logger = logging.getLogger("optionsganster")
 
@@ -299,6 +301,18 @@ def get_greeks_engine() -> GreeksSignalEngine:
     return greeks_engine
 
 
+# DataLayer singleton (wraps polygon_client with daily-keyed caches)
+_data_layer = DataLayer(polygon_client)
+
+
+def get_data_layer() -> DataLayer:
+    return _data_layer
+
+
+def get_sr_engine() -> SREngine:
+    return sr_engine
+
+
 # ── Response models ─────────────────────────────────────────
 
 class OHLCVBar(BaseModel):
@@ -398,6 +412,27 @@ class FairValueResponse(BaseModel):
     hv_vs_iv: float
 
 
+class SRLevelResponse(BaseModel):
+    price: float
+    kind: str          # "support" | "resistance"
+    source: str        # "swing" | "fib_ret" | "fib_ext" | "poc" | "round"
+    strength: float
+    label: str
+
+
+class SRResponse(BaseModel):
+    levels: list[SRLevelResponse]
+    poc: Optional[float] = None
+    vah: Optional[float] = None
+    val: Optional[float] = None
+    fib_high: Optional[float] = None
+    fib_low: Optional[float] = None
+    nearest_support: Optional[float] = None
+    nearest_resistance: Optional[float] = None
+    proximity_score: float = 0.0
+    proximity_detail: str = ""
+
+
 class AnalysisResponse(BaseModel):
     symbol: str
     expiration: str
@@ -411,6 +446,7 @@ class AnalysisResponse(BaseModel):
     underlying_bars: list[OHLCVBar] = []
     volume_regime: Optional[dict] = None
     fair_value: Optional[FairValueResponse] = None
+    support_resistance: Optional[SRResponse] = None
 
 
 class ExpirationResponse(BaseModel):
@@ -889,6 +925,8 @@ async def analyze_option(
     poly: PolygonClient = Depends(get_polygon),
     engine: VPAEngine = Depends(get_vpa),
     gengine: GreeksSignalEngine = Depends(get_greeks_engine),
+    dl: DataLayer = Depends(get_data_layer),
+    sr_eng: SREngine = Depends(get_sr_engine),
 ) -> AnalysisResponse:
     """Fetch options data and run VPA analysis.
     Note: mock parameter is accepted but ignored – analysis always uses real API data.
@@ -985,6 +1023,65 @@ async def analyze_option(
         if not stock_df.empty:
             vol_regime_info = engine.get_volume_regime(stock_df)
 
+        # ── S/R, Fibonacci, Volume POC analysis ────────────
+        sr_result_obj: SRResult | None = None
+        sr_response: SRResponse | None = None
+        try:
+            # Get underlying price for SR analysis
+            sr_underlying_price = 0.0
+            if not stock_df.empty:
+                sr_underlying_price = float(stock_df.iloc[-1]["close"])
+            if sr_underlying_price <= 0:
+                try:
+                    sr_underlying_price = await poly.get_underlying_price(symbol.upper())
+                except Exception:
+                    pass
+
+            if sr_underlying_price > 0:
+                # Fetch daily bars (90 days) + intraday bars (20 days, 5-min)
+                daily_bars_df, intraday_bars_df = await _aio.gather(
+                    dl.get_daily_bars(symbol.upper(), num_days=90),
+                    dl.get_intraday_bars(symbol.upper(), lookback_days=20, interval_min=5),
+                )
+
+                sr_result_obj = sr_eng.analyze(
+                    daily_bars=daily_bars_df,
+                    underlying_price=sr_underlying_price,
+                    intraday_bars=intraday_bars_df,
+                )
+
+                # Cache for potential reuse
+                dl.set_cached_sr(symbol.upper(), {
+                    "poc": sr_result_obj.poc,
+                    "vah": sr_result_obj.vah,
+                    "val": sr_result_obj.val,
+                })
+
+                # Build response model
+                sr_response = SRResponse(
+                    levels=[
+                        SRLevelResponse(
+                            price=l.price,
+                            kind=l.kind,
+                            source=l.source,
+                            strength=l.strength,
+                            label=l.label,
+                        )
+                        for l in sr_result_obj.levels[:25]  # Cap at 25 levels
+                    ],
+                    poc=sr_result_obj.poc,
+                    vah=sr_result_obj.vah,
+                    val=sr_result_obj.val,
+                    fib_high=sr_result_obj.fib_high,
+                    fib_low=sr_result_obj.fib_low,
+                    nearest_support=sr_result_obj.nearest_support,
+                    nearest_resistance=sr_result_obj.nearest_resistance,
+                    proximity_score=sr_result_obj.proximity_score,
+                    proximity_detail=sr_result_obj.proximity_detail,
+                )
+        except Exception as sr_err:
+            print(f"S/R analysis error (non-fatal): {sr_err}")
+
         # ── Composite Greeks analysis ────────────────────
         composite_response = None
         contract_snap = None
@@ -1007,6 +1104,7 @@ async def analyze_option(
                     underlying_trend=underlying_trend,
                     dte=dte,
                     volume_regime=vol_regime_info["regime"] if vol_regime_info else None,
+                    sr_result=sr_result_obj,
                 )
                 # Map composite signal → actionable BUY / SELL / HOLD
                 # For calls: bullish underlying = BUY (the call)
@@ -1195,6 +1293,7 @@ async def analyze_option(
             underlying_bars=underlying_bars,
             volume_regime=vol_regime_info,
             fair_value=fair_value_response,
+            support_resistance=sr_response,
         )
 
     except HTTPException:
