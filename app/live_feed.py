@@ -2,8 +2,8 @@
 Live WebSocket Feed Manager
 ============================
 Manages TWO upstream WebSockets:
-  1. Options  – raw websockets to wss://delayed.polygon.io/options (for O:* tickers)
-  2. Stocks   – massive Python client to delayed.massive.com/stocks (for stock tickers)
+  1. Options  – raw websockets to wss://socket.polygon.io/options (realtime, for O:* tickers)
+  2. Stocks   – massive Python client via RealTime feed (for stock tickers)
 
 Both connections are lazy – they only start when a client subscribes to a
 ticker of that market.  Subscriptions are reference-counted with a 5-second
@@ -276,6 +276,8 @@ class _MassiveUpstreamWS:
         self._client: Optional[WebSocketClient] = None
         # Expose ws-like attribute for get_status compat
         self.ws = None
+        # Track bars received (for RealTime→Delayed fallback)
+        self._bar_count = 0
         # Per-ticker aggregation for LaunchpadValue ticks (no OHLCV)
         # Builds per-second OHLCV candles from single-value FMV ticks.
         self._lv_candles: dict[str, dict] = {}  # {sym: {sec, o, h, l, c}}
@@ -461,6 +463,7 @@ class _MassiveUpstreamWS:
                                 }
 
                             if msg_dict:
+                                self._bar_count += 1
                                 await self._on_message(msg_dict)
 
                         except Exception as proc_err:
@@ -952,7 +955,7 @@ class LiveFeedManager:
         # Options: try raw WebSocket first (gives proper OHLCV aggregates),
         # with Massive Launchpad as fallback (gives FMV values)
         self._options_raw = _UpstreamWS(
-            "options-raw", OPTIONS_WS_DELAYED, self._handle_aggregate,
+            "options-raw", OPTIONS_WS_REALTIME, self._handle_aggregate,
         )
         self._options_launchpad = _MassiveUpstreamWS(
             "options-lp", self._handle_aggregate,
@@ -961,11 +964,12 @@ class LiveFeedManager:
         # Track which options upstream is active
         self._options_upstream_active = None  # will be set on first subscribe
 
-        # Stocks: use Massive client with Delayed feed
+        # Stocks: use Massive client with RealTime feed (auto-falls back to Delayed)
         self._stocks_upstream = _MassiveUpstreamWS(
             "stocks", self._handle_aggregate,
-            feed=Feed.Delayed, market=Market.Stocks,
+            feed=Feed.RealTime, market=Market.Stocks,
         )
+        self._stocks_fallback_task: Optional[asyncio.Task] = None
 
         # downstream clients: ticker → set of asyncio.Queue
         self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
@@ -991,6 +995,8 @@ class LiveFeedManager:
 
     async def stop(self):
         self._running = False
+        if self._stocks_fallback_task:
+            self._stocks_fallback_task.cancel()
         await self._options_raw.stop()
         await self._options_launchpad.stop()
         await self._stocks_upstream.stop()
@@ -998,6 +1004,43 @@ class LiveFeedManager:
             t.cancel()
         self._unsub_timers.clear()
         _log("LiveFeedManager stopped")
+
+    async def _stocks_realtime_fallback(self):
+        """If RealTime stocks upstream delivers no bars within 30s, fall back to Delayed."""
+        try:
+            await asyncio.sleep(30)
+            if self._stocks_upstream._bar_count > 0:
+                return  # RealTime is working fine
+            if self._stocks_upstream._feed != Feed.RealTime:
+                return  # already switched
+            _log("[stocks] ⚠ No bars received after 30s on RealTime – falling back to Delayed")
+            # Capture active tickers before stopping
+            active = set(self._stocks_upstream._active_tickers)
+            await self._stocks_upstream.stop()
+            # Create a new Delayed upstream
+            self._stocks_upstream = _MassiveUpstreamWS(
+                "stocks", self._handle_aggregate,
+                feed=Feed.Delayed, market=Market.Stocks,
+            )
+            # Re-subscribe to all previously active tickers
+            for t in active:
+                self._stocks_upstream._active_tickers.add(t)
+            await self._stocks_upstream.ensure_started()
+            # Wait for auth
+            for _ in range(50):
+                if self._stocks_upstream.authenticated or self._stocks_upstream._auth_failed_permanent:
+                    break
+                await asyncio.sleep(0.1)
+            if self._stocks_upstream.authenticated:
+                for t in active:
+                    await self._stocks_upstream.subscribe(t)
+                _log("[stocks] ✅ Switched to Delayed feed successfully")
+            else:
+                _log("[stocks] ❌ Delayed feed also failed to authenticate")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            _log(f"[stocks] Fallback error: {e}")
 
     # ── Aggregate handler (called from BOTH upstream connections) ──
 
@@ -1119,6 +1162,10 @@ class LiveFeedManager:
                 # subscribe() re-adds to _active_tickers (set, no-op)
                 # and sends the WS subscribe command
                 await upstream.subscribe(ticker)
+                # Start RealTime→Delayed fallback timer for stocks
+                if upstream is self._stocks_upstream and upstream._feed == Feed.RealTime:
+                    if self._stocks_fallback_task is None or self._stocks_fallback_task.done():
+                        self._stocks_fallback_task = asyncio.create_task(self._stocks_realtime_fallback())
             elif upstream._auth_failed_permanent:
                 # If the raw websocket auth failed, try fallback to Launchpad
                 if upstream is self._options_raw and not self._options_launchpad._auth_failed_permanent:
@@ -1153,7 +1200,7 @@ class LiveFeedManager:
         raw = self._options_raw
         if not raw._auth_failed_permanent:
             self._options_upstream_active = raw
-            _log(f"Using raw options WebSocket (delayed) for {ticker}")
+            _log(f"Using raw options WebSocket (realtime) for {ticker}")
             return raw
 
         # Raw WS not available → try Launchpad

@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Cache TTLs (seconds)
-    CACHE_TTL_EXPIRATIONS: int = 300  # 5 min
-    CACHE_TTL_STRIKES: int = 300
+    CACHE_TTL_EXPIRATIONS: int = 3600  # 1 hour – expiry dates rarely change
+    CACHE_TTL_STRIKES: int = 3600      # 1 hour – strikes rarely change
     CACHE_TTL_OHLCV: int = 60  # 1 min
     CACHE_TTL_PRICES: int = 30  # 30 sec
 

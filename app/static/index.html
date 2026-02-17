@@ -112,7 +112,7 @@
         }
         
         #price-chart {
-            flex: 3;
+            flex: 1;
             background: #161b22;
             border-radius: 8px;
             border: 1px solid #30363d;
@@ -278,6 +278,58 @@
             border-radius: 6px;
             margin: 16px;
         }
+
+        /* S/R Levels card */
+        .sr-card h4 {
+            margin: 0 0 10px;
+            font-size: 13px;
+            color: #c9d1d9;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sr-levels-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 260px;
+            overflow-y: auto;
+        }
+        .sr-level-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .sr-level-row.support { background: rgba(38,166,154,0.10); }
+        .sr-level-row.resistance { background: rgba(239,83,80,0.10); }
+        .sr-level-price { font-weight: 600; font-family: monospace; }
+        .sr-level-label { color: #8b949e; font-size: 11px; }
+        .sr-level-source {
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: #21262d;
+            color: #8b949e;
+        }
+        .sr-level-source.swing { color: #26a69a; }
+        .sr-level-source.fib_ret { color: #42a5f5; }
+        .sr-level-source.fib_ext { color: #29b6f6; }
+        .sr-level-source.poc { color: #ffffff; }
+        .sr-level-source.round { color: #aaa; }
+        .sr-vol-profile {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            padding: 6px 8px;
+            background: #21262d;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #8b949e;
+        }
+        .sr-vol-profile span { font-family: monospace; color: #ffa726; }
 
         /* Signal filter toggles */
         .filter-bar {
@@ -527,6 +579,12 @@
                 </div>
             </div>
             
+            <div class="sidebar-section sr-card" id="sr-card" style="display:none;">
+                <h4>📊 S/R &amp; Fibonacci Levels</h4>
+                <div id="sr-levels-list" class="sr-levels-list"></div>
+                <div id="sr-vol-profile" class="sr-vol-profile" style="display:none;"></div>
+            </div>
+
             <div class="sidebar-section">
                 <h3>VPA Signals</h3>
                 <div id="signals-container" class="signal-list">
@@ -544,6 +602,8 @@
         let volumeSeries = null;
         let currentInterval = 1;
         let lastData = null; // store last analysis data for re-filtering
+        let _srData = null;
+        let _srPriceLines = [];
 
         // Get enabled signal filters
         function getEnabledSignals() {
@@ -714,6 +774,11 @@
                 updateCharts(data);
                 updateBias(data.bias);
                 updateSignals(data.signals);
+
+                // S/R + Fibonacci levels
+                _srData = data.support_resistance || null;
+                applySRLines();
+                updateSRCard(_srData);
                 
             } catch (e) {
                 document.getElementById('signals-container').innerHTML = 
@@ -813,6 +878,136 @@
                 .join('');
         }
         
+        // ── S/R + Fibonacci lines on price chart ──
+        function applySRLines() {
+            // Remove previous S/R price lines
+            _srPriceLines.forEach(pl => {
+                try { candlestickSeries.removePriceLine(pl); } catch(_) {}
+            });
+            _srPriceLines = [];
+
+            if (!_srData || !_srData.levels || !candlestickSeries) return;
+
+            const sourceColors = {
+                swing:   { support: '#26a69a', resistance: '#ef5350' },
+                fib_ret: { support: '#42a5f5', resistance: '#ab47bc' },
+                fib_ext: { support: '#29b6f6', resistance: '#8e24aa' },
+                poc:     { support: '#ffffff', resistance: '#ffffff' },
+                round:   { support: 'rgba(255,255,255,0.25)', resistance: 'rgba(255,255,255,0.25)' },
+            };
+            const lineStyles = {
+                swing:   LightweightCharts.LineStyle.Solid,
+                fib_ret: LightweightCharts.LineStyle.Dashed,
+                fib_ext: LightweightCharts.LineStyle.Dotted,
+                poc:     LightweightCharts.LineStyle.Solid,
+                round:   LightweightCharts.LineStyle.Dotted,
+            };
+
+            const levels = _srData.levels.slice(0, 15);
+
+            for (const lvl of levels) {
+                const colors = sourceColors[lvl.source] || sourceColors.swing;
+                const color = colors[lvl.kind] || '#787b86';
+                const style = lineStyles[lvl.source] || LightweightCharts.LineStyle.Dashed;
+                const showLabel = lvl.strength >= 0.5;
+                const isFib = lvl.source === 'fib_ret' || lvl.source === 'fib_ext';
+
+                try {
+                    const pl = candlestickSeries.createPriceLine({
+                        price: lvl.price,
+                        color: color,
+                        lineWidth: lvl.strength >= 0.7 ? 2 : 1,
+                        lineStyle: style,
+                        axisLabelVisible: isFib ? false : showLabel,
+                        title: (isFib || showLabel) ? lvl.label : '',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
+
+            // 20-day POC
+            if (_srData.poc) {
+                try {
+                    const pl = candlestickSeries.createPriceLine({
+                        price: _srData.poc,
+                        color: '#ffffff',
+                        lineWidth: 2,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
+                        axisLabelVisible: true,
+                        title: 'POC (20d)',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
+
+            // VAH / VAL
+            if (_srData.vah) {
+                try {
+                    const pl = candlestickSeries.createPriceLine({
+                        price: _srData.vah,
+                        color: 'rgba(255, 167, 38, 0.5)',
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        axisLabelVisible: false,
+                        title: 'VAH',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
+            if (_srData.val) {
+                try {
+                    const pl = candlestickSeries.createPriceLine({
+                        price: _srData.val,
+                        color: 'rgba(255, 167, 38, 0.5)',
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        axisLabelVisible: false,
+                        title: 'VAL',
+                    });
+                    _srPriceLines.push(pl);
+                } catch(e) {}
+            }
+        }
+
+        function updateSRCard(sr) {
+            const card = document.getElementById('sr-card');
+            const list = document.getElementById('sr-levels-list');
+            const volDiv = document.getElementById('sr-vol-profile');
+
+            if (!sr || !sr.levels || sr.levels.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+
+            const sourceLabels = {
+                swing: 'Swing', fib_ret: 'Fib Ret', fib_ext: 'Fib Ext',
+                poc: 'POC', round: 'Round',
+            };
+
+            list.innerHTML = sr.levels.slice(0, 15).map(lvl => {
+                const kindCls = lvl.kind === 'support' ? 'support' : 'resistance';
+                return `<div class="sr-level-row ${kindCls}">
+                    <span class="sr-level-price" style="color:${kindCls === 'support' ? '#26a69a' : '#ef5350'}">
+                        $${lvl.price.toFixed(2)}
+                    </span>
+                    <span class="sr-level-label">${lvl.label}</span>
+                    <span class="sr-level-source ${lvl.source}">${sourceLabels[lvl.source] || lvl.source}</span>
+                </div>`;
+            }).join('');
+
+            if (sr.poc || sr.vah || sr.val) {
+                volDiv.style.display = '';
+                volDiv.innerHTML = [
+                    sr.poc ? `POC <span>$${sr.poc.toFixed(2)}</span>` : '',
+                    sr.vah ? `VAH <span>$${sr.vah.toFixed(2)}</span>` : '',
+                    sr.val ? `VAL <span>$${sr.val.toFixed(2)}</span>` : '',
+                ].filter(Boolean).join('');
+            } else {
+                volDiv.style.display = 'none';
+            }
+        }
+
         // Event listeners
         document.getElementById('analyze-btn').addEventListener('click', analyze);
         

@@ -253,6 +253,8 @@ _watchlist_hub = WatchlistHub()
 async def lifespan(application: FastAPI):
     # startup – start the live WebSocket feed manager
     await live_feed_manager.start()
+    # Pre-warm Polygon caches in background so first page load is fast
+    asyncio.create_task(polygon_client.warm_cache(["QQQ"]))
     yield
     # shutdown – stop live feed + close the shared httpx client
     await live_feed_manager.stop()
@@ -771,7 +773,10 @@ async def get_me(request: Request):
 @app.get("/")
 async def root():
     """Serve the main UI."""
-    return FileResponse("app/static/index_watchlist.html")
+    return FileResponse(
+        "app/static/index_watchlist.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.get("/api/expirations/{symbol}")
@@ -1784,6 +1789,11 @@ async def websocket_live(ws: WebSocket):
 
                 # Composite (greeks + chain)
                 try:
+                    # Clear snapshot cache for fresh greeks/price data
+                    if hasattr(polygon_client, '_contract_snapshot_cache'):
+                        snap_key = ("snapshot", symbol, exp_date, strike, right)
+                        polygon_client._contract_snapshot_cache.pop(snap_key, None)
+
                     contract_snap, chain_snap = await asyncio.gather(
                         polygon_client.get_option_contract_snapshot(
                             symbol, exp_date, strike, right
@@ -1981,6 +1991,10 @@ async def websocket_live(ws: WebSocket):
                         "ticker": ticker,
                         "message": f"Subscribed to {ticker}",
                     }))
+
+                    # Send updated status (upstream may have connected during subscribe)
+                    status = live_feed_manager.get_status()
+                    await ws.send_text(json.dumps({"type": "status", **status}))
 
                     # Start periodic analysis for option tickers
                     if ticker.startswith("O:") and analysis_task is None:

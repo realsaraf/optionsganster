@@ -908,6 +908,21 @@
             transition: all 0.15s;
             white-space: nowrap;
         }
+
+        /* Desktop LIVE + MOCK group in header */
+        .desktop-live-group {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-left: auto;
+        }
+        .desktop-mock-btn {
+            background: #2a2e39 !important;
+            color: #787b86 !important;
+            font-size: 11px !important;
+            padding: 6px 10px !important;
+            min-width: auto;
+        }
         
         .live-btn:hover {
             background: #4a4e59;
@@ -1162,12 +1177,12 @@
         }
         
         #price-chart {
-            flex: 3;
+            flex: 2;
             min-height: 0;
         }
         
         #stock-chart {
-            flex: 1;
+            flex: 2;
             border-top: 1px solid #2a2e39;
             min-height: 0;
         }
@@ -2388,6 +2403,11 @@
 
             .header-logo {
                 display: none;
+            }
+
+            /* Hide desktop LIVE group on mobile */
+            .desktop-live-group {
+                display: none !important;
             }
 
             /* Top row: underlying symbol + ticking price */
@@ -3705,6 +3725,12 @@
                     <div class="contract-details" id="contract-details">Select a symbol</div>
                 </div>
 
+                <!-- Desktop LIVE + MOCK buttons -->
+                <div class="desktop-live-group" id="desktop-live-group">
+                    <button class="live-btn" id="desktop-live-btn">⚪ LIVE</button>
+                    <button class="live-btn desktop-mock-btn" id="desktop-mock-btn" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
+                </div>
+
                 <button class="submit-idea-btn" id="submit-idea-btn" title="Share this contract as a trade idea">💡 Submit Idea</button>
                 <a href="/api/logout" class="logout-btn" title="Sign Out">⏻ Logout</a>
             </div>
@@ -4247,6 +4273,13 @@
         let lastBarDatetime = null;    // tracks the last bar for delta updates
         let liveWs = null;             // WebSocket connection for live option feed
         let liveWsTicker = null;       // currently subscribed option ticker
+
+        // Delta-based option price estimation (updates from QQQ stock bars)
+        let deltaAnchorOptionPrice = null;   // last known actual option price
+        let deltaAnchorUnderlying = null;    // underlying price at anchor time
+        let deltaOpenPrice = null;           // day-open price for change calc
+        let currentDelta = null;             // greeks delta from last analysis
+        let currentGamma = null;             // greeks gamma for 2nd order
         
         // Watchlist WS state
         let watchlistWs = null;         // dedicated WS for watchlist price streaming
@@ -4336,6 +4369,47 @@
         // Lookup maps for crosshair sync (time -> data point)
         let _volumeByTime = new Map();
         let _underlayByTime = new Map();
+
+        // ===== LIVE BAR ACCUMULATION =====
+        // Per-second ticks from RealTime feed must be accumulated into
+        // the selected chart interval (1m, 5m, 15m, 1h).
+        // Key: ticker, Value: { time, open, high, low, close, volume }
+        let _liveAccum = {};   // accumulated candle per ticker
+
+        function floorToInterval(unixSec, intervalMin) {
+            // Floor a unix timestamp (seconds) to the nearest interval boundary
+            const intervalSec = intervalMin * 60;
+            return Math.floor(unixSec / intervalSec) * intervalSec;
+        }
+
+        function accumBar(ticker, bar, intervalMin, overrideUnixSec) {
+            // Accumulate a per-second bar into the current interval candle.
+            // Returns the merged candle with floored timestamp.
+            // overrideUnixSec: if provided, use this instead of bar.datetime
+            const rawT = overrideUnixSec || toEasternUnix(bar.datetime);
+            const t = floorToInterval(rawT, intervalMin);
+            const prev = _liveAccum[ticker];
+            if (prev && prev.time === t) {
+                // Same interval – merge
+                prev.high = Math.max(prev.high, bar.high);
+                prev.low = Math.min(prev.low, bar.low);
+                prev.close = bar.close;
+                prev.volume += (bar.volume || 0);
+                return prev;
+            } else {
+                // New interval – start fresh
+                const candle = {
+                    time: t,
+                    open: bar.open,
+                    high: bar.high,
+                    low: bar.low,
+                    close: bar.close,
+                    volume: bar.volume || 0,
+                };
+                _liveAccum[ticker] = candle;
+                return candle;
+            }
+        }
 
         // ===== TIMEZONE HELPER =====
         // Backend sends datetimes already in US/Eastern.
@@ -4801,7 +4875,8 @@
         
         // ===== LIVE MODE FUNCTIONS =====
         function updateLiveButton() {
-            const desktopBtn = document.getElementById('live-btn');
+            const mobileBtn = document.getElementById('live-btn');
+            const desktopBtn = document.getElementById('desktop-live-btn');
             const summaryBtn = document.getElementById('summary-live-btn');
             const mobileBadge = document.getElementById('mobile-live-badge');
             
@@ -4809,7 +4884,11 @@
                 const prefix = mockMode ? '🟡 MOCK ' : '🔴 LIVE ';
                 const dot = liveWs && liveWs.readyState === WebSocket.OPEN ? '●' : '○';
                 const text = `${prefix}${dot}`;
-                desktopBtn.textContent = text;
+                if (mobileBtn) mobileBtn.textContent = text;
+                if (desktopBtn) {
+                    desktopBtn.textContent = text;
+                    desktopBtn.classList.add('active');
+                }
                 if (summaryBtn) {
                     summaryBtn.textContent = `LIVE ${dot}`;
                     summaryBtn.classList.add('active');
@@ -4826,7 +4905,11 @@
                     }
                 }
             } else {
-                desktopBtn.textContent = '⚪ LIVE';
+                if (mobileBtn) mobileBtn.textContent = '⚪ LIVE';
+                if (desktopBtn) {
+                    desktopBtn.textContent = '⚪ LIVE';
+                    desktopBtn.classList.remove('active');
+                }
                 if (summaryBtn) {
                     summaryBtn.textContent = 'LIVE';
                     summaryBtn.classList.remove('active');
@@ -4875,6 +4958,13 @@
                     liveWs.send(JSON.stringify(subMsg));
                     console.log('[LiveWS] Subscribed to', liveWsTicker, mockMode ? '(mock)' : '');
                 }
+
+                // Subscribe to underlying stock for live chart overlay
+                // (must be done here in onopen, not in toggleLiveMode where WS is still CONNECTING)
+                if (liveUnderlyingTicker) {
+                    liveWs.send(JSON.stringify({ action: 'subscribe', ticker: liveUnderlyingTicker, mock: false }));
+                    console.log(`[LiveWS] Subscribed to underlying: ${liveUnderlyingTicker} (always real)`);
+                }
             };
 
             liveWs.onmessage = (event) => {
@@ -4918,8 +5008,10 @@
                     window._chartDataLoading = true;
                     for (const bar of bars) {
                         const t = toEasternUnix(bar.datetime);
-                        candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-                        volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                        try {
+                            candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                            volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                        } catch (e) { /* skip duplicate/old timestamps */ }
                     }
                     window._chartDataLoading = false;
 
@@ -4989,14 +5081,68 @@
 
                 // ── Underlying stock overlay update ──
                 if (ticker === liveUnderlyingTicker && liveMode && underlaySeries) {
-                    const t = toEasternUnix(bar.datetime);
-                    if (underlayMode === 'line') {
-                        underlaySeries.update({ time: t, value: bar.close });
-                    } else if (underlayMode === 'candle') {
-                        underlaySeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-                    }
+                    // Use wall-clock Eastern time (same as option bars) so the
+                    // overlay stays in sync even when the stock feed is Delayed.
+                    const _etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+                    const _nowET = new Date(_etStr);
+                    const _nowUnix = Math.floor(_nowET.getTime() / 1000);
+                    const ac = accumBar(ticker, bar, currentInterval, _nowUnix);
+                    const t = ac.time;
+                    try {
+                        if (underlayMode === 'line') {
+                            underlaySeries.update({ time: t, value: ac.close });
+                        } else if (underlayMode === 'candle') {
+                            underlaySeries.update({ time: t, open: ac.open, high: ac.high, low: ac.low, close: ac.close });
+                        }
+                    } catch (e) { /* skip duplicate/old timestamps */ }
                     // Also keep underlayBarsData in sync for mode switches
-                    underlayBarsData.push({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                    // Update existing entry if same time, else push new
+                    const lastUnderlayBar = underlayBarsData.length > 0 ? underlayBarsData[underlayBarsData.length - 1] : null;
+                    if (lastUnderlayBar && lastUnderlayBar.time === t) {
+                        lastUnderlayBar.open = ac.open; lastUnderlayBar.high = ac.high;
+                        lastUnderlayBar.low = ac.low; lastUnderlayBar.close = ac.close;
+                    } else {
+                        underlayBarsData.push({ time: t, open: ac.open, high: ac.high, low: ac.low, close: ac.close });
+                    }
+
+                    // ── Delta-based option price estimation ──
+                    // Even though we have no live option ticks, estimate price
+                    // from the underlying movement using greeks.
+                    if (currentDelta != null && deltaAnchorOptionPrice != null && deltaAnchorUnderlying != null) {
+                        const dS = bar.close - deltaAnchorUnderlying;
+                        let estPrice = deltaAnchorOptionPrice + currentDelta * dS;
+                        if (currentGamma) estPrice += 0.5 * currentGamma * dS * dS;
+                        estPrice = Math.max(0.01, estPrice);  // floor at $0.01
+
+                        const priceEl = document.getElementById('contract-price');
+                        const oldPrice = parseFloat(priceEl.textContent.replace('$','')) || 0;
+                        priceEl.textContent = `$${estPrice.toFixed(2)}`;
+                        priceEl.classList.remove('tick-up','tick-down');
+                        if (estPrice > oldPrice + 0.005) priceEl.classList.add('tick-up');
+                        else if (estPrice < oldPrice - 0.005) priceEl.classList.add('tick-down');
+                        setTimeout(() => priceEl.classList.remove('tick-up','tick-down'), 600);
+
+                        // Update change from day open
+                        if (deltaOpenPrice && deltaOpenPrice > 0) {
+                            const chg = estPrice - deltaOpenPrice;
+                            const chgPct = (chg / deltaOpenPrice) * 100;
+                            const changeEl = document.getElementById('contract-change');
+                            changeEl.textContent = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
+                            changeEl.className = `contract-change ${chg >= 0 ? 'positive' : 'negative'}`;
+                        }
+
+                        // Update underlying price display
+                        const uEl = document.getElementById('mobile-underlying-price');
+                        if (uEl) {
+                            const oldU = parseFloat(uEl.textContent.replace('$','')) || 0;
+                            uEl.textContent = `$${bar.close.toFixed(2)}`;
+                            uEl.classList.remove('tick-up','tick-down');
+                            if (bar.close > oldU) uEl.classList.add('tick-up');
+                            else if (bar.close < oldU) uEl.classList.add('tick-down');
+                            setTimeout(() => uEl.classList.remove('tick-up','tick-down'), 600);
+                        }
+                    }
+
                     return; // underlying bars don't update the main chart
                 }
 
@@ -5004,19 +5150,50 @@
                 const chartsContainer = document.querySelector('.charts-container');
                 chartsContainer.classList.add('live-refreshing');
 
-                // Update chart
-                const t = toEasternUnix(bar.datetime);
+                // Use current wall-clock time (Eastern) for chart placement.
+                // Option bars from the delayed WS have timestamps ~15 min behind,
+                // which would fall before the chart's latest candle and fail.
+                // Faking a "now" datetime in the same format _msg_dict_to_bar uses:
+                const nowET = new Date();
+                // Convert to Eastern by using Intl (approximate: offset in minutes)
+                const etOffset = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+                const nowEastern = new Date(etOffset);
+                const nowUnix = Math.floor(nowEastern.getTime() / 1000);
+
+                // Accumulate per-second ticks into interval candle using wall-clock
+                const ac = accumBar(ticker, bar, currentInterval, nowUnix);
+                const t = ac.time;
                 window._chartDataLoading = true;
-                candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-                volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                try {
+                    candlestickSeries.update({ time: t, open: ac.open, high: ac.high, low: ac.low, close: ac.close });
+                    volumeSeries.update({ time: t, value: ac.volume, color: ac.close >= ac.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                } catch (e) { /* skip duplicate/old timestamps */ }
                 window._chartDataLoading = false;
 
-                // Track for delta state
-                lastBarDatetime = bar.datetime;
+                // Construct a synthetic datetime string matching chart's time domain
+                // so analysis bar tracking uses the same base as the chart candle.
+                const synthDate = new Date(t * 1000);
+                const synthDT = synthDate.getUTCFullYear() + '-' +
+                    String(synthDate.getUTCMonth()+1).padStart(2,'0') + '-' +
+                    String(synthDate.getUTCDate()).padStart(2,'0') + ' ' +
+                    String(synthDate.getUTCHours()).padStart(2,'0') + ':' +
+                    String(synthDate.getUTCMinutes()).padStart(2,'0') + ':' +
+                    String(synthDate.getUTCSeconds()).padStart(2,'0');
 
-                // Append to analysis data
+                // Track for delta state (use wall-clock time, not delayed)
+                lastBarDatetime = synthDT;
+
+                // Append/merge to analysis data
                 if (lastAnalysisData) {
-                    lastAnalysisData.bars.push(bar);
+                    const lastABar = lastAnalysisData.bars.length > 0 ? lastAnalysisData.bars[lastAnalysisData.bars.length - 1] : null;
+                    const lastATime = lastABar ? toEasternUnix(lastABar.datetime) : null;
+                    if (lastABar && lastATime === t) {
+                        // Update existing interval bar
+                        lastABar.high = ac.high; lastABar.low = ac.low;
+                        lastABar.close = ac.close; lastABar.volume = ac.volume;
+                    } else {
+                        lastAnalysisData.bars.push({...bar, datetime: synthDT, open: ac.open, high: ac.high, low: ac.low, close: ac.close, volume: ac.volume});
+                    }
                     if (signals.length > 0) {
                         lastAnalysisData.signals = (lastAnalysisData.signals || []).concat(signals);
                     }
@@ -5044,7 +5221,11 @@
                 if (msg.composite) {
                     const newAction = msg.composite.action;
                     if (lastCompositeAction !== null && newAction !== lastCompositeAction) {
-                        showSignalToast(lastCompositeAction, newAction, msg.composite);
+                        // Only show toast if confidence meets threshold
+                        const compConf = (msg.composite.confidence || 0) * 100;
+                        if (compConf >= minConfidence) {
+                            showSignalToast(lastCompositeAction, newAction, msg.composite);
+                        }
                     }
                     lastCompositeAction = newAction;
                     updateComposite(msg.composite);
@@ -5081,9 +5262,75 @@
                     document.getElementById('stat-bars').textContent = msg.total_bars;
                 }
 
-                // Update contract price from latest bar close
-                if (msg.last_price) {
-                    document.getElementById('contract-price').textContent = `$${msg.last_price.toFixed(2)}`;
+                // Update contract price – prefer OHLCV bar close (most recent 5m bar) over snapshot
+                const snapPrice = msg.composite && msg.composite.greeks && msg.composite.greeks.last_price;
+                const bestPrice = (msg.last_price && msg.last_price > 0) ? msg.last_price : ((snapPrice && snapPrice > 0) ? snapPrice : null);
+                // Only update displayed price if delta estimation is NOT active
+                // (when delta is active, each QQQ bar ticks the price smoothly)
+                const deltaEstActive = (currentDelta != null && deltaAnchorOptionPrice != null && deltaAnchorUnderlying != null);
+                if (bestPrice && !deltaEstActive) {
+                    const priceEl = document.getElementById('contract-price');
+                    const oldPrice = parseFloat(priceEl.textContent.replace('$','')) || 0;
+                    priceEl.textContent = `$${bestPrice.toFixed(2)}`;
+                    priceEl.classList.remove('tick-up','tick-down');
+                    if (bestPrice > oldPrice + 0.005) priceEl.classList.add('tick-up');
+                    else if (bestPrice < oldPrice - 0.005) priceEl.classList.add('tick-down');
+                    setTimeout(() => priceEl.classList.remove('tick-up','tick-down'), 1200);
+                }
+
+                // ── Update delta estimation anchors from analysis data ──
+                if (msg.composite && msg.composite.greeks) {
+                    const g = msg.composite.greeks;
+                    currentDelta = (g.delta != null) ? g.delta : currentDelta;
+                    currentGamma = (g.gamma != null) ? g.gamma : currentGamma;
+
+                    // Re-anchor to the current displayed state to avoid jumps.
+                    // The analysis greeks (delta/gamma) change slowly, but the prices
+                    // may be stale relative to the live QQQ bars we're streaming.
+                    const curPrice = parseFloat((document.getElementById('contract-price').textContent || '').replace('$',''));
+                    const curUnderlying = parseFloat((document.getElementById('mobile-underlying-price').textContent || '').replace('$',''));
+                    if (curPrice > 0 && curUnderlying > 0) {
+                        // Re-anchor from current live state
+                        deltaAnchorOptionPrice = curPrice;
+                        deltaAnchorUnderlying = curUnderlying;
+                    } else {
+                        // Fallback: first analysis before any live bars
+                        deltaAnchorUnderlying = (g.underlying_price != null && g.underlying_price > 0) ? g.underlying_price : deltaAnchorUnderlying;
+                        deltaAnchorOptionPrice = bestPrice || deltaAnchorOptionPrice;
+                    }
+                }
+
+                // Set day-open reference price for change calculation
+                if (!deltaOpenPrice && bestPrice) {
+                    // Use first bar open if available, else best price
+                    if (lastAnalysisData && lastAnalysisData.bars && lastAnalysisData.bars.length > 0) {
+                        deltaOpenPrice = lastAnalysisData.bars[0].open;
+                    } else {
+                        deltaOpenPrice = bestPrice;
+                    }
+                }
+
+                // Update change from day open using best price (skip when delta estimation active)
+                if (bestPrice && deltaOpenPrice && deltaOpenPrice > 0 && !deltaEstActive) {
+                    const chg = bestPrice - deltaOpenPrice;
+                    const chgPct = (chg / deltaOpenPrice) * 100;
+                    const changeEl = document.getElementById('contract-change');
+                    changeEl.textContent = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
+                    changeEl.className = `contract-change ${chg >= 0 ? 'positive' : 'negative'}`;
+                }
+
+                // Also update underlying price from composite snapshot (skip when delta estimation active)
+                if (msg.composite && msg.composite.greeks && msg.composite.greeks.underlying_price && !deltaEstActive) {
+                    const uPrice = msg.composite.greeks.underlying_price;
+                    const uEl = document.getElementById('mobile-underlying-price');
+                    if (uEl) {
+                        const oldU = parseFloat(uEl.textContent.replace('$','')) || 0;
+                        uEl.textContent = `$${uPrice.toFixed(2)}`;
+                        uEl.classList.remove('tick-up','tick-down');
+                        if (uPrice > oldU) uEl.classList.add('tick-up');
+                        else if (uPrice < oldU) uEl.classList.add('tick-down');
+                        setTimeout(() => uEl.classList.remove('tick-up','tick-down'), 1000);
+                    }
                 }
 
             } else if (type === 'subscribed') {
@@ -5230,9 +5477,12 @@
             liveUnderlyingTicker = symbol;
 
             // Subscribe via the live options WS (always real for stock data)
+            // Note: if WS is still CONNECTING, the onopen handler will pick this up
             if (liveWs && liveWs.readyState === WebSocket.OPEN) {
                 liveWs.send(JSON.stringify({ action: 'subscribe', ticker: symbol, mock: false }));
                 console.log(`[LiveWS] Subscribed to underlying: ${symbol} (always real)`);
+            } else {
+                console.log(`[LiveWS] Underlying ${symbol} queued (WS not yet open, onopen will subscribe)`);
             }
         }
 
@@ -5323,6 +5573,7 @@
                 
                 // Add active class to button
                 document.getElementById('live-btn').classList.add('active');
+                if (document.getElementById('desktop-live-btn')) document.getElementById('desktop-live-btn').classList.add('active');
                 document.getElementById('summary-live-btn').classList.add('active');
                 document.getElementById('summary-live-btn').textContent = 'LIVE ●';
                 
@@ -5384,6 +5635,16 @@
                 lastBarDatetime = null;
                 lastCompositeAction = null;
                 lastVpaAction = null;
+
+                // Reset delta estimation anchors
+                deltaAnchorOptionPrice = null;
+                deltaAnchorUnderlying = null;
+                currentDelta = null;
+                currentGamma = null;
+                deltaOpenPrice = null;
+
+                // Reset live bar accumulation
+                _liveAccum = {};
                 
                 // Clear polling intervals (mock mode)
                 if (liveInterval) {
@@ -5415,6 +5676,7 @@
                 
                 // Remove active class from button
                 document.getElementById('live-btn').classList.remove('active');
+                if (document.getElementById('desktop-live-btn')) document.getElementById('desktop-live-btn').classList.remove('active');
                 document.getElementById('summary-live-btn').classList.remove('active');
                 document.getElementById('summary-live-btn').textContent = 'LIVE';
                 
@@ -5828,8 +6090,8 @@
                     vertLine: { color: '#758696', width: 1, style: 2 },
                     horzLine: { color: '#758696', width: 1, style: 2 },
                 },
-                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80 },
-                timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 100 },
+                timeScale: { visible: false },
             });
             
             candlestickSeries = priceChart.addCandlestickSeries({
@@ -5875,8 +6137,8 @@
                     vertLine: { color: '#758696', width: 1, style: 2 },
                     horzLine: { color: '#758696', width: 1, style: 2 },
                 },
-                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80 },
-                timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 100 },
+                timeScale: { visible: false },
             });
             
             volumeChart = LightweightCharts.createChart(volumeContainer, {
@@ -5890,7 +6152,7 @@
                 },
                 rightPriceScale: {
                     borderColor: '#2a2e39',
-                    minimumWidth: 80,
+                    minimumWidth: 100,
                     autoScale: true,
                     scaleMargins: { top: 0.05, bottom: 0 },
                 },
@@ -6036,6 +6298,10 @@
                     document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
                     document.getElementById('contract-change').textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)`;
                     document.getElementById('contract-change').className = `contract-change ${change >= 0 ? 'positive' : 'negative'}`;
+
+                    // Set delta estimation anchors from initial analysis
+                    deltaOpenPrice = firstBar.open;
+                    deltaAnchorOptionPrice = lastBar.close;
                 }
                 
                 // Update fair value banner
@@ -6046,7 +6312,14 @@
                     updateCharts(data);
                 }
                 updateAnalysis(data);
-                
+
+                // Set initial delta/gamma anchors from composite greeks
+                if (data.composite && data.composite.greeks) {
+                    const g = data.composite.greeks;
+                    currentDelta = (g.delta != null) ? g.delta : null;
+                    currentGamma = (g.gamma != null) ? g.gamma : null;
+                    deltaAnchorUnderlying = (g.underlying_price != null && g.underlying_price > 0) ? g.underlying_price : null;
+                }                
                 // Update summary text after analyze
                 updateSummaryText();
                 updateUrlParams();
@@ -6349,9 +6622,9 @@
                 const poc = currentPOC;
                 underlaySeries.createPriceLine({
                     price: poc,
-                    color: '#ffeb3b',
+                    color: '#ffffff',
                     lineWidth: 2,
-                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    lineStyle: LightweightCharts.LineStyle.Solid,
                     axisLabelVisible: true,
                     title: 'POC',
                 });
@@ -6375,14 +6648,14 @@
                 swing:   { support: '#26a69a', resistance: '#ef5350' },
                 fib_ret: { support: '#42a5f5', resistance: '#ab47bc' },
                 fib_ext: { support: '#29b6f6', resistance: '#8e24aa' },
-                poc:     { support: '#ffeb3b', resistance: '#ffeb3b' },
+                poc:     { support: '#ffffff', resistance: '#ffffff' },
                 round:   { support: 'rgba(255,255,255,0.25)', resistance: 'rgba(255,255,255,0.25)' },
             };
             const lineStyles = {
                 swing:   LightweightCharts.LineStyle.Solid,
                 fib_ret: LightweightCharts.LineStyle.Dashed,
                 fib_ext: LightweightCharts.LineStyle.Dotted,
-                poc:     LightweightCharts.LineStyle.Dashed,
+                poc:     LightweightCharts.LineStyle.Solid,
                 round:   LightweightCharts.LineStyle.Dotted,
             };
 
@@ -6395,6 +6668,7 @@
                 const style = lineStyles[lvl.source] || LightweightCharts.LineStyle.Dashed;
                 // Only show axis label for strong levels to reduce clutter
                 const showLabel = lvl.strength >= 0.5;
+                const isFib = lvl.source === 'fib_ret' || lvl.source === 'fib_ext';
 
                 try {
                     const pl = underlaySeries.createPriceLine({
@@ -6402,8 +6676,8 @@
                         color: color,
                         lineWidth: lvl.strength >= 0.7 ? 2 : 1,
                         lineStyle: style,
-                        axisLabelVisible: showLabel,
-                        title: showLabel ? lvl.label : '',
+                        axisLabelVisible: isFib ? false : showLabel,
+                        title: (isFib || showLabel) ? lvl.label : '',
                     });
                     _srPriceLines.push(pl);
                 } catch(e) { /* ignore if chart not ready */ }
@@ -6414,9 +6688,9 @@
                 try {
                     const pl = underlaySeries.createPriceLine({
                         price: _srData.poc,
-                        color: '#ffa726',
+                        color: '#ffffff',
                         lineWidth: 2,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true,
                         title: 'POC (20d)',
                     });
@@ -6783,7 +7057,11 @@
                 });
                 const latestAction = classifySignal(sortedAll[sortedAll.length - 1].signal);
                 if (lastVpaAction !== null && latestAction !== lastVpaAction) {
-                    showVpaActionToast(lastVpaAction, latestAction, sortedAll[sortedAll.length - 1]);
+                    // Only show toast if signal confidence meets threshold
+                    const sigConf = (sortedAll[sortedAll.length - 1].confidence || 0) * 100;
+                    if (sigConf >= minConfidence) {
+                        showVpaActionToast(lastVpaAction, latestAction, sortedAll[sortedAll.length - 1]);
+                    }
                 }
                 lastVpaAction = latestAction;
             }
@@ -6922,6 +7200,34 @@
         
         // Live mode button
         document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
+        document.getElementById('desktop-live-btn').addEventListener('click', toggleLiveMode);
+
+        // Desktop mock mode toggle
+        document.getElementById('desktop-mock-btn').addEventListener('click', () => {
+            mockMode = !mockMode;
+            const dBtn = document.getElementById('desktop-mock-btn');
+            const mBtn = document.getElementById('mock-btn');
+            if (mockMode) {
+                dBtn.style.background = '#facc15';
+                dBtn.style.color = '#000';
+                dBtn.textContent = 'MOCK ✓';
+                mBtn.style.background = '#facc15';
+                mBtn.style.color = '#000';
+                mBtn.textContent = 'MOCK ✓';
+            } else {
+                dBtn.style.background = '#2a2e39';
+                dBtn.style.color = '#787b86';
+                dBtn.textContent = 'MOCK';
+                mBtn.style.background = '#2a2e39';
+                mBtn.style.color = '#787b86';
+                mBtn.textContent = 'MOCK';
+            }
+            sendWatchlistSymbols();
+            if (liveMode) {
+                stopLiveMode();
+                toggleLiveMode();
+            }
+        });
 
         // Connection-limit modal dismiss
         document.getElementById('conn-limit-ok').addEventListener('click', () => {
@@ -6933,18 +7239,25 @@
             }
         });
         
-        // Mock mode toggle
+        // Mock mode toggle (mobile button)
         document.getElementById('mock-btn').addEventListener('click', () => {
             mockMode = !mockMode;
             const btn = document.getElementById('mock-btn');
+            const dBtn = document.getElementById('desktop-mock-btn');
             if (mockMode) {
                 btn.style.background = '#facc15';
                 btn.style.color = '#000';
                 btn.textContent = 'MOCK ✓';
+                dBtn.style.background = '#facc15';
+                dBtn.style.color = '#000';
+                dBtn.textContent = 'MOCK ✓';
             } else {
                 btn.style.background = '#2a2e39';
                 btn.style.color = '#787b86';
                 btn.textContent = 'MOCK';
+                dBtn.style.background = '#2a2e39';
+                dBtn.style.color = '#787b86';
+                dBtn.textContent = 'MOCK';
             }
             // Re-send watchlist symbols with new mock state
             sendWatchlistSymbols();
@@ -7660,8 +7973,11 @@
                 // Load strikes for that exp, then set URL strike
                 await loadStrikes(initSymbol, expSelect.value, false);
                 const strikeSelect = document.getElementById('strike');
-                if (strikeSelect.querySelector(`option[value="${urlP.strike}"]`)) {
-                    strikeSelect.value = urlP.strike;
+                // Match URL strike as numeric (590 matches 590.0)
+                const targetStrike = parseFloat(urlP.strike);
+                const matchOption = Array.from(strikeSelect.options).find(o => parseFloat(o.value) === targetStrike);
+                if (matchOption) {
+                    strikeSelect.value = matchOption.value;
                     syncStrikeMatrix();
                 }
                 // Now analyze with all params set

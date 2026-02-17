@@ -7,9 +7,12 @@ from datetime import datetime, date
 from typing import Optional
 from zoneinfo import ZoneInfo
 import asyncio
+import logging
 import httpx
 import pandas as pd
 from cachetools import TTLCache
+
+logger = logging.getLogger("optionsganster")
 
 _ET = ZoneInfo("America/New_York")
 
@@ -361,6 +364,7 @@ class PolygonClient:
         params = {
             "underlying_ticker": cache_key,
             "expiration_date.gte": today.strftime("%Y-%m-%d"),
+            "contract_type": "call",   # only calls – halves pages, same unique dates
             "sort": "expiration_date",
             "order": "asc",
             "limit": 1000,
@@ -402,6 +406,7 @@ class PolygonClient:
         params = {
             "underlying_ticker": symbol.upper(),
             "expiration_date": expiration.strftime("%Y-%m-%d"),
+            "contract_type": "call",   # only calls – halves pages, same unique strikes
             "limit": 1000,
         }
 
@@ -416,6 +421,26 @@ class PolygonClient:
         sorted_strikes = sorted(strikes)
         self._strikes_cache[cache_key] = sorted_strikes
         return sorted_strikes
+
+    # ── Cache pre-warming ────────────────────────────────────
+
+    async def warm_cache(self, symbols: list[str] | None = None):
+        """Pre-warm expirations + first-expiration strikes for given symbols.
+        Called at server startup so the first page load is fast.
+        """
+        symbols = symbols or ["QQQ"]
+        for sym in symbols:
+            try:
+                print(f"[CacheWarm] Pre-warming expirations for {sym}…")
+                exps = await self.get_expirations(sym)
+                if exps:
+                    print(f"[CacheWarm] {sym}: {len(exps)} expirations, warming strikes for {exps[0]}…")
+                    await self.get_strikes(sym, exps[0])
+                    # Also warm the underlying price
+                    await self.get_underlying_price(sym)
+                print(f"[CacheWarm] {sym} done.")
+            except Exception as e:
+                print(f"[CacheWarm] Failed for {sym}: {e}")
 
     # ── Underlying price ─────────────────────────────────────
 
