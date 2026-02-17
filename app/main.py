@@ -774,7 +774,7 @@ async def get_me(request: Request):
 async def root():
     """Serve the main UI."""
     return FileResponse(
-        "app/static/index_watchlist.html",
+        "app/static/index.html",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
 
