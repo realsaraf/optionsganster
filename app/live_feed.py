@@ -18,9 +18,11 @@ Usage from FastAPI:
 """
 
 import asyncio
+import atexit
 import csv
 import json
 import os
+import signal
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -50,8 +52,9 @@ OPTIONS_WS_REALTIME = "wss://socket.polygon.io/options"
 UNSUBSCRIBE_GRACE = 5
 
 # Backoff when Polygon says "max_connections" (seconds)
-# Polygon needs time to release the old socket on their side
-MAX_CONN_BACKOFF = 30
+# Polygon needs 30-60s to release old sockets on their side;
+# use 60s to be safe, especially after dev reloads.
+MAX_CONN_BACKOFF = 60
 
 
 def _is_option_ticker(ticker: str) -> bool:
@@ -483,7 +486,7 @@ class _MassiveUpstreamWS:
                     backoff = MAX_CONN_BACKOFF
                     _log(f"[{self.label}] ⚠ Connection limit error – backing off {backoff}s: {e}")
                 else:
-                    backoff = 5
+                    backoff = 10
                     _log(f"[{self.label}] Error: {e}")
             finally:
                 if self._client:
@@ -991,7 +994,7 @@ class LiveFeedManager:
         if self._running:
             return
         self._running = True
-        _log("LiveFeedManager ready (dual WS: options + stocks, lazy connect)")
+        _log("LiveFeedManager ready (lazy connect: 1 raw WS for options + 1 massive WS for stocks, max 2 connections)")
 
     async def stop(self):
         self._running = False
@@ -1017,6 +1020,9 @@ class LiveFeedManager:
             # Capture active tickers before stopping
             active = set(self._stocks_upstream._active_tickers)
             await self._stocks_upstream.stop()
+            # Wait for Polygon to fully release the old connection slot
+            _log("[stocks] Waiting 5s for Polygon to release old connection…")
+            await asyncio.sleep(5)
             # Create a new Delayed upstream
             self._stocks_upstream = _MassiveUpstreamWS(
                 "stocks", self._handle_aggregate,
@@ -1251,8 +1257,12 @@ class LiveFeedManager:
             "options_connected": opts.ws is not None and opts.authenticated,
             "options_plan_ok": not opts._auth_failed_permanent,
             "options_upstream_type": opts_type,
+            "options_conn_limit": opts._conn_limit_hit,
             "stocks_connected": stks.ws is not None and stks.authenticated,
             "stocks_plan_ok": not stks._auth_failed_permanent,
+            "stocks_conn_limit": stks._conn_limit_hit,
+            "stocks_feed": stks._feed.name if hasattr(stks, '_feed') else "unknown",
+            "stocks_bar_count": stks._bar_count,
             "subscriptions": {
                 ticker: len(subs) for ticker, subs in self._subscribers.items() if subs
             },
@@ -1264,3 +1274,44 @@ class LiveFeedManager:
 
 # Singleton instance
 live_feed_manager = LiveFeedManager()
+
+
+# ── Cleanup on process exit (critical for uvicorn --reload) ──
+# When the dev server reloads (file change), the old worker is killed.
+# Without explicit cleanup, Polygon keeps the old WS connection alive
+# for 30-60s, and the new worker hits max_connections.
+
+def _sync_cleanup():
+    """Synchronous cleanup called by atexit / signal handlers."""
+    _log("Process exiting – force-closing upstream WebSocket connections…")
+    # Close raw websocket synchronously (best effort)
+    raw = live_feed_manager._options_raw
+    if raw.ws:
+        try:
+            asyncio.get_event_loop().run_until_complete(raw.ws.close())
+        except Exception:
+            pass
+    # Close massive clients
+    for upstream in [live_feed_manager._options_launchpad, live_feed_manager._stocks_upstream]:
+        if upstream._client:
+            try:
+                asyncio.get_event_loop().run_until_complete(upstream._client.close())
+            except Exception:
+                pass
+    _log("Cleanup done.")
+
+
+atexit.register(_sync_cleanup)
+
+# Also handle SIGTERM/SIGINT (uvicorn reload sends SIGTERM)
+def _signal_handler(signum, frame):
+    _log(f"Received signal {signum} – cleaning up WS connections…")
+    _sync_cleanup()
+    # Re-raise so the default handler runs
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+try:
+    signal.signal(signal.SIGTERM, _signal_handler)
+except (OSError, ValueError):
+    pass  # May fail on Windows or in threads

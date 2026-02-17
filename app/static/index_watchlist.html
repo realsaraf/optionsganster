@@ -3623,7 +3623,7 @@
         <div class="modal-box">
             <div class="modal-icon">⚠️</div>
             <h2>Connection Limit Reached</h2>
-            <p id="conn-limit-msg">Polygon’s WebSocket connection limit has been exceeded. The server is backing off and will retry automatically. Please wait ~30 seconds before trying live mode again.</p>
+            <p id="conn-limit-msg">Polygon’s WebSocket connection limit has been exceeded. The server is backing off and will retry automatically. Please wait ~60 seconds before trying live mode again.</p>
             <button class="modal-btn" id="conn-limit-ok">OK</button>
         </div>
     </div>
@@ -5001,30 +5001,50 @@
             if (type === 'sow') {
                 // Snapshot of world — initial bars on subscribe
                 const bars = msg.bars || [];
+                const sowTicker = msg.ticker || '';
+
+                // ── GUARD: only render SOW for the OPTION ticker on the main chart.
+                // Stock/underlying SOW bars are at completely different price
+                // levels ($530 vs $5) and would blow out the Y-axis, squashing
+                // option candles into a flat line.
+                const isUnderlyingSow = sowTicker === liveUnderlyingTicker;
+
+                // In non-mock real mode the chart already has proper interval
+                // candles from the REST API.  SOW bars are raw per-second
+                // aggregates (o≈h≈l≈c) that would clutter the chart, so skip
+                // rendering them when historical data is already loaded.
+                const chartAlreadyLoaded = lastAnalysisData && lastAnalysisData.bars && lastAnalysisData.bars.length > 0;
+                const skipSowRender = isUnderlyingSow || (!mockMode && chartAlreadyLoaded);
+
                 if (bars.length > 0) {
-                    console.log(`[LiveWS] SOW: ${bars.length} bars for ${msg.ticker}`);
+                    console.log(`[LiveWS] SOW: ${bars.length} bars for ${sowTicker}` +
+                        (skipSowRender ? ' (skipping chart render)' : ''));
 
-                    // Update chart with SOW bars incrementally 
-                    window._chartDataLoading = true;
-                    for (const bar of bars) {
-                        const t = toEasternUnix(bar.datetime);
-                        try {
-                            candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-                            volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
-                        } catch (e) { /* skip duplicate/old timestamps */ }
+                    if (!skipSowRender) {
+                        // Update chart with SOW bars incrementally 
+                        window._chartDataLoading = true;
+                        for (const bar of bars) {
+                            const t = toEasternUnix(bar.datetime);
+                            try {
+                                candlestickSeries.update({ time: t, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+                                volumeSeries.update({ time: t, value: bar.volume, color: bar.close >= bar.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' });
+                            } catch (e) { /* skip duplicate/old timestamps */ }
+                        }
+                        window._chartDataLoading = false;
                     }
-                    window._chartDataLoading = false;
 
-                    // Append to analysis data
-                    if (lastAnalysisData) {
+                    // Append to analysis data (only for option ticker, not underlying)
+                    if (lastAnalysisData && !isUnderlyingSow) {
                         lastAnalysisData.bars = lastAnalysisData.bars.concat(bars);
                     }
 
-                    // Update price header from last SOW bar
+                    // Update price header from last SOW bar (option ticker only)
                     const lastBar = bars[bars.length - 1];
                     const firstBar = bars[0];
-                    document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
-                    document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : bars.length;
+                    if (!isUnderlyingSow) {
+                        document.getElementById('contract-price').textContent = `$${lastBar.close.toFixed(2)}`;
+                        document.getElementById('stat-bars').textContent = lastAnalysisData ? lastAnalysisData.bars.length : bars.length;
+                    }
 
                     // ── Mock-mode: update contract header & date range ──
                     if (msg.mock && msg.ticker) {
@@ -5350,7 +5370,7 @@
                     const modal = document.getElementById('conn-limit-modal');
                     const msgEl = document.getElementById('conn-limit-msg');
                     if (msg.code === 'conn_limit') {
-                        msgEl.textContent = 'Polygon\u2019s WebSocket connection limit has been exceeded. The server is backing off and will retry automatically. Please wait ~30 seconds before trying live mode again.';
+                        msgEl.textContent = 'Polygon\u2019s WebSocket connection limit has been exceeded. The server is backing off and will retry automatically. Please wait ~60 seconds before trying live mode again.';
                     } else {
                         msgEl.textContent = msg.message || 'Authentication failed. Your Polygon plan may not support live WebSocket streaming.';
                     }
