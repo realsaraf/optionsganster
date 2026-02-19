@@ -1901,6 +1901,27 @@
             background: #2962ff;
             color: #fff;
         }
+        /* Ichimoku toggle styling */
+        .ichi-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-right: 10px;
+            border-right: 1px solid #2a2e39;
+            margin-right: 2px;
+        }
+        .ichi-toggle .ichi-label {
+            font-size: 10px;
+            color: #787b86;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .ichi-toggle .underlay-btn.active {
+            background: #7b1fa2;
+            color: #fff;
+        }
 
         .toggle-group {
             display: flex;
@@ -3990,6 +4011,15 @@
                             <button class="underlay-btn active" data-underlay="candle">CANDLE</button>
                         </div>
                     </div>
+                    <div class="ichi-toggle" style="border-left:1px solid #2a2e39;padding-left:10px;margin-left:0;">
+                        <span class="ichi-label">Cloud:</span>
+                        <div class="underlay-btn-group">
+                            <button class="underlay-btn ichi-opt-btn active" data-ichitarget="option" data-ichi="off">OFF</button>
+                            <button class="underlay-btn ichi-opt-btn" data-ichitarget="option" data-ichi="on">Opt</button>
+                            <button class="underlay-btn ichi-stock-btn active" data-ichitarget="stock" data-ichi="off">OFF</button>
+                            <button class="underlay-btn ichi-stock-btn" data-ichitarget="stock" data-ichi="on">Stk</button>
+                        </div>
+                    </div>
                     <div class="conf-toggle-group" style="border-left:1px solid #2a2e39;padding-left:10px;margin-left:0;">
                         <span class="conf-label">Confidence:</span>
                         <div class="conf-btn-group">
@@ -4038,6 +4068,16 @@
                         <button class="underlay-btn" data-underlay="off" id="underlay-off">OFF</button>
                         <button class="underlay-btn" data-underlay="line" id="underlay-line">LINE</button>
                         <button class="underlay-btn active" data-underlay="candle" id="underlay-candle">CANDLE</button>
+                    </div>
+                </div>
+
+                <div class="ichi-toggle desktop-filter-item">
+                    <span class="ichi-label">Ichimoku:</span>
+                    <div class="underlay-btn-group">
+                        <button class="underlay-btn ichi-opt-btn active" data-ichitarget="option" data-ichi="off">OFF</button>
+                        <button class="underlay-btn ichi-opt-btn" data-ichitarget="option" data-ichi="on">Option</button>
+                        <button class="underlay-btn ichi-stock-btn active" data-ichitarget="stock" data-ichi="off">OFF</button>
+                        <button class="underlay-btn ichi-stock-btn" data-ichitarget="stock" data-ichi="on">Stock</button>
                     </div>
                 </div>
 
@@ -4531,6 +4571,20 @@
         let currentPOC = null;       // Current POC price for autoscale
         let _srPriceLines = [];      // S/R price lines on stock chart
         let _srData = null;          // support_resistance data from API
+
+        // Ichimoku cloud state
+        let ichiOptionEnabled = false;
+        let ichiStockEnabled = false;
+        // Series references for option (price) chart Ichimoku
+        let ichiOptTenkan = null, ichiOptKijun = null;
+        let ichiOptSpanALine = null, ichiOptSpanBLine = null;
+        let ichiOptChikou = null;
+        let ichiOptCloudGreen = null, ichiOptCloudRed = null;
+        // Series references for stock chart Ichimoku
+        let ichiStkTenkan = null, ichiStkKijun = null;
+        let ichiStkSpanALine = null, ichiStkSpanBLine = null;
+        let ichiStkChikou = null;
+        let ichiStkCloudGreen = null, ichiStkCloudRed = null;
 
         // Unified timestamp data for multi-chart sync (ensures all charts share
         // the same set of timestamps so logical-range sync works perfectly)
@@ -6295,9 +6349,9 @@
             });
 
             // ── Underlay toggle buttons ──
-            document.querySelectorAll('.underlay-btn').forEach(btn => {
+            document.querySelectorAll('.underlay-btn[data-underlay]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    document.querySelectorAll('.underlay-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.underlay-btn[data-underlay]').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     underlayMode = btn.dataset.underlay;
                     // Collapse/expand stock chart section based on mode
@@ -6310,6 +6364,24 @@
                         }
                     }
                     applyUnderlay();
+                });
+            });
+
+            // ── Ichimoku toggle buttons ──
+            document.querySelectorAll('.ichi-opt-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.ichi-opt-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    ichiOptionEnabled = btn.dataset.ichi === 'on';
+                    applyIchimokuOption();
+                });
+            });
+            document.querySelectorAll('.ichi-stock-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.ichi-stock-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    ichiStockEnabled = btn.dataset.ichi === 'on';
+                    applyIchimokuStock();
                 });
             });
 
@@ -6929,6 +7001,10 @@
 
             applyUnderlay();
 
+            // Apply Ichimoku clouds if enabled
+            applyIchimokuOption();
+            applyIchimokuStock();
+
             // Store for re-filtering and update markers
             lastAnalysisData = data;
             updateFilteredMarkers(data.signals || []);
@@ -7013,6 +7089,241 @@
             if (underlaySeries) {
                 try { stockChart.removeSeries(underlaySeries); } catch(_) {}
                 underlaySeries = null;
+            }
+        }
+
+        // ===== ICHIMOKU CLOUD FUNCTIONS =====
+        // Calculate Ichimoku components from OHLC data
+        // Returns { tenkan, kijun, spanA, spanB, chikou } arrays of {time, value}
+        function calculateIchimoku(bars, tenkanPeriod = 9, kijunPeriod = 26, senkouBPeriod = 52, displacement = 26) {
+            if (!bars || bars.length < senkouBPeriod) return null;
+
+            function periodHighLow(data, end, period) {
+                let high = -Infinity, low = Infinity;
+                const start = Math.max(0, end - period + 1);
+                for (let i = start; i <= end; i++) {
+                    if (data[i].high !== undefined) {
+                        high = Math.max(high, data[i].high);
+                        low = Math.min(low, data[i].low);
+                    }
+                }
+                return { high, low };
+            }
+
+            const tenkan = [], kijun = [], spanA = [], spanB = [], chikou = [];
+
+            for (let i = 0; i < bars.length; i++) {
+                // Tenkan-sen (conversion line)
+                if (i >= tenkanPeriod - 1) {
+                    const hl = periodHighLow(bars, i, tenkanPeriod);
+                    tenkan.push({ time: bars[i].time, value: (hl.high + hl.low) / 2 });
+                }
+                // Kijun-sen (base line)
+                if (i >= kijunPeriod - 1) {
+                    const hl = periodHighLow(bars, i, kijunPeriod);
+                    kijun.push({ time: bars[i].time, value: (hl.high + hl.low) / 2 });
+                }
+                // Senkou Span A = (tenkan + kijun) / 2, plotted displacement periods ahead
+                if (i >= kijunPeriod - 1) {
+                    const tHL = periodHighLow(bars, i, tenkanPeriod);
+                    const kHL = periodHighLow(bars, i, kijunPeriod);
+                    const tVal = (tHL.high + tHL.low) / 2;
+                    const kVal = (kHL.high + kHL.low) / 2;
+                    spanA.push({ idx: i + displacement, value: (tVal + kVal) / 2 });
+                }
+                // Senkou Span B = (52-period high + low) / 2, plotted displacement periods ahead
+                if (i >= senkouBPeriod - 1) {
+                    const hl = periodHighLow(bars, i, senkouBPeriod);
+                    spanB.push({ idx: i + displacement, value: (hl.high + hl.low) / 2 });
+                }
+                // Chikou Span = close plotted displacement periods back
+                if (i < bars.length) {
+                    chikou.push({ idx: i - displacement, value: bars[i].close });
+                }
+            }
+
+            // Build time mapping — extend timestamps forward for displacement
+            const allTimes = bars.map(b => b.time);
+            // Extrapolate future timestamps based on average bar spacing
+            if (bars.length >= 2) {
+                const avgSpacing = (bars[bars.length - 1].time - bars[0].time) / (bars.length - 1);
+                for (let j = 1; j <= displacement; j++) {
+                    allTimes.push(bars[bars.length - 1].time + Math.round(avgSpacing * j));
+                }
+            }
+
+            function resolveTime(arr) {
+                return arr.filter(d => d.idx >= 0 && d.idx < allTimes.length)
+                          .map(d => ({ time: allTimes[d.idx], value: d.value }));
+            }
+
+            return {
+                tenkan,
+                kijun,
+                spanA: resolveTime(spanA),
+                spanB: resolveTime(spanB),
+                chikou: chikou.filter(d => d.idx >= 0).map(d => ({ time: allTimes[d.idx], value: d.value })),
+            };
+        }
+
+        // Build cloud fill data: split Span A / Span B into green (A>=B) and red (A<B) segments
+        function buildCloudData(spanA, spanB) {
+            // Merge on matching timestamps
+            const aByTime = new Map(spanA.map(d => [d.time, d.value]));
+            const bByTime = new Map(spanB.map(d => [d.time, d.value]));
+            const times = [...new Set([...spanA.map(d => d.time), ...spanB.map(d => d.time)])].sort((a, b) => a - b);
+
+            const greenTop = [], greenBot = [], redTop = [], redBot = [];
+            for (const t of times) {
+                const a = aByTime.get(t), b = bByTime.get(t);
+                if (a === undefined || b === undefined) continue;
+                if (a >= b) {
+                    greenTop.push({ time: t, value: a });
+                    greenBot.push({ time: t, value: b });
+                    // Insert whitespace break in red
+                    redTop.push({ time: t, value: NaN });
+                    redBot.push({ time: t, value: NaN });
+                } else {
+                    redTop.push({ time: t, value: b });
+                    redBot.push({ time: t, value: a });
+                    // Insert whitespace break in green
+                    greenTop.push({ time: t, value: NaN });
+                    greenBot.push({ time: t, value: NaN });
+                }
+            }
+            return { greenTop, greenBot, redTop, redBot };
+        }
+
+        // Apply Ichimoku cloud to a given chart
+        // Returns { tenkan, kijun, spanALine, spanBLine, chikou, cloudGreen, cloudRed }
+        function applyIchimokuToChart(chart, bars) {
+            const ichi = calculateIchimoku(bars);
+            if (!ichi) return null;
+
+            // Tenkan-sen (conversion line) — blue
+            const tenkanS = chart.addLineSeries({
+                color: '#2196f3', lineWidth: 1, lastValueVisible: false,
+                priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            tenkanS.setData(ichi.tenkan);
+
+            // Kijun-sen (base line) — dark red/maroon
+            const kijunS = chart.addLineSeries({
+                color: '#b71c1c', lineWidth: 1, lastValueVisible: false,
+                priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            kijunS.setData(ichi.kijun);
+
+            // Senkou Span A line — thin green
+            const spanAS = chart.addLineSeries({
+                color: 'rgba(38, 166, 154, 0.5)', lineWidth: 1, lastValueVisible: false,
+                priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            spanAS.setData(ichi.spanA);
+
+            // Senkou Span B line — thin red
+            const spanBS = chart.addLineSeries({
+                color: 'rgba(239, 83, 80, 0.5)', lineWidth: 1, lastValueVisible: false,
+                priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            spanBS.setData(ichi.spanB);
+
+            // Chikou Span (lagging span) — orange
+            const chikouS = chart.addLineSeries({
+                color: '#ff9800', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted,
+                lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            chikouS.setData(ichi.chikou);
+
+            // Cloud fill — green area (bullish) and red area (bearish)
+            const cloud = buildCloudData(ichi.spanA, ichi.spanB);
+
+            // Green cloud: Span A on top, fill down to Span B
+            const cloudGreenTop = chart.addLineSeries({
+                color: 'rgba(0,0,0,0)', lineWidth: 0, lastValueVisible: false,
+                priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            const cloudGreenBot = chart.addLineSeries({
+                color: 'rgba(0,0,0,0)', lineWidth: 0, lastValueVisible: false,
+                priceLineVisible: false, crosshairMarkerVisible: false,
+            });
+            // We'll use area series for the actual cloud fill
+            // Since lightweight-charts doesn't support fill between two arbitrary lines,
+            // approximate with two overlapping area series
+            const greenCloud = chart.addAreaSeries({
+                topColor: 'rgba(38, 166, 154, 0.25)',
+                bottomColor: 'rgba(38, 166, 154, 0.05)',
+                lineColor: 'rgba(0,0,0,0)',
+                lineWidth: 0,
+                lastValueVisible: false,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            // Map green cloud top values, skip NaN
+            greenCloud.setData(cloud.greenTop.filter(d => !isNaN(d.value)));
+
+            const redCloud = chart.addAreaSeries({
+                topColor: 'rgba(239, 83, 80, 0.25)',
+                bottomColor: 'rgba(239, 83, 80, 0.05)',
+                lineColor: 'rgba(0,0,0,0)',
+                lineWidth: 0,
+                lastValueVisible: false,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            redCloud.setData(cloud.redTop.filter(d => !isNaN(d.value)));
+
+            // Clean up hidden helper series
+            try { chart.removeSeries(cloudGreenTop); } catch(_) {}
+            try { chart.removeSeries(cloudGreenBot); } catch(_) {}
+
+            return {
+                tenkan: tenkanS, kijun: kijunS,
+                spanALine: spanAS, spanBLine: spanBS,
+                chikou: chikouS,
+                cloudGreen: greenCloud, cloudRed: redCloud,
+            };
+        }
+
+        // Remove all Ichimoku series from a chart
+        function removeIchimokuFromChart(chart, refs) {
+            if (!chart || !refs) return;
+            const keys = ['tenkan','kijun','spanALine','spanBLine','chikou','cloudGreen','cloudRed'];
+            for (const k of keys) {
+                if (refs[k]) {
+                    try { chart.removeSeries(refs[k]); } catch(_) {}
+                }
+            }
+        }
+
+        // Apply/remove Ichimoku on the option (price) chart
+        function applyIchimokuOption() {
+            removeIchimokuFromChart(priceChart, { tenkan: ichiOptTenkan, kijun: ichiOptKijun, spanALine: ichiOptSpanALine, spanBLine: ichiOptSpanBLine, chikou: ichiOptChikou, cloudGreen: ichiOptCloudGreen, cloudRed: ichiOptCloudRed });
+            ichiOptTenkan = ichiOptKijun = ichiOptSpanALine = ichiOptSpanBLine = ichiOptChikou = ichiOptCloudGreen = ichiOptCloudRed = null;
+            if (!ichiOptionEnabled || !_unifiedCandleData || _unifiedCandleData.length < 52) return;
+            // Build bars with OHLC from unified candle data (filter whitespace entries)
+            const bars = _unifiedCandleData.filter(b => b.open !== undefined);
+            const refs = applyIchimokuToChart(priceChart, bars);
+            if (refs) {
+                ichiOptTenkan = refs.tenkan; ichiOptKijun = refs.kijun;
+                ichiOptSpanALine = refs.spanALine; ichiOptSpanBLine = refs.spanBLine;
+                ichiOptChikou = refs.chikou;
+                ichiOptCloudGreen = refs.cloudGreen; ichiOptCloudRed = refs.cloudRed;
+            }
+        }
+
+        // Apply/remove Ichimoku on the stock (underlay) chart
+        function applyIchimokuStock() {
+            removeIchimokuFromChart(stockChart, { tenkan: ichiStkTenkan, kijun: ichiStkKijun, spanALine: ichiStkSpanALine, spanBLine: ichiStkSpanBLine, chikou: ichiStkChikou, cloudGreen: ichiStkCloudGreen, cloudRed: ichiStkCloudRed });
+            ichiStkTenkan = ichiStkKijun = ichiStkSpanALine = ichiStkSpanBLine = ichiStkChikou = ichiStkCloudGreen = ichiStkCloudRed = null;
+            if (!ichiStockEnabled || !_unifiedUnderlayData || _unifiedUnderlayData.length < 52) return;
+            const bars = _unifiedUnderlayData.filter(b => b.open !== undefined);
+            const refs = applyIchimokuToChart(stockChart, bars);
+            if (refs) {
+                ichiStkTenkan = refs.tenkan; ichiStkKijun = refs.kijun;
+                ichiStkSpanALine = refs.spanALine; ichiStkSpanBLine = refs.spanBLine;
+                ichiStkChikou = refs.chikou;
+                ichiStkCloudGreen = refs.cloudGreen; ichiStkCloudRed = refs.cloudRed;
             }
         }
 
@@ -7121,6 +7432,9 @@
 
             // ── S/R, Fibonacci, Volume Profile levels ──
             applySRLines();
+
+            // Re-apply Ichimoku on stock chart after underlay rebuild
+            applyIchimokuStock();
         }
 
         function applySRLines() {
