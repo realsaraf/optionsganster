@@ -1176,21 +1176,143 @@
             min-width: 0;
         }
         
-        #price-chart {
+        #price-chart, #split-price-chart {
             flex: 2;
             min-height: 0;
         }
         
-        #stock-chart {
+        #stock-chart, #split-stock-chart {
             flex: 2;
             border-top: 1px solid #2a2e39;
             min-height: 0;
         }
 
-        #volume-chart {
+        #volume-chart, #split-volume-chart {
             flex: 1;
             border-top: 1px solid #2a2e39;
             min-height: 0;
+        }
+
+        /* ===== SPLIT VIEW ===== */
+        .split-panels-wrapper {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            min-width: 0;
+        }
+        .split-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            position: relative;
+        }
+        .split-panel + .split-panel {
+            border-left: 2px solid #2a2e39;
+        }
+        .split-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: #1a1e2b;
+            border-bottom: 1px solid #2a2e39;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        .split-panel-header .split-contract-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #d1d4dc;
+            white-space: nowrap;
+        }
+        .split-panel-header .split-price {
+            font-size: 13px;
+            font-weight: 600;
+            color: #26a69a;
+        }
+        .split-panel-header .split-change {
+            font-size: 11px;
+        }
+        .split-panel-header .split-change.positive { color: #26a69a; }
+        .split-panel-header .split-change.negative { color: #ef5350; }
+        .split-panel-header select {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 4px 6px;
+            color: #d1d4dc;
+            font-size: 12px;
+            min-width: 60px;
+        }
+        .split-panel-header select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .split-panel-header .split-analyze-btn {
+            background: #238636;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .split-panel-header .split-analyze-btn:hover {
+            background: #2ea043;
+        }
+        .split-panel-header .split-analyze-btn:disabled {
+            background: #21262d;
+            cursor: not-allowed;
+        }
+        .split-panel .charts-container {
+            flex: 1;
+        }
+        .split-panel-right {
+            display: none;
+        }
+        .chart-area.split-active .split-panel-right {
+            display: flex;
+        }
+        .chart-area.split-active .split-panels-wrapper {
+            flex: 1;
+        }
+        /* Split view button in header */
+        .split-view-btn {
+            background: #2a2e39;
+            color: #787b86;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .split-view-btn:hover { background: #363a45; color: #d1d4dc; }
+        .split-view-btn.active { background: #1f6feb; color: white; }
+        /* Composite mini-gauge for split panel */
+        .split-composite {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: #161b22;
+            border-bottom: 1px solid #2a2e39;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+        .split-composite .split-action {
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+        .split-composite .split-action.buy { color: #26a69a; }
+        .split-composite .split-action.sell { color: #ef5350; }
+        .split-composite .split-action.hold { color: #787b86; }
+        .split-composite .split-conf {
+            color: #787b86;
         }
         
         .chart-legend {
@@ -3726,8 +3848,9 @@
                     <div class="contract-details" id="contract-details">Select a symbol</div>
                 </div>
 
-                <!-- Desktop LIVE + MOCK buttons -->
+                <!-- Desktop LIVE + MOCK + SPLIT buttons -->
                 <div class="desktop-live-group" id="desktop-live-group">
+                    <button class="split-view-btn" id="split-view-btn" title="Compare two contracts side by side">⫸ Split</button>
                     <button class="live-btn" id="desktop-live-btn">⚪ LIVE</button>
                     <button class="live-btn desktop-mock-btn" id="desktop-mock-btn" title="Mock mode: simulates option WS feed using CSV data. Stock prices, expirations &amp; strikes remain real.">MOCK</button>
                 </div>
@@ -4005,11 +4128,46 @@
             </div>
             </div><!-- /.settings-sheet -->
             
-            <div class="chart-area">
-                <div class="charts-container">
-                    <div id="price-chart"></div>
-                    <div id="stock-chart"></div>
-                    <div id="volume-chart"></div>
+            <div class="chart-area" id="chart-area">
+                <div class="split-panels-wrapper">
+                    <!-- LEFT panel (always visible) -->
+                    <div class="split-panel split-panel-left">
+                        <div class="split-panel-header" id="split-left-header" style="display:none">
+                            <span class="split-contract-label" id="split-left-label">—</span>
+                            <span class="split-price" id="split-left-price">—</span>
+                            <span class="split-change" id="split-left-change"></span>
+                        </div>
+                        <div class="split-composite" id="split-left-composite" style="display:none">
+                            <span class="split-action hold" id="split-left-action">—</span>
+                            <span class="split-conf" id="split-left-conf"></span>
+                        </div>
+                        <div class="charts-container">
+                            <div id="price-chart"></div>
+                            <div id="stock-chart"></div>
+                            <div id="volume-chart"></div>
+                        </div>
+                    </div>
+                    <!-- RIGHT panel (split view only) -->
+                    <div class="split-panel split-panel-right" id="split-panel-right">
+                        <div class="split-panel-header" id="split-right-header">
+                            <select id="split-exp" style="min-width:120px"><option value="">Exp</option></select>
+                            <select id="split-strike" style="min-width:80px"><option value="">Strike</option></select>
+                            <select id="split-right-select" style="min-width:55px"><option value="C">Call</option><option value="P">Put</option></select>
+                            <button class="split-analyze-btn" id="split-analyze-btn">▶ Go</button>
+                            <span class="split-contract-label" id="split-right-label"></span>
+                            <span class="split-price" id="split-right-price"></span>
+                            <span class="split-change" id="split-right-change"></span>
+                        </div>
+                        <div class="split-composite" id="split-right-composite">
+                            <span class="split-action hold" id="split-right-action">—</span>
+                            <span class="split-conf" id="split-right-conf"></span>
+                        </div>
+                        <div class="charts-container" id="split-charts-container">
+                            <div id="split-price-chart"></div>
+                            <div id="split-stock-chart"></div>
+                            <div id="split-volume-chart"></div>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- RIGHT: Analysis Sidebar -->
@@ -4262,6 +4420,18 @@
         let volumeSeries = null;
         let currentInterval = 5;
         let currentSymbol = 'SPY';
+
+        // ── Split view state ──
+        let splitActive = false;
+        let splitPriceChart = null;
+        let splitStockChart = null;
+        let splitVolumeChart = null;
+        let splitCandleSeries = null;
+        let splitVolumeSeries = null;
+        let splitUnderlaySeries = null;
+        let splitUnderlayMode = 'candle';
+        let splitUnderlayBarsData = [];
+        let splitAnalysisData = null;
         let watchlistData = {};
         let priceUpdateInterval = null;
         
@@ -6263,6 +6433,302 @@
             resizeObserver.observe(volumeContainer);
         }
         
+        // ===== SPLIT VIEW FUNCTIONS =====
+        function initSplitCharts() {
+            if (splitPriceChart) return; // already initialized
+            const pc = document.getElementById('split-price-chart');
+            const sc = document.getElementById('split-stock-chart');
+            const vc = document.getElementById('split-volume-chart');
+
+            const chartOpts = (timeVisible) => ({
+                layout: { background: { color: '#131722' }, textColor: '#787b86' },
+                grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: '#758696', width: 1, style: 2 },
+                    horzLine: { color: '#758696', width: 1, style: 2 },
+                },
+                rightPriceScale: { borderColor: '#2a2e39', minimumWidth: 80, ...(timeVisible ? { autoScale: true, scaleMargins: { top: 0.05, bottom: 0 } } : {}) },
+                timeScale: timeVisible ? { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false } : { visible: false },
+            });
+
+            splitPriceChart = LightweightCharts.createChart(pc, chartOpts(false));
+            splitCandleSeries = splitPriceChart.addCandlestickSeries({
+                upColor: '#26a69a', downColor: '#ef5350',
+                borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+                wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+            });
+
+            splitStockChart = LightweightCharts.createChart(sc, chartOpts(false));
+            splitVolumeChart = LightweightCharts.createChart(vc, chartOpts(true));
+            splitVolumeSeries = splitVolumeChart.addHistogramSeries({ priceFormat: { type: 'volume' } });
+
+            // Sync timescales within split panel
+            let _splitSyncing = false;
+            function syncSplitRange(source, range) {
+                if (_splitSyncing || !range) return;
+                _splitSyncing = true;
+                [splitPriceChart, splitStockChart, splitVolumeChart].forEach(c => {
+                    if (c !== source) try { c.timeScale().setVisibleLogicalRange(range); } catch(_) {}
+                });
+                _splitSyncing = false;
+            }
+            splitPriceChart.timeScale().subscribeVisibleLogicalRangeChange(r => syncSplitRange(splitPriceChart, r));
+            splitStockChart.timeScale().subscribeVisibleLogicalRangeChange(r => syncSplitRange(splitStockChart, r));
+            splitVolumeChart.timeScale().subscribeVisibleLogicalRangeChange(r => syncSplitRange(splitVolumeChart, r));
+
+            // Resize observer for split charts
+            const ro = new ResizeObserver(entries => {
+                for (let entry of entries) {
+                    const { width, height } = entry.contentRect;
+                    if (width === 0 || height === 0) continue;
+                    if (entry.target === pc) splitPriceChart.applyOptions({ width, height });
+                    else if (entry.target === sc) splitStockChart.applyOptions({ width, height });
+                    else if (entry.target === vc) splitVolumeChart.applyOptions({ width, height });
+                }
+            });
+            ro.observe(pc); ro.observe(sc); ro.observe(vc);
+        }
+
+        function toggleSplitView() {
+            splitActive = !splitActive;
+            const chartArea = document.getElementById('chart-area');
+            const btn = document.getElementById('split-view-btn');
+            const leftHeader = document.getElementById('split-left-header');
+            const leftComposite = document.getElementById('split-left-composite');
+
+            if (splitActive) {
+                chartArea.classList.add('split-active');
+                btn.classList.add('active');
+                btn.textContent = '⫸ Split ✕';
+                leftHeader.style.display = '';
+                leftComposite.style.display = '';
+                initSplitCharts();
+                // Populate split selectors from current symbol
+                populateSplitSelectors();
+                // Copy left panel info
+                updateSplitLeftHeader();
+            } else {
+                chartArea.classList.remove('split-active');
+                btn.classList.remove('active');
+                btn.textContent = '⫸ Split';
+                leftHeader.style.display = 'none';
+                leftComposite.style.display = 'none';
+            }
+            // Trigger resize for all charts
+            window.dispatchEvent(new Event('resize'));
+        }
+
+        function updateSplitLeftHeader() {
+            const sym = document.getElementById('contract-symbol').textContent;
+            const price = document.getElementById('contract-price').textContent;
+            const change = document.getElementById('contract-change').textContent;
+            const changeClass = document.getElementById('contract-change').className;
+            document.getElementById('split-left-label').textContent = sym;
+            document.getElementById('split-left-price').textContent = price;
+            const leftChange = document.getElementById('split-left-change');
+            leftChange.textContent = change;
+            leftChange.className = 'split-change ' + (changeClass.includes('positive') ? 'positive' : 'negative');
+
+            // Update composite from current analysis
+            if (lastAnalysisData && lastAnalysisData.composite) {
+                const c = lastAnalysisData.composite;
+                const actionEl = document.getElementById('split-left-action');
+                actionEl.textContent = c.action || '—';
+                actionEl.className = 'split-action ' + (c.action || '').toLowerCase().replace('strong ', '');
+                const confPct = Math.round((c.confidence || 0) * 100);
+                document.getElementById('split-left-conf').textContent = confPct + '% conf';
+            }
+        }
+
+        async function populateSplitSelectors() {
+            // Populate expirations from what's already loaded for the current symbol
+            const mainExp = document.getElementById('expiration');
+            const splitExp = document.getElementById('split-exp');
+            splitExp.innerHTML = '';
+            for (const opt of mainExp.options) {
+                const o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.textContent;
+                splitExp.appendChild(o);
+            }
+            // Default to same expiration
+            splitExp.value = mainExp.value;
+            // Load strikes for that expiration
+            await loadSplitStrikes();
+        }
+
+        async function loadSplitStrikes() {
+            const exp = document.getElementById('split-exp').value;
+            const splitStrike = document.getElementById('split-strike');
+            if (!exp || !currentSymbol) return;
+
+            try {
+                const res = await authFetch(`/api/strikes/${currentSymbol}?expiration=${exp}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                splitStrike.innerHTML = '';
+                (data.strikes || []).forEach(s => {
+                    const o = document.createElement('option');
+                    o.value = s;
+                    o.textContent = '$' + s;
+                    splitStrike.appendChild(o);
+                });
+                // Try to pick current main strike or ATM
+                const mainStrike = document.getElementById('strike').value;
+                if (mainStrike && splitStrike.querySelector(`option[value="${mainStrike}"]`)) {
+                    splitStrike.value = mainStrike;
+                }
+            } catch(e) {
+                console.warn('Split strikes load error:', e);
+            }
+        }
+
+        async function analyzeSplit() {
+            const exp = document.getElementById('split-exp').value;
+            const strike = document.getElementById('split-strike').value;
+            const right = document.getElementById('split-right-select').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+
+            if (!currentSymbol || !exp || !strike) {
+                alert('Select expiration and strike for the comparison panel');
+                return;
+            }
+
+            const btn = document.getElementById('split-analyze-btn');
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                let url = `/api/analyze?symbol=${currentSymbol}&expiration=${exp}&strike=${strike}&right=${right}&interval=${currentInterval}`;
+                if (startDate) url += `&start_date=${startDate}`;
+                if (endDate) url += `&end_date=${endDate}`;
+
+                const res = await authFetch(url);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Analysis failed');
+                }
+                const data = await res.json();
+                splitAnalysisData = data;
+
+                // Update right panel header
+                const label = `${currentSymbol} $${strike} ${right === 'C' ? 'Call' : 'Put'}`;
+                document.getElementById('split-right-label').textContent = label;
+
+                if (data.bars && data.bars.length > 0) {
+                    const last = data.bars[data.bars.length - 1];
+                    const first = data.bars[0];
+                    const chg = last.close - first.open;
+                    const chgPct = first.open !== 0 ? (chg / first.open * 100) : 0;
+                    document.getElementById('split-right-price').textContent = `$${last.close.toFixed(2)}`;
+                    const chgEl = document.getElementById('split-right-change');
+                    chgEl.textContent = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
+                    chgEl.className = `split-change ${chg >= 0 ? 'positive' : 'negative'}`;
+                }
+
+                // Update composite mini-gauge
+                if (data.composite) {
+                    const c = data.composite;
+                    const actionEl = document.getElementById('split-right-action');
+                    actionEl.textContent = c.action || '—';
+                    const cls = (c.action || '').toLowerCase();
+                    actionEl.className = 'split-action ' + (cls.includes('buy') ? 'buy' : cls.includes('sell') ? 'sell' : 'hold');
+                    const confPct = Math.round((c.confidence || 0) * 100);
+                    document.getElementById('split-right-conf').textContent = confPct + '% conf';
+                }
+
+                // Render charts
+                updateSplitCharts(data);
+
+            } catch(e) {
+                console.warn('Split analyze error:', e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Go';
+            }
+        }
+
+        function updateSplitCharts(data) {
+            if (!splitPriceChart) return;
+            const candleData = data.bars.map(b => ({
+                time: toEasternUnix(b.datetime),
+                open: b.open, high: b.high, low: b.low, close: b.close,
+            }));
+            const volData = data.bars.map(b => ({
+                time: toEasternUnix(b.datetime),
+                value: b.volume,
+                color: b.close >= b.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            }));
+
+            splitUnderlayBarsData = (data.underlying_bars || []).map(b => ({
+                time: toEasternUnix(b.datetime),
+                open: b.open, high: b.high, low: b.low, close: b.close,
+            }));
+
+            // Unify timestamps
+            const unified = unifyTimestamps(candleData, volData, splitUnderlayBarsData);
+
+            splitCandleSeries.setData(unified.candle);
+            splitVolumeSeries.setData(unified.volume);
+
+            // Apply underlay on split stock chart
+            if (splitUnderlaySeries) {
+                try { splitStockChart.removeSeries(splitUnderlaySeries); } catch(_) {}
+                splitUnderlaySeries = null;
+            }
+            const splitStockEl = document.getElementById('split-stock-chart');
+            if (splitUnderlayBarsData.length > 0 && splitUnderlayMode !== 'off') {
+                splitStockEl.style.display = '';
+                if (splitUnderlayMode === 'line') {
+                    splitUnderlaySeries = splitStockChart.addLineSeries({
+                        color: '#787b86', lineWidth: 1, crosshairMarkerVisible: false,
+                        priceScaleId: 'right', lastValueVisible: true,
+                    });
+                    splitUnderlaySeries.setData(unified.underlay.map(b => b.close !== undefined ? { time: b.time, value: b.close } : { time: b.time }));
+                } else {
+                    splitUnderlaySeries = splitStockChart.addCandlestickSeries({
+                        upColor: 'rgba(38,166,154,0.4)', downColor: 'rgba(239,83,80,0.4)',
+                        borderUpColor: 'rgba(38,166,154,0.6)', borderDownColor: 'rgba(239,83,80,0.6)',
+                        wickUpColor: 'rgba(38,166,154,0.4)', wickDownColor: 'rgba(239,83,80,0.4)',
+                        priceScaleId: 'right',
+                    });
+                    splitUnderlaySeries.setData(unified.underlay);
+                }
+            } else {
+                splitStockEl.style.display = 'none';
+            }
+
+            // Add signal markers
+            if (data.signals && data.signals.length > 0) {
+                const markers = data.signals
+                    .filter(s => s.signal !== 'neutral')
+                    .map(s => {
+                        const isBull = ['strong_bullish','accumulation','test_support','no_supply','pin_bar_bull'].includes(s.signal);
+                        return {
+                            time: toEasternUnix(s.datetime),
+                            position: isBull ? 'belowBar' : 'aboveBar',
+                            color: isBull ? '#26a69a' : '#ef5350',
+                            shape: isBull ? 'arrowUp' : 'arrowDown',
+                            text: s.signal.replace(/_/g, ' ').substring(0, 12),
+                        };
+                    })
+                    .sort((a, b) => a.time - b.time);
+                splitCandleSeries.setMarkers(markers);
+            }
+
+            // Scroll to last ~100 bars
+            if (unified.candle.length > 0) {
+                const total = unified.candle.length;
+                const show = Math.min(100, total);
+                const from = total - show;
+                splitPriceChart.timeScale().setVisibleLogicalRange({ from, to: total - 1 });
+                splitStockChart.timeScale().setVisibleLogicalRange({ from, to: total - 1 });
+                splitVolumeChart.timeScale().setVisibleLogicalRange({ from, to: total - 1 });
+            }
+        }
+
         // ===== ANALYSIS =====
         async function analyze() {
             const expiration = document.getElementById('expiration').value;
@@ -6344,6 +6810,8 @@
                 // Update summary text after analyze
                 updateSummaryText();
                 updateUrlParams();
+                // Update split left header if split view is active
+                if (splitActive) updateSplitLeftHeader();
                 if (isMobile() && !hasAnalyzed) {
                     hasAnalyzed = true;
                 }
@@ -7222,6 +7690,11 @@
         // Live mode button
         document.getElementById('live-btn').addEventListener('click', toggleLiveMode);
         document.getElementById('desktop-live-btn').addEventListener('click', toggleLiveMode);
+
+        // Split view button
+        document.getElementById('split-view-btn').addEventListener('click', toggleSplitView);
+        document.getElementById('split-analyze-btn').addEventListener('click', analyzeSplit);
+        document.getElementById('split-exp').addEventListener('change', loadSplitStrikes);
 
         // Desktop mock mode toggle
         document.getElementById('desktop-mock-btn').addEventListener('click', () => {
