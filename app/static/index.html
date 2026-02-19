@@ -1922,6 +1922,27 @@
             background: #7b1fa2;
             color: #fff;
         }
+        /* VWAP toggle styling */
+        .vwap-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-right: 10px;
+            border-right: 1px solid #2a2e39;
+            margin-right: 2px;
+        }
+        .vwap-toggle .vwap-label {
+            font-size: 10px;
+            color: #787b86;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .vwap-toggle .underlay-btn.active {
+            background: #0288d1;
+            color: #fff;
+        }
 
         .toggle-group {
             display: flex;
@@ -4011,6 +4032,15 @@
                             <button class="underlay-btn active" data-underlay="candle">CANDLE</button>
                         </div>
                     </div>
+                    <div class="vwap-toggle" style="border-left:1px solid #2a2e39;padding-left:10px;margin-left:0;">
+                        <span class="vwap-label">VWAP:</span>
+                        <div class="underlay-btn-group">
+                            <button class="underlay-btn vwap-opt-btn active" data-vwap="off" data-vwaptarget="option">OFF</button>
+                            <button class="underlay-btn vwap-opt-btn" data-vwap="on" data-vwaptarget="option">Opt</button>
+                            <button class="underlay-btn vwap-stock-btn active" data-vwap="off" data-vwaptarget="stock">OFF</button>
+                            <button class="underlay-btn vwap-stock-btn" data-vwap="on" data-vwaptarget="stock">Stk</button>
+                        </div>
+                    </div>
                     <div class="ichi-toggle" style="border-left:1px solid #2a2e39;padding-left:10px;margin-left:0;">
                         <span class="ichi-label">Cloud:</span>
                         <div class="underlay-btn-group">
@@ -4068,6 +4098,16 @@
                         <button class="underlay-btn" data-underlay="off" id="underlay-off">OFF</button>
                         <button class="underlay-btn" data-underlay="line" id="underlay-line">LINE</button>
                         <button class="underlay-btn active" data-underlay="candle" id="underlay-candle">CANDLE</button>
+                    </div>
+                </div>
+
+                <div class="vwap-toggle desktop-filter-item">
+                    <span class="vwap-label">VWAP:</span>
+                    <div class="underlay-btn-group">
+                        <button class="underlay-btn vwap-opt-btn active" data-vwap="off" data-vwaptarget="option">OFF</button>
+                        <button class="underlay-btn vwap-opt-btn" data-vwap="on" data-vwaptarget="option">Option</button>
+                        <button class="underlay-btn vwap-stock-btn active" data-vwap="off" data-vwaptarget="stock">OFF</button>
+                        <button class="underlay-btn vwap-stock-btn" data-vwap="on" data-vwaptarget="stock">Stock</button>
                     </div>
                 </div>
 
@@ -4585,6 +4625,12 @@
         let ichiStkSpanALine = null, ichiStkSpanBLine = null;
         let ichiStkChikou = null;
         let ichiStkCloudGreen = null, ichiStkCloudRed = null;
+
+        // VWAP state
+        let vwapOptionEnabled = false;
+        let vwapStockEnabled = false;
+        let vwapOptSeries = null;   // line series on price chart
+        let vwapStkSeries = null;   // line series on stock chart
 
         // Unified timestamp data for multi-chart sync (ensures all charts share
         // the same set of timestamps so logical-range sync works perfectly)
@@ -6367,6 +6413,24 @@
                 });
             });
 
+            // ── VWAP toggle buttons ──
+            document.querySelectorAll('.vwap-opt-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.vwap-opt-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    vwapOptionEnabled = btn.dataset.vwap === 'on';
+                    applyVwapOption();
+                });
+            });
+            document.querySelectorAll('.vwap-stock-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.vwap-stock-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    vwapStockEnabled = btn.dataset.vwap === 'on';
+                    applyVwapStock();
+                });
+            });
+
             // ── Ichimoku toggle buttons ──
             document.querySelectorAll('.ichi-opt-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -7001,13 +7065,17 @@
 
             applyUnderlay();
 
-            // Apply Ichimoku clouds if enabled
+            // Apply overlays if enabled
             applyIchimokuOption();
             applyIchimokuStock();
 
             // Store for re-filtering and update markers
             lastAnalysisData = data;
             updateFilteredMarkers(data.signals || []);
+
+            // Apply VWAP after lastAnalysisData is set (option VWAP reads it)
+            applyVwapOption();
+            applyVwapStock();
             
             // Scroll to show last ~100 bars using logical range (index-based)
             if (candleData.length > 0) {
@@ -7090,6 +7158,85 @@
                 try { stockChart.removeSeries(underlaySeries); } catch(_) {}
                 underlaySeries = null;
             }
+        }
+
+        // ===== VWAP FUNCTIONS =====
+        // Calculate VWAP from bars with {time, open, high, low, close, volume}
+        // Resets at each new trading day (Eastern time)
+        function calculateVWAP(bars) {
+            if (!bars || bars.length === 0) return [];
+            const result = [];
+            let cumTPV = 0; // cumulative (typical price * volume)
+            let cumVol = 0; // cumulative volume
+            let prevDay = null;
+
+            for (const bar of bars) {
+                if (bar.open === undefined || bar.volume === undefined) continue;
+                // Detect day boundary — reset accumulators
+                const d = new Date(bar.time * 1000);
+                const dayStr = d.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+                if (dayStr !== prevDay) {
+                    cumTPV = 0;
+                    cumVol = 0;
+                    prevDay = dayStr;
+                }
+                const tp = (bar.high + bar.low + bar.close) / 3; // typical price
+                cumTPV += tp * bar.volume;
+                cumVol += bar.volume;
+                const vwap = cumVol > 0 ? cumTPV / cumVol : tp;
+                result.push({ time: bar.time, value: vwap });
+            }
+            return result;
+        }
+
+        // Apply VWAP line to option (price) chart
+        function applyVwapOption() {
+            if (vwapOptSeries) {
+                try { priceChart.removeSeries(vwapOptSeries); } catch(_) {}
+                vwapOptSeries = null;
+            }
+            if (!vwapOptionEnabled || !lastAnalysisData || !lastAnalysisData.bars) return;
+            // Build bars with volume for VWAP calc
+            const bars = lastAnalysisData.bars.map(b => ({
+                time: toEasternUnix(b.datetime),
+                open: b.open, high: b.high, low: b.low, close: b.close,
+                volume: b.volume || 0,
+            }));
+            const vwapData = calculateVWAP(bars);
+            if (vwapData.length === 0) return;
+
+            vwapOptSeries = priceChart.addLineSeries({
+                color: '#00bcd4',
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                lastValueVisible: true,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+                title: 'VWAP',
+            });
+            vwapOptSeries.setData(vwapData);
+        }
+
+        // Apply VWAP line to stock (underlay) chart
+        function applyVwapStock() {
+            if (vwapStkSeries) {
+                try { stockChart.removeSeries(vwapStkSeries); } catch(_) {}
+                vwapStkSeries = null;
+            }
+            if (!vwapStockEnabled || !underlayBarsData || underlayBarsData.length === 0) return;
+            const vwapData = calculateVWAP(underlayBarsData);
+            if (vwapData.length === 0) return;
+
+            vwapStkSeries = stockChart.addLineSeries({
+                color: '#00bcd4',
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                lastValueVisible: true,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+                title: 'VWAP',
+            });
+            vwapStkSeries.setData(vwapData);
         }
 
         // ===== ICHIMOKU CLOUD FUNCTIONS =====
@@ -7435,6 +7582,8 @@
 
             // Re-apply Ichimoku on stock chart after underlay rebuild
             applyIchimokuStock();
+            // Re-apply VWAP on stock chart after underlay rebuild
+            applyVwapStock();
         }
 
         function applySRLines() {
