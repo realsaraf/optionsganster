@@ -745,7 +745,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   </div>
   <div class="spacer"></div>
   <div class="sym-wrap">
-    <input class="sym-input" id="symInput" value="QQQ" maxlength="6" placeholder="Ticker" spellcheck="false" autocomplete="off">
+    <input class="sym-input" id="symInput" value="QQQ" maxlength="8" placeholder="QQQ / /ES" spellcheck="false" autocomplete="off">
     <div class="sym-dd" id="symDropdown"></div>
     <button class="mag-btn" onclick="openSearchModal()" title="Search symbols">🔍</button>
   </div>
@@ -915,7 +915,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
           <span class="opt-tracker-ticker" id="optTrackTicker">—</span>
           <span class="opt-tracker-price" id="optTrackPrice">—</span>
           <span class="opt-tracker-change" id="optTrackChange"></span>
+          <span id="optTrackVol" style="font-size:.65rem;color:var(--muted);margin-left:4px"></span>
           <div class="spacer"></div>
+          <span style="font-size:.55rem;color:var(--muted)"><span style="color:rgba(38,166,154,.9)">▌</span>opt vol &nbsp;<span style="color:rgba(96,165,250,.9)">▌</span>stk vol</span>
           <button class="btn" onclick="stopTracking()" style="font-size:.65rem;padding:2px 8px">✕ Stop</button>
         </div>
         <div id="lwc-opt"></div>
@@ -936,7 +938,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
     </div>
     <!-- ACTION TAB -->
     <div class="tab-pane active" id="tab-action">
-      <div class="panel">
+      <!-- Chain & FV: equity-only panels -->
+      <div class="panel equity-only">
         <div class="pnl-title">Chain Snapshot</div>
         <div class="chain-grid">
           <div class="ci"><div class="ck">IV Rank</div><div class="cv" id="cIvR">—</div></div>
@@ -947,7 +950,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
           <div class="ci"><div class="ck">Wtd IV</div><div class="cv" id="cWiv">—</div></div>
         </div>
       </div>
-      <div class="panel">
+      <div class="panel equity-only">
         <div class="pnl-title">Fair Value</div>
         <div id="fvPanel" style="color:var(--muted);font-size:.73rem">—</div>
       </div>
@@ -1023,9 +1026,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 </nav>
 
 <script>
-const S={bars:[],allBars:[],barStart:0,ind:null,levels:[],alerts:[],regime:null,chain:null,vpa:null,fv:null,sym:'QQQ',briefing:null,vol_regime:null,proximity_score:0,proximity_detail:''};
+const S={bars:[],allBars:[],barStart:0,ind:null,levels:[],alerts:[],regime:null,chain:null,vpa:null,fv:null,sym:'QQQ',briefing:null,vol_regime:null,proximity_score:0,proximity_detail:'',assetClass:'equity',proxyTicker:''};;
 let _feedWs=null,_topAlert=null,_playbook='all',_chartRange='today',_interval=5;
-const _OPT={active:false,ticker:'',chart:null,series:null,bars:[]};
+const _OPT={active:false,ticker:'',chart:null,series:null,bars:[],optVolSeries:null,undVolSeries:null};
 const DPR=window.devicePixelRatio||1;
 const C={up:'rgba(38,166,154,.85)',dn:'rgba(239,83,80,.85)',vwap:'#60a5fa',vband:'rgba(96,165,250,.18)',
   e9:'#fbbf24',e20:'#c084fc',entry:'#3b82f6',stop:'#ef4444',t1:'#22c55e',t2:'#86efac',
@@ -1061,12 +1064,39 @@ function setPb(mode){
   else fetchBriefing(S.sym);
 }
 
+// ── Asset-class mode: hide equity-only features for futures ──
+function _applyAssetClass(){
+  const isFut=S.assetClass==='futures';
+  document.querySelectorAll('.equity-only').forEach(el=>el.style.display=isFut?'none':'');
+  // Stop option tracking if user switched to a futures symbol
+  if(isFut&&_OPT.active) stopTracking();
+  // Tiny badge next to sym label
+  document.querySelectorAll('.fut-badge').forEach(b=>b.remove());
+  if(isFut){
+    const badge=document.createElement('span');
+    badge.className='fut-badge';
+    const proxyNote=S.proxyTicker?` via ${S.proxyTicker}`:'';
+    badge.textContent='FUT'+proxyNote;
+    badge.title=S.proxyTicker?`Showing ${S.proxyTicker} ETF data as proxy (futures data requires upgraded Polygon plan)`:'Futures mode';
+    badge.style.cssText='font-size:.58rem;font-weight:700;background:rgba(251,191,36,.18);color:#fbbf24;border:1px solid rgba(251,191,36,.4);border-radius:6px;padding:1px 6px;margin-left:5px;vertical-align:middle;cursor:help';
+    const lbl=document.querySelector('.sym-wrap');
+    if(lbl) lbl.appendChild(badge);
+  }
+}
+
 function getVisibleBars(){
   const all=S.allBars||[];
   if(!all.length) return {bars:[],start:0};
   const now=new Date();
   let cutoff=null;
   if(_chartRange==='today'){
+    // Futures trade ~23h/day – use a 27h window so the overnight session is always visible
+    if(S.assetClass==='futures'){
+      cutoff=new Date(now-27*3600*1000);
+      const idx=all.findIndex(b=>new Date(b.datetime)>=cutoff);
+      const start=idx>=0?idx:0;
+      return {bars:all.slice(start),start};
+    }
     // Use local YYYY-MM-DD to match bar datetime strings
     const todayStr=now.toLocaleDateString('en-CA'); // YYYY-MM-DD
     let idx=all.findIndex(b=>(b.datetime||'').startsWith(todayStr));
@@ -1092,6 +1122,41 @@ function setChartRange(r){
   document.querySelectorAll('.rng-pill').forEach(p=>p.classList.toggle('active',p.dataset.rng===r));
   const v=getVisibleBars();S.bars=v.bars;S.barStart=v.start;
   if(_lwcChart) _applyChartRange(); else {redrawChart();}
+  _pushUrl();
+}
+
+// ── URL Query-Param State Persistence ────────────────────────
+function _pushUrl(){
+  const p=new URLSearchParams();
+  p.set('sym',S.sym||'QQQ');
+  p.set('tf',String(_interval));
+  p.set('range',_chartRange);
+  if(_feedWs) p.set('live','1');
+  if(_OPT.active&&_OPT.ticker) p.set('track',_OPT.ticker);
+  history.replaceState(null,'',location.pathname+'?'+p.toString());
+}
+function _restoreUrl(){
+  const p=new URLSearchParams(location.search);
+  if(p.has('sym')){
+    const sym=p.get('sym').toUpperCase();
+    S.sym=sym;
+    const inp=document.getElementById('symInput');
+    if(inp) inp.value=sym;
+  }
+  if(p.has('tf')){
+    const iv=parseInt(p.get('tf'));
+    if(iv>0){
+      _interval=iv;
+      document.querySelectorAll('.tf-pill').forEach(pill=>pill.classList.toggle('active',parseInt(pill.dataset.tf)===iv));
+    }
+  }
+  if(p.has('range')){
+    const r=p.get('range');
+    if(['today','24h','3d','5d','1w'].includes(r)){
+      _chartRange=r;
+      document.querySelectorAll('.rng-pill').forEach(pill=>pill.classList.toggle('active',pill.dataset.rng===r));
+    }
+  }
 }
 
 async function fetchAll(nocache=false){
@@ -1116,11 +1181,12 @@ async function fetchAll(nocache=false){
   await Promise.all([fetchSignals(sym,nocache),fetchBriefing(sym)]);
   setLoader(false);
   document.getElementById('last-update').textContent='Updated '+new Date().toLocaleTimeString();
+  _pushUrl();
 }
 
 async function fetchSignals(sym,nocache=false){
   try{
-    const r=await fetch(`/api/signals/${sym}?interval=${_interval}${nocache?'&nocache=true':''}`);
+    const r=await fetch(`/api/signals/${encodeURIComponent(sym)}?interval=${_interval}${nocache?'&nocache=true':''}`);
     if(!r.ok){const e=await r.json().catch(()=>({detail:r.statusText}));toast('Error: '+(e.detail||r.statusText),'err');return;}
     const d=await r.json();
     S.allBars=d.bars||[];S.ind=d.indicators||null;S.levels=d.key_levels||[];
@@ -1129,6 +1195,9 @@ async function fetchSignals(sym,nocache=false){
     S.vol_regime=d.volume_regime||null;
     S.proximity_score=d.proximity_score||0;
     S.proximity_detail=d.proximity_detail||'';
+    S.assetClass=d.asset_class||'equity';
+    S.proxyTicker=d.proxy_ticker||'';
+    _applyAssetClass();
     const _v=getVisibleBars();S.bars=_v.bars;S.barStart=_v.start;
     redrawChart();renderRsi();renderAlerts();renderLevels();renderChain();renderVpa();renderFv();renderVolRegime();renderProximity();
   }catch(e){toast('Signals error: '+e.message,'err');}
@@ -1136,7 +1205,7 @@ async function fetchSignals(sym,nocache=false){
 
 async function fetchBriefing(sym){
   try{
-    const r=await fetch(`/api/briefing/${sym}?playbook=${_playbook}&interval=${_interval}`);
+    const r=await fetch(`/api/briefing/${encodeURIComponent(sym)}?playbook=${_playbook}&interval=${_interval}`);
     if(!r.ok){
       const e=await r.json().catch(()=>({detail:r.statusText}));
       console.error('[briefing] HTTP '+r.status+':',e.detail||r.statusText);
@@ -1158,6 +1227,7 @@ function toggleLive(){
   if(_feedWs){
     disconnectFeedWs();
     disconnectPriceWs();
+    stopLiveRefresh();
     btn.innerHTML='\ud83d\udce1';
     btn.style.borderColor='';
     btn.style.background='';
@@ -1167,11 +1237,25 @@ function toggleLive(){
     fetchAll(true);
     connectFeedWs(S.sym);
     connectPriceWs();
+    startLiveRefresh();
     btn.innerHTML='\ud83d\udce1';
     btn.style.borderColor='var(--green)';
     btn.style.background='rgba(16,185,129,.15)';
     document.getElementById('liveDot').classList.add('on');
   }
+  _pushUrl();
+}
+
+// ── Periodic live refresh (fallback when WS ticks are sparse) ──
+let _liveRefreshTimer=null;
+function startLiveRefresh(){
+  if(_liveRefreshTimer) return;
+  _liveRefreshTimer=setInterval(()=>{
+    if(_feedWs&&S.sym&&!BT.active) fetchSignals(S.sym);
+  },60000); // refresh bars every 60s
+}
+function stopLiveRefresh(){
+  if(_liveRefreshTimer){clearInterval(_liveRefreshTimer);_liveRefreshTimer=null;}
 }
 
 // ── Feed WebSocket — replaces setInterval REST polling ────────
@@ -1249,7 +1333,9 @@ function disconnectPriceWs(){
 function syncPriceSubs(){
   if(!_priceWs||_priceWs.readyState!==WebSocket.OPEN) return;
   const needed=new Set();
-  if(S.sym) needed.add(S.sym);
+  // For futures, subscribe to the ETF proxy ticker instead of the raw /NQ symbol
+  const mainTicker = S.proxyTicker || S.sym;
+  if(mainTicker) needed.add(mainTicker);
   (S.alerts||[]).forEach(a=>{if(a.option&&a.option.ticker) needed.add(a.option.ticker);});
   if(_OPT&&_OPT.active&&_OPT.ticker) needed.add(_OPT.ticker);
   const toAdd=[...needed].filter(t=>!_priceSubs.has(t));
@@ -1269,7 +1355,8 @@ function onPriceTick(msg){
   const {ticker,price,prev,change}=msg;
   const dir=change>0.0001?'up':change<-0.0001?'dn':'';
   // Underlying → header price label
-  if(ticker===S.sym){
+  // For futures, the tick arrives as the proxy ETF ticker (e.g. QQQ for /NQ)
+  if(ticker===S.sym || (S.proxyTicker && ticker===S.proxyTicker)){
     const el=document.getElementById('priceLbl');
     if(el){el.textContent=price.toFixed(2);flashEl(el,dir);}
     // day change vs first bar open
@@ -1281,11 +1368,24 @@ function onPriceTick(msg){
     }
     // Update any data-und spans in alert cards
     document.querySelectorAll('[data-und]').forEach(el=>{el.textContent=price.toFixed(2);flashEl(el,dir);});
-    // ✦ Live chart candle update
+    // ✦ Live chart candle update — create new bar when period advances
     if(_candleSeries && S.allBars.length && !BT.active){
+      const intervalMs=(_interval||5)*60*1000;
       const last=S.allBars[S.allBars.length-1];
-      last.close=price;last.high=Math.max(last.high,price);last.low=Math.min(last.low,price);
-      _candleSeries.update({time:_lwcTime(last.datetime),open:last.open,high:last.high,low:last.low,close:last.close});
+      const lastMs=_lwcTime(last.datetime)*1000;  // ET-as-UTC ms
+      const nowMs=_etNowMs();                      // current ET-as-UTC ms
+      if(nowMs-lastMs>=intervalMs){
+        // New bar period — floor to interval boundary
+        const barStartMs=Math.floor(nowMs/intervalMs)*intervalMs;
+        const bd=new Date(barStartMs);
+        const dtStr=bd.getUTCFullYear()+'-'+String(bd.getUTCMonth()+1).padStart(2,'0')+'-'+String(bd.getUTCDate()).padStart(2,'0')+' '+String(bd.getUTCHours()).padStart(2,'0')+':'+String(bd.getUTCMinutes()).padStart(2,'0')+':00';
+        const newBar={datetime:dtStr,open:price,high:price,low:price,close:price,volume:0,vwap:price,accumulated_volume:0};
+        S.allBars.push(newBar);
+        _candleSeries.update({time:_lwcTime(dtStr),open:price,high:price,low:price,close:price});
+      } else {
+        last.close=price;last.high=Math.max(last.high,price);last.low=Math.min(last.low,price);
+        _candleSeries.update({time:_lwcTime(last.datetime),open:last.open,high:last.high,low:last.low,close:last.close});
+      }
     }
   }
   // Option tickers → data-opt spans
@@ -1299,14 +1399,25 @@ function onPriceTick(msg){
     if(oEl){oEl.textContent='$'+price.toFixed(2);flashEl(oEl,dir);}
     const ocEl=document.getElementById('optTrackChange');
     if(ocEl){ocEl.textContent=(change>=0?'+':'')+change.toFixed(4);ocEl.className='opt-tracker-change '+(change>=0?'change-up':'change-dn');}
+    const intervalMs=(_interval||5)*60*1000;
     if(_OPT.bars.length){
       const lb=_OPT.bars[_OPT.bars.length-1];
-      lb.close=price;lb.high=Math.max(lb.high,price);lb.low=Math.min(lb.low,price);
-      _OPT.series.update({time:lb.time,open:lb.open,high:lb.high,low:lb.low,close:lb.close});
+      const lastMs=lb.time*1000;
+      const nowMs=_etNowMs();
+      if(nowMs-lastMs>=intervalMs){
+        const barStartMs=Math.floor(nowMs/intervalMs)*intervalMs;
+        const nb={time:Math.floor(barStartMs/1000),open:price,high:price,low:price,close:price,volume:0};
+        _OPT.bars.push(nb);
+        _OPT.series.update({time:nb.time,open:price,high:price,low:price,close:price});
+      } else {
+        lb.close=price;lb.high=Math.max(lb.high,price);lb.low=Math.min(lb.low,price);
+        _OPT.series.update({time:lb.time,open:lb.open,high:lb.high,low:lb.low,close:lb.close});
+      }
     } else {
-      const t=Math.floor(Date.now()/1000);
-      const b={time:t,open:price,high:price,low:price,close:price};
-      _OPT.bars.push(b);_OPT.series.update(b);
+      const t=Math.floor(_etNowMs()/1000);
+      const b={time:t,open:price,high:price,low:price,close:price,volume:0};
+      _OPT.bars.push(b);
+      _OPT.series.update({time:b.time,open:price,high:price,low:price,close:price});
     }
   }
 }
@@ -1559,13 +1670,26 @@ function renderPositioningStrip(b){
 // ── Lightweight Charts state ────────────────────────────────
 let _lwcChart=null,_lwcRsi=null;
 let _candleSeries=null,_vwapSeries=null,_vwapUSeries=null,_vwapLSeries=null;
-let _ema9Series=null,_ema20Series=null;
+let _ema9Series=null,_ema20Series=null,_volSeries=null;
 let _rsiLineSeries=null,_syncLock=false;
 let _priceLinesRef=[];
 
 function _lwcTime(dtStr){
   if(!dtStr) return 0;
-  return Math.floor(new Date(dtStr.replace(' ','T')).getTime()/1000);
+  // Append 'Z' so the ET naive datetime is treated as UTC epoch.
+  // Combined with the UTC timeFormatter on the chart, the axis always
+  // shows the exact Eastern Time the backend produced — no browser-tz shift.
+  return Math.floor(new Date(dtStr.replace(' ','T')+'Z').getTime()/1000);
+}
+function _etNowMs(){
+  // Return current Eastern Time wall-clock expressed as fake-UTC milliseconds
+  // so live bars get the same 'epoch' convention as _lwcTime / historical bars.
+  const s=new Date().toLocaleString('en-US',{timeZone:'America/New_York',
+    year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const m=s.match(/(\d+)\/(\d+)\/(\d+)[,\s]+(\d+):(\d+):(\d+)/);
+  if(!m) return Date.now();
+  const [,mo,dd,yy,hh,mm,ss]=m;
+  return Date.UTC(+yy,+mo-1,+dd,+hh,+mm,+ss);
 }
 
 function _ensureChart(){
@@ -1576,12 +1700,15 @@ function _ensureChart(){
     layout:{background:{type:'solid',color:'#111827'},textColor:'#94a3b8'},
     grid:{vertLines:{color:'rgba(30,41,59,.7)'},horzLines:{color:'rgba(30,41,59,.7)'}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-    rightPriceScale:{borderColor:'#1e293b',scaleMargins:{top:0.06,bottom:0.06}},
+    localization:{timeFormatter:t=>{const d=new Date(t*1000);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0');}},
+    rightPriceScale:{borderColor:'#1e293b',scaleMargins:{top:0.06,bottom:0.22}},
+    leftPriceScale:{visible:false,scaleMargins:{top:0.82,bottom:0.02}},
     timeScale:{borderColor:'#1e293b',timeVisible:true,secondsVisible:false,rightOffset:8,barSpacing:6,minBarSpacing:1},
     handleScroll:{mouseWheel:true,pressedMouseMove:true},
     handleScale:{mouseWheel:true,pinch:true},
   });
   _candleSeries=_lwcChart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+  _volSeries=_lwcChart.addHistogramSeries({color:'rgba(100,116,139,0.4)',priceFormat:{type:'volume'},priceScaleId:'left',lastValueVisible:false,priceLineVisible:false});
   _vwapSeries  =_lwcChart.addLineSeries({color:'#60a5fa',lineWidth:1.5,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
   _vwapUSeries =_lwcChart.addLineSeries({color:'rgba(96,165,250,.35)',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
   _vwapLSeries =_lwcChart.addLineSeries({color:'rgba(96,165,250,.35)',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
@@ -1648,6 +1775,17 @@ function redrawChart(){
   });
   cData.sort((a,b)=>a.time-b.time);
   _candleSeries.setData(cData);
+  // Volume bars (colour-coded by candle direction, normalized to own scale)
+  if(_volSeries){
+    const maxV=Math.max(...S.allBars.map(b=>b.volume||0),1);
+    const vData=[];
+    S.allBars.forEach(b=>{
+      const t=_lwcTime(b.datetime);
+      vData.push({time:t,value:(b.volume||0)/maxV*100,color:b.close>=b.open?'rgba(38,166,154,0.45)':'rgba(239,83,80,0.4)'});
+    });
+    vData.sort((a,b)=>a.time-b.time);
+    _volSeries.setData(vData);
+  }
   // Overlay series visibility + data
   _vwapSeries.applyOptions({visible:!!showV});
   _vwapUSeries.applyOptions({visible:!!showV});
@@ -1758,7 +1896,7 @@ function renderAlerts(){
     <span><span class="opt-k">Est.$</span>&nbsp;<span class="opt-v">${(a.option.entry_premium_est||0).toFixed(2)}</span></span>
     <span><span class="opt-k">Live&nbsp;$</span>&nbsp;<span class="opt-v tick-cell" data-opt="${esc(a.option.ticker||'')}">—</span></span>
     <span><span class="opt-k">DTE</span>&nbsp;<span class="opt-v">${a.option.dte??'—'}d</span></span>
-    <button class="btn" style="margin-left:auto;font-size:.62rem;padding:2px 8px;background:rgba(59,130,246,.15);border-color:rgba(59,130,246,.4);color:var(--accent)" onclick="trackOption('${esc(a.option.ticker)}')">📊 Track</button>
+    <button class="btn" style="margin-left:auto;font-size:.62rem;padding:2px 8px;background:rgba(59,130,246,.15);border-color:rgba(59,130,246,.4);color:var(--accent)${S.assetClass==='futures'?';display:none':''}" onclick="trackOption('${esc(a.option.ticker)}')">📊 Track</button>
   </div>`:''}
   ${(a.kill_switch_conditions||[]).length?`<div class="killswitches"><div class="ks-title">Kill Switches</div>${a.kill_switch_conditions.map(k=>`<div class="ks-item">${esc(k)}</div>`).join('')}</div>`:''}
   <div class="state-bar">
@@ -2325,8 +2463,29 @@ function _simulateTrades(snaps){
   const trades=[];
   let pos=null;
   let cooldown=0;
-  const MAX_TRADES=5;
+  const isATM=_btMode==='atm';
+  const cfg=isATM?{
+    maxTrades:5, cooldownBars:2, confMin:0.30, regScoreMin:1, rrMin:0.8,
+    premiumRiskPct:0.2, dollarsPerTrade:400, optTakeProfitPct:null, optStopLossPct:0.12,
+    maxDailyLosses:2, entryCutoffUtcMin:20*60, allowChoppy:true, allowRangeBound:true,
+    directionMode:'put_only', requireTrendRegime:false,
+    srReversalOnly:false, srProximityPct:0.25, srMinStrength:40, srWickRatioMin:0.20,
+    srReversalBoost:1, srReversalPenalty:1
+  }:{
+    maxTrades:5, cooldownBars:3, confMin:0.45, regScoreMin:1, rrMin:1.2,
+    premiumRiskPct:1.0, dollarsPerTrade:null, optTakeProfitPct:null, optStopLossPct:null,
+    maxDailyLosses:null, entryCutoffUtcMin:null, allowChoppy:true, allowRangeBound:true,
+    directionMode:'both', requireTrendRegime:false,
+    srReversalOnly:false, srProximityPct:0.15, srMinStrength:60, srWickRatioMin:0.35,
+    srReversalBoost:0, srReversalPenalty:0
+  };
   const iv=_estimateIV(snaps);
+  const fixedPremiumPerTrade=isATM
+    ? Math.max(0, cfg.dollarsPerTrade!=null ? cfg.dollarsPerTrade : (_btCapital*cfg.premiumRiskPct))
+    : null;
+  let dayPnl=0;
+  let dayLosses=0;
+  let dayLocked=false;
 
   for(let i=0;i<snaps.length;i++){
     const snap=snaps[i];
@@ -2335,16 +2494,26 @@ function _simulateTrades(snaps){
     const ideas=snap.trade_ideas||[];
     const regime=snap.regime||{};
     const indicators=snap.indicators||{};
+    const keyLevels=snap.key_levels||[];
+    const bars=snap.bars||[];
 
     // ── EXIT LOGIC ──
     if(pos){
       let exitReason=null;
+      let currOptPrice=null;
+      if(isATM){
+        const minElapsed=_minutesBetween(pos.entryTime, time);
+        currOptPrice=_estimateOptPrice(price, pos.strike, pos.type==='CALLS'?'call':'put', 5, minElapsed/(6.5*60), iv);
+        if(currOptPrice<0.01) currOptPrice=0.01;
+        if(cfg.optTakeProfitPct!=null && currOptPrice>=pos.optEntryPrice*(1+cfg.optTakeProfitPct)) exitReason='OPT_TP';
+        if(cfg.optStopLossPct!=null && !exitReason && currOptPrice<=pos.optEntryPrice*(1-cfg.optStopLossPct)) exitReason='OPT_SL';
+      }
       if(pos.type==='CALLS'){
-        if(price>=pos.adjTarget) exitReason='TARGET';
-        else if(price<=pos.adjStop) exitReason='STOP';
+        if(!exitReason && price>=pos.adjTarget) exitReason='TARGET';
+        else if(!exitReason && price<=pos.adjStop) exitReason='STOP';
       } else {
-        if(price<=pos.adjTarget) exitReason='TARGET';
-        else if(price>=pos.adjStop) exitReason='STOP';
+        if(!exitReason && price<=pos.adjTarget) exitReason='TARGET';
+        else if(!exitReason && price>=pos.adjStop) exitReason='STOP';
       }
       // Trailing stop: move stop to breakeven once 60% of target is reached
       if(!exitReason && pos.adjTarget && pos.entry){
@@ -2367,27 +2536,31 @@ function _simulateTrades(snaps){
         const ulPnl=pos.type==='CALLS'?(price-pos.entry):(pos.entry-price);
         const ulPnlPct=pos.entry?ulPnl/pos.entry*100:0;
         let optEntry=null,optExit=null,optPnl=0,optPnlPct=0,contracts=0;
-        if(_btMode==='atm'){
-          const minElapsed=_minutesBetween(pos.entryTime, time);
+        if(isATM){
           optEntry=pos.optEntryPrice;
-          optExit=_estimateOptPrice(price, pos.strike, pos.type==='CALLS'?'call':'put', 5, minElapsed/(6.5*60), iv);
-          if(optExit<0.01) optExit=0.01;
+          optExit=currOptPrice;
           contracts=pos.contracts;
           optPnl=contracts*100*(optExit-optEntry);
           optPnlPct=optEntry>0?(optExit-optEntry)/optEntry*100:0;
+          dayPnl+=optPnl;
+          if(optPnl<=0){
+            dayLosses+=1;
+            if(cfg.maxDailyLosses!=null && dayLosses>=cfg.maxDailyLosses) dayLocked=true;
+          }
         }
         trades.push({type:pos.type, entry:pos.entry, entryTime:pos.entryTime,
           exit:price, exitTime:time, pnl:ulPnl, pnlPct:ulPnlPct,
           reason:exitReason, entrySnap:pos.snapIdx, exitSnap:i, ideaType:pos.ideaType,
           optEntry, optExit, optPnl, optPnlPct, contracts:pos.contracts, strike:pos.strike});
         pos=null;
-        cooldown=3; // 15 min cooldown
+        cooldown=cfg.cooldownBars;
         continue;
       }
     }
 
+    if(dayLocked) continue;
     if(cooldown>0){cooldown--;continue;}
-    if(trades.length>=MAX_TRADES) continue;
+    if(trades.length>=cfg.maxTrades) continue;
     if(pos) continue;
 
     // ── ENTRY LOGIC: multi-factor confirmation ──
@@ -2397,13 +2570,50 @@ function _simulateTrades(snaps){
     const best=sorted[0];
     const dir=best.direction||'';
     const conf=best.confidence||0;
-    if(conf<0.45 || (dir!=='CALL' && dir!=='PUT') || !best.entry_level) continue;
+    if(conf<cfg.confMin || (dir!=='CALL' && dir!=='PUT') || !best.entry_level) continue;
+    if(cfg.directionMode==='call_only' && dir!=='CALL') continue;
+    if(cfg.directionMode==='put_only' && dir!=='PUT') continue;
 
     // 2) Regime confirmation — trade WITH the regime, not against it
     const regName=(regime.regime||'').toUpperCase();
+    if(isATM && !cfg.allowChoppy && regName==='CHOPPY') continue;
+    if(isATM && !cfg.allowRangeBound && regName==='RANGE_BOUND') continue;
+    if(isATM && cfg.requireTrendRegime && regName!=='TREND_UP' && regName!=='TREND_DOWN') continue;
+    if(isATM && cfg.entryCutoffUtcMin!=null && _timeToMin(_extractHHMM(time))>cfg.entryCutoffUtcMin) continue;
     const vwapPos=(regime.price_vs_vwap||'').toLowerCase();
     const rsiVal=regime.rsi_current||50;
     const atr=regime.atr_current||0;
+    let srMatch=null;
+
+    if(cfg.srReversalOnly || (cfg.srReversalBoost||0)!==0 || (cfg.srReversalPenalty||0)!==0){
+      const lb=bars.length?bars[bars.length-1]:null;
+      const o=lb?(lb.open||price):price;
+      const h=lb?(lb.high||price):price;
+      const l=lb?(lb.low||price):price;
+      const c=lb?(lb.close||price):price;
+      const barRange=Math.max(h-l,1e-6);
+      const body=Math.abs(c-o);
+      const lowerWick=Math.max(0,Math.min(o,c)-l);
+      const upperWick=Math.max(0,h-Math.max(o,c));
+      const bullReject=(c>=o)&&(lowerWick/barRange>=cfg.srWickRatioMin)&&(body/barRange<=0.5);
+      const bearReject=(c<=o)&&(upperWick/barRange>=cfg.srWickRatioMin)&&(body/barRange<=0.5);
+
+      const supports=keyLevels.filter(k=>k.kind==='support'&&(k.strength||0)>=cfg.srMinStrength);
+      const resistances=keyLevels.filter(k=>k.kind==='resistance'&&(k.strength||0)>=cfg.srMinStrength);
+      let nearSupport=false, nearResistance=false;
+      if(price>0){
+        if(supports.length){
+          const d=Math.min(...supports.map(k=>Math.abs(price-(k.price||price))/price*100));
+          nearSupport=d<=cfg.srProximityPct;
+        }
+        if(resistances.length){
+          const d=Math.min(...resistances.map(k=>Math.abs(price-(k.price||price))/price*100));
+          nearResistance=d<=cfg.srProximityPct;
+        }
+      }
+      srMatch=dir==='CALL' ? (nearSupport&&bullReject) : (nearResistance&&bearReject);
+      if(cfg.srReversalOnly && !srMatch) continue;
+    }
 
     let regScore=0; // accumulate confirmation points
     // Regime direction
@@ -2440,8 +2650,11 @@ function _simulateTrades(snaps){
       if(dir==='PUT' && e9>e20) regScore-=1;
     }
 
+    if(srMatch===true) regScore+=(cfg.srReversalBoost||0);
+    else if(srMatch===false) regScore-=(cfg.srReversalPenalty||0);
+
     // Need at least 1 confirmation point to enter (don't fight the market)
-    if(regScore<1) continue;
+    if(regScore<cfg.regScoreMin) continue;
 
     // 4) R:R and stop/target calculation
     const entryLvl=best.entry_level, stopLvl=best.stop_level||0, tgt1=best.target_1||0;
@@ -2459,15 +2672,19 @@ function _simulateTrades(snaps){
       const rr=riskAmt>0?(rewardAmt/riskAmt):1.5;
       riskAmt=minRisk; rewardAmt=minRisk*rr;
     }
-    if(riskAmt<=0||rewardAmt<=0||rewardAmt/riskAmt<1.2) continue;
+    if(riskAmt<=0||rewardAmt<=0||rewardAmt/riskAmt<cfg.rrMin) continue;
 
     const adjStop=dir==='CALL'?(price-riskAmt):(price+riskAmt);
     const adjTarget=dir==='CALL'?(price+rewardAmt):(price-rewardAmt);
     const strike=Math.round(price);
     const optType=dir==='CALL'?'call':'put';
-    const optPrice=_btMode==='atm'?_estimateOptPrice(price, strike, optType, 5, 0, iv):0;
-    const contracts=_btMode==='atm'?Math.floor(_btCapital/(optPrice*100)):0;
-    if(_btMode==='atm' && contracts<1) continue;
+    const optPrice=isATM?_estimateOptPrice(price, strike, optType, 5, 0, iv):0;
+    let contracts=0;
+    if(isATM){
+      const premiumCap=fixedPremiumPerTrade;
+      contracts=Math.floor(premiumCap/(optPrice*100));
+      if(contracts<1) continue;
+    }
 
     pos={type:dir==='CALL'?'CALLS':'PUTS', entry:price, entryTime:time,
       adjStop, adjTarget, snapIdx:i, ideaType:best.idea_type||'',
@@ -2481,7 +2698,7 @@ function _simulateTrades(snaps){
     const ulPnl=pos.type==='CALLS'?(price-pos.entry):(pos.entry-price);
     const ulPnlPct=pos.entry?ulPnl/pos.entry*100:0;
     let optEntry=null,optExit=null,optPnl=0,optPnlPct=0;
-    if(_btMode==='atm'){
+    if(isATM){
       const minElapsed=_minutesBetween(pos.entryTime, lastSnap.time||'');
       optEntry=pos.optEntryPrice;
       optExit=_estimateOptPrice(price, pos.strike, pos.type==='CALLS'?'call':'put', 5, minElapsed/(6.5*60), iv);
@@ -2539,8 +2756,8 @@ function _detectTrend(snaps){
 }
 function _minutesBetween(t1,t2){
   if(!t1||!t2) return 0;
-  const m1=_timeToMin(t1.length>=5?t1.slice(-5):t1);
-  const m2=_timeToMin(t2.length>=5?t2.slice(-5):t2);
+  const m1=_timeToMin(_extractHHMM(t1));
+  const m2=_timeToMin(_extractHHMM(t2));
   return Math.max(0,m2-m1);
 }
 
@@ -2585,21 +2802,31 @@ function _drawTradeMarkers(trades, bars){
 
 function _findBarByTime(bars, timeStr){
   if(!timeStr||!bars.length) return bars[bars.length-1];
-  // timeStr format: "HH:MM" from snapshot, bars have datetime like "2026-01-05 14:35:00"
+  // timeStr may be HH:MM or datetime; bars have datetime like "2026-01-05 14:35:00"
   let best=null, bestDiff=Infinity;
+  const snapMin=_timeToMin(_extractHHMM(timeStr));
   for(const b of bars){
     const dt=b.datetime||'';
     // Extract HH:MM from datetime
     const m=dt.match(/(\d{2}:\d{2})/);
     if(!m) continue;
     const barMin=_timeToMin(m[1]);
-    const snapMin=_timeToMin(timeStr.length>=5?timeStr.slice(-5):timeStr);
     const diff=Math.abs(barMin-snapMin);
     if(diff<bestDiff){bestDiff=diff;best=b;}
   }
   return best||bars[bars.length-1];
 }
-function _timeToMin(hhmm){const p=hhmm.split(':');return parseInt(p[0])*60+parseInt(p[1]);}
+function _extractHHMM(t){
+  if(!t) return '00:00';
+  const m=(t+'').match(/(\d{2}:\d{2})/);
+  return m?m[1]:'00:00';
+}
+function _timeToMin(hhmm){
+  const p=(hhmm||'00:00').split(':');
+  const h=parseInt(p[0],10), m=parseInt(p[1],10);
+  if(Number.isNaN(h)||Number.isNaN(m)) return 0;
+  return h*60+m;
+}
 
 function _renderResultsModal(trades, summary, sym, date, capital){
   const isATM=_btMode==='atm';
@@ -2750,12 +2977,52 @@ function switchLeftTab(tab){
 function setTf(iv){
   _interval=iv;
   document.querySelectorAll('.tf-pill').forEach(p=>p.classList.toggle('active',parseInt(p.dataset.tf)===iv));
-  if(_lwcChart){_lwcChart.remove();_lwcChart=null;_candleSeries=null;_vwapSeries=null;_vwapUSeries=null;_vwapLSeries=null;_ema9Series=null;_ema20Series=null;}
+  if(_lwcChart){_lwcChart.remove();_lwcChart=null;_candleSeries=null;_vwapSeries=null;_vwapUSeries=null;_vwapLSeries=null;_ema9Series=null;_ema20Series=null;_volSeries=null;}
   if(_lwcRsi){_lwcRsi.remove();_lwcRsi=null;_rsiLineSeries=null;}
   fetchAll(true);
 }
 
 // ── Option Tracker ──────────────────────────────────────────
+let _optRefreshTimer=null;
+function startOptRefresh(ticker){
+  stopOptRefresh();
+  _optRefreshTimer=setInterval(()=>{
+    if(_OPT.active&&_OPT.ticker) _loadOptBars(_OPT.ticker);
+  },60000);
+}
+function stopOptRefresh(){
+  if(_optRefreshTimer){clearInterval(_optRefreshTimer);_optRefreshTimer=null;}
+}
+async function _loadOptBars(ticker){
+  try{
+    const r=await fetch(`/api/option/bars?ticker=${encodeURIComponent(ticker)}&interval=${_interval}`);
+    if(!r.ok) return;
+    const d=await r.json();
+    _renderOptBars(d.option_bars||[],d.stock_bars||[]);
+  }catch(e){console.warn('[opt bars]',e);}
+}
+function _renderOptBars(optBars,stockBars){
+  if(!_OPT.series) return;
+  if(optBars.length){
+    _OPT.bars=optBars.map(b=>({time:_lwcTime(b.datetime),open:b.open,high:b.high,low:b.low,close:b.close,volume:b.volume}));
+    _OPT.series.setData(_OPT.bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
+    const last=optBars[optBars.length-1];
+    const vEl=document.getElementById('optTrackVol');
+    if(vEl) vEl.textContent='OVol:'+(last.volume||0).toLocaleString();
+    const pEl=document.getElementById('optTrackPrice');
+    if(pEl&&last.close) pEl.textContent='$'+last.close.toFixed(2);
+  }
+  // Normalize each series to 0–100 so both are visible regardless of unit difference
+  function _normVol(bars){
+    const maxV=Math.max(...bars.map(b=>b.volume||0),1);
+    return bars.map(b=>({time:_lwcTime(b.datetime),value:(b.volume||0)/maxV*100}));
+  }
+  if(_OPT.optVolSeries&&optBars.length)
+    _OPT.optVolSeries.setData(_normVol(optBars));
+  if(_OPT.undVolSeries&&stockBars.length)
+    _OPT.undVolSeries.setData(_normVol(stockBars).map(b=>({...b,color:'rgba(96,165,250,0.4)'})));
+  if(_OPT.chart) _OPT.chart.timeScale().scrollToRealTime();
+}
 function trackOption(optTicker){
   if(!optTicker) return;
   if(_OPT.active) stopTracking();
@@ -2764,44 +3031,67 @@ function trackOption(optTicker){
   _OPT.bars=[];
   document.getElementById('optTracker').style.display='';
   document.getElementById('optTrackTicker').textContent=optTicker;
-  document.getElementById('optTrackPrice').textContent='—';
+  document.getElementById('optTrackPrice').textContent='Loading…';
   document.getElementById('optTrackChange').textContent='';
-  if(_priceWs && _priceWs.readyState===WebSocket.OPEN){
-    if(!_priceSubs.has(optTicker)){
-      _priceWs.send(JSON.stringify({action:'sub',tickers:[optTicker]}));
-      _priceSubs.add(optTicker);
-    }
+  const vEl=document.getElementById('optTrackVol');if(vEl)vEl.textContent='';
+  if(_priceWs&&_priceWs.readyState===WebSocket.OPEN){
+    if(!_priceSubs.has(optTicker)){_priceWs.send(JSON.stringify({action:'sub',tickers:[optTicker]}));_priceSubs.add(optTicker);}
   }
   _ensureOptChart();
+  _loadOptBars(optTicker);
+  if(_feedWs) startOptRefresh(optTicker);
+  _pushUrl();
 }
 function stopTracking(){
   const tk=_OPT.ticker;
+  stopOptRefresh();
   _OPT.active=false;_OPT.ticker='';_OPT.bars=[];
   document.getElementById('optTracker').style.display='none';
-  if(_OPT.chart){_OPT.chart.remove();_OPT.chart=null;_OPT.series=null;}
+  if(_OPT.chart){_OPT.chart.remove();_OPT.chart=null;_OPT.series=null;_OPT.optVolSeries=null;_OPT.undVolSeries=null;}
   const neededByAlerts=(S.alerts||[]).some(a=>a.option&&a.option.ticker===tk);
-  if(tk && !neededByAlerts && _priceWs && _priceWs.readyState===WebSocket.OPEN){
+  if(tk&&!neededByAlerts&&_priceWs&&_priceWs.readyState===WebSocket.OPEN){
     _priceWs.send(JSON.stringify({action:'unsub',tickers:[tk]}));
     _priceSubs.delete(tk);
   }
+  _pushUrl();
 }
 function _ensureOptChart(){
   const el=document.getElementById('lwc-opt');
   if(!el||_OPT.chart) return;
   _OPT.chart=LightweightCharts.createChart(el,{
-    width:el.offsetWidth,height:160,
+    width:el.offsetWidth,height:200,
     layout:{background:{type:'solid',color:'#0d1422'},textColor:'#94a3b8'},
     grid:{vertLines:{color:'rgba(30,41,59,.5)'},horzLines:{color:'rgba(30,41,59,.5)'}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-    rightPriceScale:{borderColor:'#1e293b',scaleMargins:{top:0.08,bottom:0.08}},
+    localization:{timeFormatter:t=>{const d=new Date(t*1000);return d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0');}},
+    // Right scale = candle prices — reserve bottom 22% for volume strip
+    rightPriceScale:{borderColor:'#1e293b',scaleMargins:{top:0.04,bottom:0.22}},
+    // Left scale = volume histograms — occupy only bottom 20%
+    leftPriceScale:{visible:false,scaleMargins:{top:0.80,bottom:0.02}},
     timeScale:{borderColor:'#1e293b',timeVisible:true,secondsVisible:false,rightOffset:5},
     handleScroll:{mouseWheel:true,pressedMouseMove:true},handleScale:{mouseWheel:true,pinch:true},
   });
   _OPT.series=_OPT.chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+  // Option contract volume – teal bars on left scale
+  _OPT.optVolSeries=_OPT.chart.addHistogramSeries({
+    color:'rgba(38,166,154,0.55)',priceFormat:{type:'volume'},
+    priceScaleId:'left',lastValueVisible:false,priceLineVisible:false,
+  });
+  // Underlying stock volume – blue semi-transparent bars, same left scale
+  _OPT.undVolSeries=_OPT.chart.addHistogramSeries({
+    color:'rgba(96,165,250,0.35)',priceFormat:{type:'volume'},
+    priceScaleId:'left',lastValueVisible:false,priceLineVisible:false,
+  });
   window.addEventListener('resize',()=>{if(_OPT.chart){const c=document.getElementById('lwc-opt');if(c)_OPT.chart.applyOptions({width:c.offsetWidth});}});
 }
 
-fetchAll();
+(async()=>{
+  _restoreUrl();
+  await fetchAll();
+  const _urlP=new URLSearchParams(location.search);
+  if(_urlP.get('live')==='1') toggleLive();
+  if(_urlP.has('track')&&_urlP.get('track')) trackOption(decodeURIComponent(_urlP.get('track')));
+})();
 fetchPerformance();
 </script>
 </body>

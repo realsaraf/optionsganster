@@ -11,7 +11,7 @@ Changes from v1:
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Optional
-import hashlib, json, logging, math, random, secrets, time
+import hashlib, json, logging, math, random, re, secrets, time
 import asyncio
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Cookie, WebSocket, WebSocketDisconnect
@@ -544,6 +544,8 @@ class ChainSnapshotResponse(BaseModel):
 class SignalResponse(BaseModel):
     symbol: str
     as_of: str
+    asset_class: str = "equity"   # "equity" | "futures"
+    proxy_ticker: str = ""        # ETF proxy used for data (futures only)
     bars: list[OHLCVBar] = []
     regime: Optional[RegimeResponse] = None
     active_alerts: list[AlertResponse] = []
@@ -938,7 +940,122 @@ async def get_underlying_price(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/signals/{symbol}")
+@app.get("/api/option/bars")
+async def get_option_bars_endpoint(
+    ticker: str = Query(..., description="OCC option ticker e.g. O:QQQ260225C00610000"),
+    interval: int = Query(5, description="Bar interval in minutes"),
+    poly: PolygonClient = Depends(get_polygon),
+):
+    """Fetch historical OHLCV bars for an option contract + its underlying stock."""
+    try:
+        raw = ticker.replace("O:", "")
+        m = re.match(r'^([A-Z]+)(\d{6})([CP])(\d{8})$', raw)
+        if not m:
+            raise HTTPException(status_code=400, detail=f"Invalid OCC ticker: {ticker}")
+        sym = m.group(1)
+        dt_str = m.group(2)
+        right = m.group(3)
+        strike = int(m.group(4)) / 1000
+        expiration = date(int('20' + dt_str[:2]), int(dt_str[2:4]), int(dt_str[4:6]))
+
+        end_dt = date.today()
+        start_dt = end_dt - timedelta(days=5)
+
+        try:
+            opt_df, stock_df = await asyncio.gather(
+                poly.get_option_ohlcv(sym, expiration, strike, right, start_dt, end_dt, interval),
+                poly.get_stock_ohlcv(sym, start_date=start_dt, end_date=end_dt, interval_min=interval),
+            )
+        except Exception:
+            opt_df = pd.DataFrame()
+            stock_df = pd.DataFrame()
+
+        def df_to_bars(df):
+            if df.empty:
+                return []
+            bars = []
+            for _, row in df.iterrows():
+                dt = row['datetime']
+                bars.append({
+                    'datetime': dt.strftime('%Y-%m-%d %H:%M:%S') if hasattr(dt, 'strftime') else str(dt),
+                    'open': round(float(row['open']), 4),
+                    'high': round(float(row['high']), 4),
+                    'low': round(float(row['low']), 4),
+                    'close': round(float(row['close']), 4),
+                    'volume': int(row.get('volume', 0) or 0),
+                })
+            return bars
+
+        return {
+            'option_bars': df_to_bars(opt_df),
+            'stock_bars': df_to_bars(stock_df),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Futures symbol normalisation ──────────────────────────────
+# Maps TradingView-style /XX shorthand → closest ETF proxy on current plan.
+# (Polygon Starter/Stocks plan does NOT cover I: index/futures tickers.)
+# The ETF proxy is used for OHLCV data; asset_class stays "futures" so the
+# UI suppresses chain/options features and shows a proxy badge.
+_FUTURES_MAP: dict[str, str] = {
+    "/ES":  "SPY",   # E-mini S&P 500   → SPDR S&P 500 ETF
+    "/NQ":  "QQQ",   # E-mini Nasdaq 100→ Invesco QQQ
+    "/YM":  "DIA",   # E-mini Dow Jones → SPDR Dow Jones ETF
+    "/RTY": "IWM",   # E-mini Russell   → iShares Russell 2000
+    "/CL":  "USO",   # Crude Oil WTI    → United States Oil Fund
+    "/GC":  "GLD",   # Gold             → SPDR Gold Shares
+    "/SI":  "SLV",   # Silver           → iShares Silver Trust
+    "/ZN":  "TLT",   # 10-Yr T-Note     → iShares 20+ Year Treasury
+    "/ZB":  "TLT",   # 30-Yr T-Bond     → iShares 20+ Year Treasury
+    "/NG":  "UNG",   # Natural Gas      → United States Natural Gas
+    "/6E":  "FXE",   # Euro FX          → Invesco CurrencyShares Euro
+    "/6J":  "FXY",   # Japanese Yen     → Invesco CurrencyShares Yen
+    "/VX":  "VXX",   # VIX Futures      → iPath Series B VIX ETN
+    "/HG":  "CPER",  # Copper           → United States Copper Index
+    "/ZC":  "CORN",  # Corn             → Teucrium Corn Fund
+    "/ZS":  "SOYB",  # Soybeans         → Teucrium Soybean Fund
+}
+_FUTURES_INFO: dict[str, dict] = {
+    "/ES":  {"name": "E-mini S&P 500 (SPY proxy)",    "type": "Futures"},
+    "/NQ":  {"name": "E-mini Nasdaq 100 (QQQ proxy)", "type": "Futures"},
+    "/YM":  {"name": "E-mini Dow Jones (DIA proxy)",  "type": "Futures"},
+    "/RTY": {"name": "E-mini Russell 2000 (IWM proxy)","type": "Futures"},
+    "/CL":  {"name": "Crude Oil WTI (USO proxy)",     "type": "Futures"},
+    "/GC":  {"name": "Gold (GLD proxy)",              "type": "Futures"},
+    "/SI":  {"name": "Silver (SLV proxy)",            "type": "Futures"},
+    "/ZN":  {"name": "10-Year T-Note (TLT proxy)",    "type": "Futures"},
+    "/ZB":  {"name": "30-Year T-Bond (TLT proxy)",    "type": "Futures"},
+    "/NG":  {"name": "Natural Gas (UNG proxy)",       "type": "Futures"},
+    "/6E":  {"name": "Euro FX (FXE proxy)",           "type": "Futures"},
+    "/6J":  {"name": "Japanese Yen (FXY proxy)",      "type": "Futures"},
+    "/VX":  {"name": "VIX Futures (VXX proxy)",       "type": "Futures"},
+    "/HG":  {"name": "Copper (CPER proxy)",           "type": "Futures"},
+    "/ZC":  {"name": "Corn (CORN proxy)",             "type": "Futures"},
+    "/ZS":  {"name": "Soybeans (SOYB proxy)",         "type": "Futures"},
+}
+
+
+def _normalize_symbol(sym: str) -> tuple[str, str, str]:
+    """
+    Normalize raw symbol to (data_ticker, asset_class, proxy_ticker).
+    /NQ  -> ("QQQ", "futures", "QQQ")   – use QQQ OHLCV, UI shows futures mode + proxy badge
+    QQQ  -> ("QQQ", "equity",  "")
+    """
+    s = sym.strip().upper()
+    if s in _FUTURES_MAP:
+        proxy = _FUTURES_MAP[s]
+        return proxy, "futures", proxy
+    # Already in Polygon continuous format (I:XX1!) – no plan coverage, fall through as equity
+    if re.match(r"^I:[A-Z0-9]+1!$", s):
+        return s, "futures", s
+    return s, "equity", ""
+
+
+@app.get("/api/signals/{symbol:path}")
 async def get_signals(
     symbol: str,
     interval: int = Query(1, description="Bar interval in minutes (1, 5, 15)"),
@@ -953,12 +1070,14 @@ async def get_signals(
     Returns regime, active alerts (with entry/stop/target), key S/R levels,
     indicator series, and chain snapshot for the given underlying symbol.
     """
-    sym = symbol.upper()
+    sym_raw = symbol.upper()
+    sym, asset_class, proxy_ticker = _normalize_symbol(sym_raw)
     now_ts = datetime.utcnow().isoformat()
 
     try:
         end_dt = date.today()
-        start_dt = end_dt - timedelta(days=5)
+        # Futures trade ~23h/day – fetch a wider window so "today" includes overnight session
+        start_dt = end_dt - timedelta(days=7 if asset_class == "futures" else 5)
 
         if nocache:
             poly.clear_stock_ohlcv_cache(
@@ -988,18 +1107,20 @@ async def get_signals(
         except Exception:
             premarket_df = pd.DataFrame()
 
-        # Nearest expiration chain
+        # Nearest expiration chain (equity only – futures have no options chain here)
         chain_data: list[dict] = []
         chain_metrics_obj: ChainMetrics | None = None
-        try:
-            expirations = await poly.get_expirations(sym)
-            if expirations:
-                nearest_exp = expirations[0]
-                chain_data = await poly.get_options_chain_snapshot(sym, nearest_exp)
-                if chain_data and underlying_price > 0:
-                    chain_metrics_obj = compute_chain_metrics(chain_data, underlying_price)
-        except Exception as ce:
-            print(f"[Signals] Chain fetch non-fatal: {ce}")
+        expirations: list = []
+        if asset_class == "equity":
+            try:
+                expirations = await poly.get_expirations(sym)
+                if expirations:
+                    nearest_exp = expirations[0]
+                    chain_data = await poly.get_options_chain_snapshot(sym, nearest_exp)
+                    if chain_data and underlying_price > 0:
+                        chain_metrics_obj = compute_chain_metrics(chain_data, underlying_price)
+            except Exception as ce:
+                print(f"[Signals] Chain fetch non-fatal: {ce}")
 
         # ── Regime ───────────────────────────────────────────
         regime_result = None
@@ -1042,12 +1163,13 @@ async def get_signals(
             except Exception:
                 pass
 
-        # ── Fair value ───────────────────────────────────────
+        # ── Fair value (equity only) ─────────────────────────
         fv_response = None
-        try:
-            daily_closes_fv = await poly.get_stock_daily_ohlcv(sym, num_days=45)
-            if daily_closes_fv and underlying_price > 0 and chain_data:
-                exp_date_fv = expirations[0] if expirations else None
+        if asset_class == "equity":
+            try:
+                daily_closes_fv = await poly.get_stock_daily_ohlcv(sym, num_days=45)
+                if daily_closes_fv and underlying_price > 0 and chain_data:
+                    exp_date_fv = expirations[0] if expirations else None
                 if exp_date_fv:
                     # Use nearest ATM call for IV reference
                     atm_c = min(
@@ -1091,8 +1213,8 @@ async def get_signals(
                             spread_pct=fv_result.spread_pct,
                             hv_vs_iv=fv_result.hv_vs_iv,
                         )
-        except Exception as fv_err:
-            print(f"[Signals] Fair value non-fatal: {fv_err}")
+            except Exception as fv_err:
+                print(f"[Signals] Fair value non-fatal: {fv_err}")
 
         # ── Setup Detection → Edge Score → Risk Plan → Alerts ─
         if (
@@ -1285,8 +1407,10 @@ async def get_signals(
             prox_detail_out = sr_result_obj.proximity_detail
 
         return SignalResponse(
-            symbol=sym,
+            symbol=sym_raw,
             as_of=now_ts,
+            asset_class=asset_class,
+            proxy_ticker=proxy_ticker,
             bars=bars_out,
             regime=regime_out,
             active_alerts=active_alerts_out,
@@ -1395,8 +1519,20 @@ async def search_tickers(
     q: str = Query("", description="Search query"),
     limit: int = Query(20, ge=1, le=50),
 ):
-    """Autocomplete ticker search from cached Polygon directory."""
-    return ticker_service.search(q.strip(), limit=limit)
+    """Autocomplete ticker search. Prepends futures when query starts with '/'."""
+    q_clean = q.strip()
+    results: list[dict] = []
+    if q_clean.startswith("/"):
+        q_up = q_clean.upper()
+        futures_hits = [
+            {"symbol": sym, "name": info["name"], "type": info["type"]}
+            for sym, info in _FUTURES_INFO.items()
+            if sym.startswith(q_up) or q_up == "/"
+        ]
+        results.extend(futures_hits)
+    equity_hits = ticker_service.search(q_clean, limit=limit)
+    results.extend(equity_hits)
+    return results[:limit]
 
 
 @app.get("/api/scanner")
@@ -2521,7 +2657,7 @@ def _compute_trade_state(idea, underlying_price: float) -> tuple[str, str]:
         return "PENDING", f"Waiting for price to reach {entry:.2f}"
 
 
-@app.get("/api/briefing/{sym}", response_model=BriefingResponse)
+@app.get("/api/briefing/{sym:path}", response_model=BriefingResponse)
 async def get_briefing(
     sym: str,
     playbook: str = Query("all", description="all | 0dte | swing | scalp"),
@@ -2535,7 +2671,8 @@ async def get_briefing(
     Optionally filtered by playbook mode.
     """
     try:
-        sym = sym.upper()
+        sym_raw = sym.upper()
+        sym, asset_class, proxy_ticker = _normalize_symbol(sym_raw)
 
         # ── Fetch underlying data (reuse same pipeline as /api/signals) ──
         today = date.today()

@@ -16,6 +16,10 @@ from app.config import settings
 if __name__ == "__main__":
     is_dev = settings.ENVIRONMENT == "development"
 
+    # Force UTF-8 output so box-drawing chars render on all platforms
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     print(f"""
     ╔═══════════════════════════════════════════╗
     ║        OptionsGanster v2.0                ║
