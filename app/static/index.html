@@ -71,8 +71,19 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{background:#2563eb}
-.live-dot{width:8px;height:8px;border-radius:50%;background:#374151;transition:all .3s;flex-shrink:0}
-.live-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+.live-dot{display:none}
+#liveBtn{display:flex;align-items:center;gap:5px;font-size:.72rem;font-weight:700;letter-spacing:.4px;
+  padding:4px 9px;border-radius:20px;white-space:nowrap;
+  color:var(--muted);border-color:var(--border);background:transparent;transition:all .25s}
+#liveBtn .rec-dot{width:8px;height:8px;border-radius:50%;background:#374151;flex-shrink:0;transition:background .25s}
+#liveBtn.live-on{color:#ef4444;border-color:rgba(239,68,68,.6);background:rgba(239,68,68,.12)}
+#liveBtn.live-on .rec-dot{background:#ef4444;box-shadow:0 0 0 0 rgba(239,68,68,.7);
+  animation:rec-pulse 1.4s ease-in-out infinite}
+@keyframes rec-pulse{
+  0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}
+  70%{box-shadow:0 0 0 6px rgba(239,68,68,0)}
+  100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}
+}
 #last-update{color:var(--muted);font-size:.72rem;white-space:nowrap}
 
 /* PLAYBOOK PILLS */
@@ -135,8 +146,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   padding-top:5px;border-top:1px solid var(--border)}
 
 /* ACTION CARDS (Insight tab) */
-.act-cards{display:flex;gap:8px}
-.act-card{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;min-width:0}
+.act-cards{display:flex;flex-direction:column;gap:8px}
+.act-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;min-width:0}
 .act-card-hd{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:8px;
   padding-bottom:5px;border-bottom:1px solid var(--border)}
 .act-trig{display:flex;align-items:center;gap:6px;padding:4px 0;font-size:.75rem}
@@ -266,11 +277,11 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   .no-alerts{padding:32px 16px;font-size:.9rem}
 
   /* Idea cards */
-  .idea-card{padding:14px 16px;font-size:.88rem;margin-bottom:10px}
+  .idea-card{padding:16px 14px;font-size:.88rem;margin-bottom:12px}
   .idea-type-pill{font-size:.78rem;padding:3px 10px}
   .trade-state{font-size:.78rem;padding:3px 10px}
   .dir-pill{font-size:.82rem;padding:3px 12px}
-  .idea-headline{font-size:1rem}
+  .idea-headline{font-size:.78rem}
   .conf-pill{font-size:.78rem}
   .idea-levels{padding:10px}
   .idea-lv .lbl{font-size:.72rem}
@@ -516,36 +527,38 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 
 /* TRADE IDEAS */
 .idea-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;
-  padding:12px 13px 10px;position:relative;overflow:hidden;margin-bottom:10px}
+  padding:18px 16px 14px;position:relative;overflow:hidden;margin-bottom:14px}
 .idea-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%}
 .idea-CALL::before{background:var(--green)}
 .idea-PUT::before {background:var(--red)}
-.idea-header{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
-.idea-type-pill{padding:2px 8px;border-radius:8px;font-size:.68rem;font-weight:700;text-transform:uppercase}
-.it-BREAKOUT{background:rgba(59,130,246,.15);color:var(--accent);border:1px solid rgba(59,130,246,.3)}
-.it-PULLBACK{background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.3)}
-.it-FADE    {background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.3)}
-.it-RANGE_PLAY,.it-MOMENTUM{background:rgba(245,158,11,.1);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
+.idea-header{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.idea-type-pill{font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
+.it-BREAKOUT{color:var(--accent)}
+.it-PULLBACK{color:var(--green)}
+.it-FADE    {color:var(--red)}
+.it-RANGE_PLAY,.it-MOMENTUM{color:var(--yellow)}
 /* TRADE STATE BADGES */
-.trade-state{padding:2px 8px;border-radius:8px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-left:auto}
-.ts-PENDING{background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
-.ts-ACTIVE{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.35)}
-.ts-INVALIDATED{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+.trade-state{font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.4px}
+.ts-PENDING{color:var(--yellow)}
+.ts-ACTIVE{color:var(--green)}
+.ts-INVALIDATED{color:var(--red)}
 .idea-card.card-INVALIDATED{opacity:.55;pointer-events:auto}
 .idea-card.card-INVALIDATED::after{content:'INVALIDATED';position:absolute;top:50%;left:50%;
   transform:translate(-50%,-50%) rotate(-12deg);font-size:1.1rem;font-weight:900;
   color:rgba(239,68,68,.18);letter-spacing:3px;pointer-events:none}
 .trade-state-reason{font-size:.62rem;color:var(--muted);margin-top:2px;font-style:italic}
-.dir-pill{padding:2px 9px;border-radius:10px;font-size:.72rem;font-weight:700}
-.idea-CALL .dir-pill{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}
-.idea-PUT  .dir-pill{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
-.idea-headline{font-weight:700;font-size:.88rem;flex:1}
+.dir-pill{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.4px}
+.idea-CALL .dir-pill{color:var(--green)}
+.idea-PUT  .dir-pill{color:var(--red)}
+.idea-headline{font-weight:600;font-size:.78rem;display:block;margin:6px 0 10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .conf-pill{font-size:.68rem;color:var(--muted)}
 .idea-levels{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;
-  background:var(--surface2);border-radius:7px;padding:8px;margin-bottom:6px}
+  background:var(--surface2);border-radius:7px;padding:12px 10px;margin-bottom:12px}
 .idea-lv{text-align:center}
 .idea-lv .lbl{display:block;font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
-.idea-lv .val{font-size:.84rem;font-weight:700}
+.idea-lv .val{font-size:.88rem;font-weight:700}
+.idea-track-btn{font-size:.65rem;padding:2px 7px;margin-left:auto;opacity:.65}
+.idea-track-btn.tracked{color:var(--accent);border-color:var(--accent);opacity:1}
 .c-entry{color:var(--accent)}.c-stop{color:var(--red)}.c-t1{color:var(--green)}.c-t2{color:#86efac}
 .rr-badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.72rem;font-weight:700;
   background:rgba(59,130,246,.1);color:var(--accent);border:1px solid rgba(59,130,246,.2)}
@@ -748,10 +761,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
     <input class="sym-input" id="symInput" value="QQQ" maxlength="8" placeholder="QQQ / /ES" spellcheck="false" autocomplete="off">
     <div class="sym-dd" id="symDropdown"></div>
     <button class="mag-btn" onclick="openSearchModal()" title="Search symbols">🔍</button>
+    <button class="btn" id="liveBtn" onclick="toggleLive()" title="Toggle Live Feed"><span class="rec-dot"></span>LIVE</button>
   </div>
   <div class="spacer"></div>
-  <button class="btn" id="liveBtn" onclick="toggleLive()" title="Toggle Live Feed" style="padding:4px 8px;font-size:1rem;line-height:1">📡</button>
-  <div class="live-dot" id="liveDot"></div>
   <button class="btn" id="btToggleBtn" onclick="openBacktest()" title="Backtest" style="padding:4px 8px;font-size:.75rem;line-height:1;margin-left:2px">⏪</button>
   <span id="last-update">—</span>
 </nav>
@@ -886,7 +898,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
         <span id="changeLbl"></span>
         <div class="spacer"></div>
         <label class="chk-label"><input type="checkbox" id="chkVwap" checked onchange="redrawChart()"> VWAP</label>
-        <label class="chk-label"><input type="checkbox" id="chkEma"  checked onchange="redrawChart()"> EMA</label>
+        <label class="chk-label"><input type="checkbox" id="chkEma"  onchange="redrawChart()"> EMA</label>
         <label class="chk-label"><input type="checkbox" id="chkLvl" onchange="redrawChart()"> Levels</label>
         <label class="chk-label"><input type="checkbox" id="chkAlrt" checked onchange="redrawChart()"> Alert Lines</label>
         <label class="chk-label"><input type="checkbox" id="chkRsi" checked onchange="renderRsi()"> RSI</label>
@@ -1228,20 +1240,14 @@ function toggleLive(){
     disconnectFeedWs();
     disconnectPriceWs();
     stopLiveRefresh();
-    btn.innerHTML='\ud83d\udce1';
-    btn.style.borderColor='';
-    btn.style.background='';
-    document.getElementById('liveDot').classList.remove('on');
+    btn.classList.remove('live-on');
   }else{
     if(!S.sym){toast('Select a symbol first','warn');return;}
     fetchAll(true);
     connectFeedWs(S.sym);
     connectPriceWs();
     startLiveRefresh();
-    btn.innerHTML='\ud83d\udce1';
-    btn.style.borderColor='var(--green)';
-    btn.style.background='rgba(16,185,129,.15)';
-    document.getElementById('liveDot').classList.add('on');
+    btn.classList.add('live-on');
   }
   _pushUrl();
 }
@@ -1607,31 +1613,28 @@ function renderIdeas(ideas){
 
   // Show top 2 by default, with show-all toggle
   const showAll=el.dataset.showAll==='true';
-  const visibleIdeas=showAll?ideas:ideas.slice(0,2);
+  const showAll2=showAll; // alias for clarity
   const hasMore=ideas.length>2;
 
-  el.innerHTML=bannerHtml+visibleIdeas.map((i,idx)=>{
+  el.innerHTML=bannerHtml+ideas.map((i,idx)=>{
+    const _hidden=!showAll2&&idx>=2;
     const sc=i.score||0;
     const grade=sc>=80?'A':sc>=60?'B':sc>=40?'C':'D';
     const gradeColor=sc>=80?'#22c55e':sc>=60?'#3b82f6':sc>=40?'#f59e0b':'#ef4444';
-    const bd=i.score_breakdown||{};
-    const bdHtml=Object.keys(bd).length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${Object.entries(bd).map(([k,v])=>`<span style="font-size:.6rem;color:var(--muted);background:var(--surface2);padding:1px 6px;border-radius:4px">${k.replace(/_/g,' ')} ${v}</span>`).join('')}</div>`:'';
 
     const tState=i.trade_state||'PENDING';
     const tStateIcon=tState==='ACTIVE'?'🟢':tState==='INVALIDATED'?'🔴':'🟡';
     const cardInv=tState==='INVALIDATED'?' card-INVALIDATED':'';
 
     return `
-    <div class="idea-card idea-${esc(i.direction)}${cardInv}" ${idx>=2&&!showAll?'style="display:none"':''}>
+    <div class="idea-card idea-${esc(i.direction)}${cardInv}" ${_hidden?'style="display:none"':''}>
       <div class="idea-header">
-        <span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:800;color:${gradeColor};background:${gradeColor}18;border:1px solid ${gradeColor}40">${grade} ${sc}</span>
+        <span style="font-size:.7rem;font-weight:800;color:${gradeColor}">${grade} ${sc}</span>
         <span class="idea-type-pill it-${esc(i.idea_type)}">${esc(i.idea_type)}</span>
         <span class="dir-pill">${esc(i.direction)}</span>
-        <span class="idea-headline">${esc(i.headline)}</span>
         <span class="trade-state ts-${esc(tState)}">${tStateIcon} ${esc(tState)}</span>
       </div>
-      ${i.trade_state_reason?`<div class="trade-state-reason">${esc(i.trade_state_reason)}</div>`:''}
-      ${bdHtml}
+      <div class="idea-headline">${esc(i.headline)}</div>
       <div class="idea-levels">
         <div class="idea-lv"><span class="lbl">Entry</span><span class="val c-entry">${fp(i.entry_level)}</span></div>
         <div class="idea-lv"><span class="lbl">Stop</span><span class="val c-stop">${fp(i.stop_level)}</span></div>
@@ -1641,10 +1644,8 @@ function renderIdeas(ideas){
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
         <span class="rr-badge">R:R ${(i.reward_risk||0).toFixed(1)}×</span>
         ${(i.suitable_for||[]).map(m=>`<span class="mode-tag">${esc(m)}</span>`).join('')}
+        <button class="btn idea-track-btn${_trackedIdea===idx?' tracked':''}" onclick="trackIdeaOnChart(${idx})">${_trackedIdea===idx?'✓ On Chart':'📍 Track'}</button>
       </div>
-      <div class="idea-rationale">${esc(i.rationale)}</div>
-      <div><div class="idea-hint-label">Option Hint</div><div class="idea-hint">${esc(i.option_hint)}</div></div>
-      ${i.ai_narrative?`<div class="idea-ai">${esc(i.ai_narrative)}</div>`:''}
       ${i.warning?`<div class="idea-warning">⚠ ${esc(i.warning)}</div>`:''}
     </div>`}).join('')+(hasMore?`<button class="btn" style="width:100%;margin-top:6px;font-size:.72rem" onclick="this.parentElement.dataset.showAll=this.parentElement.dataset.showAll==='true'?'false':'true';renderIdeas(S.briefing?.trade_ideas||[])">${showAll?'Show Top 2':'Show All '+ideas.length+' Ideas'}</button>`:'');
 }
@@ -1673,6 +1674,7 @@ let _candleSeries=null,_vwapSeries=null,_vwapUSeries=null,_vwapLSeries=null;
 let _ema9Series=null,_ema20Series=null,_volSeries=null;
 let _rsiLineSeries=null,_syncLock=false;
 let _priceLinesRef=[];
+let _trackedIdea=null;
 
 function _lwcTime(dtStr){
   if(!dtStr) return 0;
@@ -1806,16 +1808,26 @@ function redrawChart(){
   _priceLinesRef=[];
   if(showL)(S.levels||[]).slice(0,14).forEach(l=>{
     const line=_candleSeries.createPriceLine({price:l.price,lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,
-      color:l.kind==='support'?'rgba(34,197,94,.65)':'rgba(239,68,68,.65)',axisLabelVisible:true,title:l.label||l.kind});
+      color:l.kind==='support'?'rgba(34,197,94,.65)':'rgba(239,68,68,.65)',axisLabelVisible:true,title:l.kind==='support'?'S':'R'});
     _priceLinesRef.push({series:_candleSeries,line});
   });
   if(showA&&_topAlert){
     const al=_topAlert;
-    [[al.trigger_price,'#3b82f6','Entry'],[al.stop_price,'#ef4444','Stop'],[al.target_1,'#22c55e','T1'],[al.target_2,'#86efac','T2']].forEach(([p,col,lbl])=>{
+    [[al.trigger_price,'#3b82f6','E'],[al.stop_price,'#ef4444','S'],[al.target_1,'#22c55e','T1'],[al.target_2,'#86efac','T2']].forEach(([p,col,lbl])=>{
       if(!p) return;
       const line=_candleSeries.createPriceLine({price:p,color:col,lineWidth:1.5,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:lbl});
       _priceLinesRef.push({series:_candleSeries,line});
     });
+  }
+  if(_trackedIdea!=null){
+    const tidea=(S.briefing?.trade_ideas||[])[_trackedIdea];
+    if(tidea){
+      [[tidea.entry_level,'#60a5fa','E'],[tidea.stop_level,'#ef4444','S'],[tidea.target_1,'#22c55e','T1'],[tidea.target_2,'#86efac','T2']].forEach(([p,col,lbl])=>{
+        if(!p) return;
+        const line=_candleSeries.createPriceLine({price:p,color:col,lineWidth:1.5,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:lbl});
+        _priceLinesRef.push({series:_candleSeries,line});
+      });
+    }
   }
   // Header price labels
   if(cData.length){
@@ -1896,12 +1908,12 @@ function renderAlerts(){
     <span><span class="opt-k">Est.$</span>&nbsp;<span class="opt-v">${(a.option.entry_premium_est||0).toFixed(2)}</span></span>
     <span><span class="opt-k">Live&nbsp;$</span>&nbsp;<span class="opt-v tick-cell" data-opt="${esc(a.option.ticker||'')}">—</span></span>
     <span><span class="opt-k">DTE</span>&nbsp;<span class="opt-v">${a.option.dte??'—'}d</span></span>
-    <button class="btn" style="margin-left:auto;font-size:.62rem;padding:2px 8px;background:rgba(59,130,246,.15);border-color:rgba(59,130,246,.4);color:var(--accent)${S.assetClass==='futures'?';display:none':''}" onclick="trackOption('${esc(a.option.ticker)}')">📊 Track</button>
   </div>`:''}
   ${(a.kill_switch_conditions||[]).length?`<div class="killswitches"><div class="ks-title">Kill Switches</div>${a.kill_switch_conditions.map(k=>`<div class="ks-item">${esc(k)}</div>`).join('')}</div>`:''}
   <div class="state-bar">
     <span class="st-pill st-${esc(a.state)}">${esc(a.state)}</span>
     ${a.expires_at?`<span class="exp-time">Exp. ${ft(a.expires_at)}</span>`:''}
+    ${a.option&&S.assetClass!=='futures'?`<button class="btn" style="font-size:.66rem;padding:3px 9px;background:rgba(59,130,246,.15);border-color:rgba(59,130,246,.4);color:var(--accent)" onclick="trackOption('${esc(a.option.ticker)}')">📊 Track</button>`:''}
     ${a.state==='PENDING'?`<button class="btn" style="margin-left:auto;font-size:.66rem;padding:3px 7px" onclick="activateAlert('${esc(a.id)}')">Mark Entered</button>`:''}
     ${a.state==='ACTIVE'?`<button class="btn" style="margin-left:auto;font-size:.66rem;padding:3px 7px" onclick="resolveAlert('${esc(a.id)}')">Resolve</button>`:''}
   </div>
@@ -3023,6 +3035,12 @@ function _renderOptBars(optBars,stockBars){
     _OPT.undVolSeries.setData(_normVol(stockBars).map(b=>({...b,color:'rgba(96,165,250,0.4)'})));
   if(_OPT.chart) _OPT.chart.timeScale().scrollToRealTime();
 }
+function trackIdeaOnChart(idx){
+  _trackedIdea=(_trackedIdea===idx)?null:idx;
+  renderIdeas(S.briefing?.trade_ideas||[]);
+  redrawChart();
+}
+
 function trackOption(optTicker){
   if(!optTicker) return;
   if(_OPT.active) stopTracking();
