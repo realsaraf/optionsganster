@@ -26,11 +26,29 @@ import pandas as pd
 from app.config import settings
 from app.polygon_client import PolygonClient, polygon_client
 from app.vpa_engine import VPAEngine, VPASignal, VPAResult, vpa_engine
-from app.greeks_engine import GreeksSignalEngine, greeks_engine
+# ── New signal engine stack ─────────────────────────────────
+from app.regime_engine import regime_engine, RegimeEngine, MarketRegime
+from app.setup_engine import setup_engine, SetupEngine, SetupAlert
+from app.option_picker import option_picker, OptionPicker, OptionPick
+from app.edge_scorer import edge_scorer, EdgeScorer, EdgeResult
+from app.risk_engine import risk_engine, RiskEngine, TradePlan
+from app.alert_manager import alert_manager, AlertManager, AlertState, ActiveAlert
+from app.chain_analytics import compute_chain_metrics, ChainMetrics
+from app.indicators import (
+    atr_value, ema, ema_value, rsi, rsi_value,
+    vwap, vwap_bands, vwap_value, vwap_band_values, rolling_rv,
+)
 from app.live_feed import LiveFeedManager, live_feed_manager, mock_csv_playback, build_mock_sow
 from app.fair_value_engine import FairValueEngine, fair_value_engine
 from app.sr_engine import SREngine, sr_engine, SRResult
 from app.data_layer import DataLayer
+from app.idea_engine import idea_engine, IdeaEngine, BriefingInput, PlaybookMode
+from app.decision_engine import decision_engine, DecisionEngine, TradeDecision
+from app.performance_tracker import perf_tracker
+from app.scanner_engine import scanner_engine
+from app.ticker_service import ticker_service
+from app.mongo import close_db
+import app.llm_narrator as llm_narrator
 
 logger = logging.getLogger("optionsganster")
 
@@ -255,10 +273,13 @@ async def lifespan(application: FastAPI):
     await live_feed_manager.start()
     # Pre-warm Polygon caches in background so first page load is fast
     asyncio.create_task(polygon_client.warm_cache(["QQQ"]))
+    # Load ticker directory from local JSON file (instant)
+    ticker_service.load()
     yield
     # shutdown – stop live feed + close the shared httpx client
     await live_feed_manager.stop()
     await polygon_client.close()
+    await close_db()
 
 
 app = FastAPI(
@@ -297,10 +318,6 @@ def get_polygon() -> PolygonClient:
 
 def get_vpa() -> VPAEngine:
     return vpa_engine
-
-
-def get_greeks_engine() -> GreeksSignalEngine:
-    return greeks_engine
 
 
 # DataLayer singleton (wraps polygon_client with daily-keyed caches)
@@ -450,6 +467,97 @@ class AnalysisResponse(BaseModel):
     fair_value: Optional[FairValueResponse] = None
     support_resistance: Optional[SRResponse] = None
 
+
+# ── New signal engine response models ────────────────────────
+
+class RegimeResponse(BaseModel):
+    regime: str
+    confidence: float
+    detail: str
+    vwap_current: float = 0.0
+    atr_current: float = 0.0
+    rsi_current: float = 0.0
+    price_vs_vwap: str = "at"  # "above" | "below" | "at"
+
+
+class AlertOptionResponse(BaseModel):
+    ticker: str
+    strike: float
+    expiration: str
+    option_type: str
+    delta: float
+    spread_pct: float
+    iv: float
+    entry_premium_est: float
+    dte: int
+    notes: str = ""
+
+
+class AlertResponse(BaseModel):
+    id: str
+    state: str
+    created_at: str
+    expires_at: str
+    setup_name: str
+    direction: str
+    edge_score: int
+    tier: str
+    regime: str
+    trigger_price: float
+    entry_condition: str
+    stop_price: float
+    target_1: float
+    target_2: Optional[float] = None
+    reward_risk_ratio: float
+    time_stop_minutes: int
+    kill_switch_conditions: list[str] = []
+    reasons: list[str] = []
+    option: Optional[AlertOptionResponse] = None
+    activated_premium: Optional[float] = None
+
+
+class IndicatorsResponse(BaseModel):
+    vwap: list[float] = []
+    vwap_upper: list[float] = []
+    vwap_lower: list[float] = []
+    ema_9: list[float] = []
+    ema_20: list[float] = []
+    rsi: list[float] = []
+    atr: float = 0.0
+
+
+class ChainSnapshotResponse(BaseModel):
+    iv_rank: float = 0.0
+    iv_percentile: float = 0.0
+    put_call_oi_ratio: float = 1.0
+    put_call_volume_ratio: float = 1.0
+    net_gex: float = 0.0
+    gex_regime: str = "neutral"
+    max_pain: float = 0.0
+    uoa_detected: bool = False
+    uoa_details: list = []
+    call_wall: float = 0.0
+    put_wall: float = 0.0
+    weighted_iv: float = 0.0
+
+
+class SignalResponse(BaseModel):
+    symbol: str
+    as_of: str
+    bars: list[OHLCVBar] = []
+    regime: Optional[RegimeResponse] = None
+    active_alerts: list[AlertResponse] = []
+    key_levels: list[SRLevelResponse] = []
+    indicators: Optional[IndicatorsResponse] = None
+    chain_snapshot: Optional[ChainSnapshotResponse] = None
+    vpa: Optional[dict] = None
+    fair_value: Optional[FairValueResponse] = None
+    volume_regime: Optional[dict] = None
+    proximity_score: float = 0.0
+    proximity_detail: str = ""
+
+
+# ── Legacy models (kept while old endpoints coexist) ──────────
 
 class ExpirationResponse(BaseModel):
     symbol: str
@@ -830,423 +938,245 @@ async def get_underlying_price(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/analyze/live")
-async def analyze_live(
-    symbol: str = Query(..., description="Underlying symbol"),
-    expiration: str = Query(..., description="Expiration date (YYYY-MM-DD)"),
-    strike: float = Query(..., description="Strike price"),
-    right: str = Query(..., description="C for Call, P for Put"),
-    after: Optional[str] = Query(None, description="Return only bars with datetime > this value"),
-    mock: bool = Query(False, description="Use mock data for testing"),
+@app.get("/api/signals/{symbol}")
+async def get_signals(
+    symbol: str,
+    interval: int = Query(1, description="Bar interval in minutes (1, 5, 15)"),
+    nocache: bool = Query(False, description="Bypass caches for latest data"),
     poly: PolygonClient = Depends(get_polygon),
     engine: VPAEngine = Depends(get_vpa),
-):
-    """Live mode endpoint – returns NEW bars & signals since *after*.
-    Full composite / greeks / bias refresh is now pushed by the WS
-    analysis loop (see /ws/live _analysis_loop).
-    Note: mock parameter is accepted but ignored – always uses real API data.
-    Mock mode only affects the WebSocket live feed (CSV playback as proxy)."""
-
-    # ── Fetch OHLCV ──────────────────────────────────────────
-    exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
-    end_dt = date.today()
-    start_dt = end_dt - timedelta(days=5)
-
-    # Always clear cache for live
-    poly.clear_ohlcv_cache(
-        symbol=symbol.upper(), expiration=exp_date,
-        strike=strike, right=right.upper(),
-        start_date=start_dt, end_date=end_dt, interval_min=5,
-    )
-    poly.clear_stock_ohlcv_cache(
-        symbol=symbol.upper(), start_date=start_dt,
-        end_date=end_dt, interval_min=5,
-    )
-
-    try:
-        df = await poly.get_option_ohlcv(
-            symbol=symbol.upper(), expiration=exp_date,
-            strike=strike, right=right.upper(),
-            start_date=start_dt, end_date=end_dt, interval_min=5,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if df.empty:
-        return {"bars": [], "signals": []}
-
-    # Run VPA on the FULL history
-    all_vpa = engine.analyze(df)
-
-    # ── Build delta bars (after filter) ──────────────────────
-    delta_df = df
-    if after:
-        delta_df = df[df["datetime"].astype(str) > after]
-
-    bars = [
-        dict(
-            datetime=str(row["datetime"]),
-            open=float(row["open"]),
-            high=float(row["high"]),
-            low=float(row["low"]),
-            close=float(row["close"]),
-            volume=int(row["volume"]),
-        )
-        for _, row in delta_df.iterrows()
-    ]
-
-    signals = [
-        dict(
-            signal=r.signal.value,
-            confidence=r.confidence,
-            description=r.description,
-            datetime=r.datetime,
-            price=r.price,
-            volume=r.volume,
-            volume_ratio=round(r.volume_ratio, 2),
-        )
-        for r in all_vpa
-        if r.signal != VPASignal.NEUTRAL
-    ]
-
-    # Filter signals to only those in the new bars time range
-    if after:
-        signals = [s for s in signals if s["datetime"] > after]
-
-    return {"bars": bars, "signals": signals}
-
-
-@app.get("/api/analyze")
-async def analyze_option(
-    symbol: str = Query(..., description="Underlying symbol (e.g., QQQ, SPY)"),
-    expiration: str = Query(..., description="Expiration date (YYYY-MM-DD)"),
-    strike: float = Query(..., description="Strike price"),
-    right: str = Query(..., description="C for Call, P for Put"),
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-    interval: int = Query(1, description="Interval in minutes (1, 5, 15, etc.)"),
-    nocache: bool = Query(False, description="Bypass OHLCV cache for live updates"),
-    mock: bool = Query(False, description="Use mock data for testing"),
-    poly: PolygonClient = Depends(get_polygon),
-    engine: VPAEngine = Depends(get_vpa),
-    gengine: GreeksSignalEngine = Depends(get_greeks_engine),
     dl: DataLayer = Depends(get_data_layer),
     sr_eng: SREngine = Depends(get_sr_engine),
-) -> AnalysisResponse:
-    """Fetch options data and run VPA analysis.
-    Note: mock parameter is accepted but ignored – analysis always uses real API data.
-    Mock mode only affects the WebSocket live feed (CSV playback as proxy)."""
+) -> SignalResponse:
+    """
+    New unified signal endpoint.
+    Returns regime, active alerts (with entry/stop/target), key S/R levels,
+    indicator series, and chain snapshot for the given underlying symbol.
+    """
+    sym = symbol.upper()
+    now_ts = datetime.utcnow().isoformat()
+
     try:
-        exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
-        end_dt = (
-            datetime.strptime(end_date, "%Y-%m-%d").date()
-            if end_date
-            else date.today()
-        )
-        start_dt = (
-            datetime.strptime(start_date, "%Y-%m-%d").date()
-            if start_date
-            else end_dt - timedelta(days=5)
-        )
+        end_dt = date.today()
+        start_dt = end_dt - timedelta(days=5)
 
-        # Clear cache if nocache=true (for live mode)
         if nocache:
-            poly.clear_ohlcv_cache(
-                symbol=symbol.upper(),
-                expiration=exp_date,
-                strike=strike,
-                right=right.upper(),
-                start_date=start_dt,
-                end_date=end_dt,
-                interval_min=interval,
-            )
             poly.clear_stock_ohlcv_cache(
-                symbol=symbol.upper(),
-                start_date=start_dt,
-                end_date=end_dt,
-                interval_min=interval,
+                symbol=sym, start_date=start_dt, end_date=end_dt, interval_min=interval,
             )
 
-        # Fetch OHLCV data (async + cached) — options + underlying in parallel
-        import asyncio as _aio
-
-        async def _safe_stock_fetch():
-            try:
-                return await poly.get_stock_ohlcv(
-                    symbol=symbol.upper(),
-                    start_date=start_dt,
-                    end_date=end_dt,
-                    interval_min=interval,
-                )
-            except Exception as exc:
-                print(f"[ANALYZE] Stock fetch failed: {exc}")
-                import pandas as _pd
-                return _pd.DataFrame(
-                    columns=["datetime", "open", "high", "low", "close", "volume"]
-                )
-
-        df, stock_df = await _aio.gather(
-            poly.get_option_ohlcv(
-                symbol=symbol.upper(),
-                expiration=exp_date,
-                strike=strike,
-                right=right.upper(),
-                start_date=start_dt,
-                end_date=end_dt,
-                interval_min=interval,
-            ),
-            _safe_stock_fetch(),
+        # ── Parallel fetches ─────────────────────────────────
+        intraday_df, daily_bars_df, intraday_5m_df = await asyncio.gather(
+            poly.get_stock_ohlcv(sym, start_date=start_dt, end_date=end_dt, interval_min=interval),
+            dl.get_daily_bars(sym, num_days=90),
+            dl.get_intraday_bars(sym, lookback_days=20, interval_min=5),
         )
 
-        if df.empty:
-            raise HTTPException(
-                status_code=404, detail="No data found for this contract"
-            )
+        # Underlying price
+        underlying_price = 0.0
+        if not intraday_df.empty:
+            underlying_price = float(intraday_df.iloc[-1]["close"])
+        if underlying_price <= 0:
+            try:
+                underlying_price = await poly.get_underlying_price(sym)
+            except Exception:
+                pass
 
-        # Run VPA analysis (CPU-bound, but fast enough for single requests)
-        vpa_results = engine.analyze(df)
-        bias = engine.get_bias(vpa_results)
-
-        # ── Compute underlying trend from stock bars ─────
-        underlying_trend = None
-        if not stock_df.empty and len(stock_df) >= 2:
-            day_open = stock_df.iloc[0]["open"]
-            day_close = stock_df.iloc[-1]["close"]
-            pct_change = (day_close - day_open) / day_open * 100 if day_open else 0
-            if pct_change > 0.15:
-                underlying_trend = "UP"
-            elif pct_change < -0.15:
-                underlying_trend = "DOWN"
-            else:
-                underlying_trend = "FLAT"
-
-        # ── Compute DTE ──────────────────────────────────
-        dte = (exp_date - date.today()).days if exp_date else None
-
-        # ── Volume regime from VPA engine ────────────────
-        vol_regime_info = None
-        if not stock_df.empty:
-            vol_regime_info = engine.get_volume_regime(stock_df)
-
-        # ── S/R, Fibonacci, Volume POC analysis ────────────
-        sr_result_obj: SRResult | None = None
-        sr_response: SRResponse | None = None
+        # Premarket bars
         try:
-            # Get underlying price for SR analysis
-            sr_underlying_price = 0.0
-            if not stock_df.empty:
-                sr_underlying_price = float(stock_df.iloc[-1]["close"])
-            if sr_underlying_price <= 0:
-                try:
-                    sr_underlying_price = await poly.get_underlying_price(symbol.upper())
-                except Exception:
-                    pass
+            premarket_df = await poly.get_premarket_bars(sym, end_dt)
+        except Exception:
+            premarket_df = pd.DataFrame()
 
-            if sr_underlying_price > 0:
-                # Fetch daily bars (90 days) + intraday bars (20 days, 5-min)
-                daily_bars_df, intraday_bars_df = await _aio.gather(
-                    dl.get_daily_bars(symbol.upper(), num_days=90),
-                    dl.get_intraday_bars(symbol.upper(), lookback_days=20, interval_min=5),
-                )
+        # Nearest expiration chain
+        chain_data: list[dict] = []
+        chain_metrics_obj: ChainMetrics | None = None
+        try:
+            expirations = await poly.get_expirations(sym)
+            if expirations:
+                nearest_exp = expirations[0]
+                chain_data = await poly.get_options_chain_snapshot(sym, nearest_exp)
+                if chain_data and underlying_price > 0:
+                    chain_metrics_obj = compute_chain_metrics(chain_data, underlying_price)
+        except Exception as ce:
+            print(f"[Signals] Chain fetch non-fatal: {ce}")
 
+        # ── Regime ───────────────────────────────────────────
+        regime_result = None
+        if not intraday_df.empty and len(intraday_df) >= 10:
+            try:
+                regime_result = regime_engine.classify(intraday_df, symbol=sym)
+            except Exception as re_err:
+                print(f"[Signals] Regime error: {re_err}")
+
+        # ── S/R ──────────────────────────────────────────────
+        sr_result_obj: SRResult | None = None
+        if underlying_price > 0 and not daily_bars_df.empty:
+            try:
                 sr_result_obj = sr_eng.analyze(
                     daily_bars=daily_bars_df,
-                    underlying_price=sr_underlying_price,
-                    intraday_bars=intraday_bars_df,
+                    underlying_price=underlying_price,
+                    intraday_bars=intraday_5m_df,
+                    premarket_bars=premarket_df,
                 )
+            except Exception as sr_err:
+                print(f"[Signals] SR error: {sr_err}")
 
-                # Cache for potential reuse
-                dl.set_cached_sr(symbol.upper(), {
-                    "poc": sr_result_obj.poc,
-                    "vah": sr_result_obj.vah,
-                    "val": sr_result_obj.val,
-                })
+        # ── VPA ──────────────────────────────────────────────
+        vpa_bias = None
+        vpa_signals_out: list[dict] = []
+        if not intraday_df.empty:
+            try:
+                vpa_results = engine.analyze(intraday_df)
+                vpa_bias = engine.get_bias(vpa_results)
+                vpa_signals_out = [
+                    dict(
+                        signal=r.signal.value,
+                        confidence=r.confidence,
+                        description=r.description,
+                        datetime=r.datetime,
+                    )
+                    for r in vpa_results
+                    if r.signal != VPASignal.NEUTRAL
+                ]
+            except Exception:
+                pass
 
-                # Build response model
-                sr_response = SRResponse(
-                    levels=[
-                        SRLevelResponse(
-                            price=l.price,
-                            kind=l.kind,
-                            source=l.source,
-                            strength=l.strength,
-                            label=l.label,
-                        )
-                        for l in sr_result_obj.levels[:25]  # Cap at 25 levels
-                    ],
-                    poc=sr_result_obj.poc,
-                    vah=sr_result_obj.vah,
-                    val=sr_result_obj.val,
-                    fib_high=sr_result_obj.fib_high,
-                    fib_low=sr_result_obj.fib_low,
-                    nearest_support=sr_result_obj.nearest_support,
-                    nearest_resistance=sr_result_obj.nearest_resistance,
-                    proximity_score=sr_result_obj.proximity_score,
-                    proximity_detail=sr_result_obj.proximity_detail,
-                )
-        except Exception as sr_err:
-            print(f"S/R analysis error (non-fatal): {sr_err}")
-
-        # ── Composite Greeks analysis ────────────────────
-        composite_response = None
-        contract_snap = None
+        # ── Fair value ───────────────────────────────────────
+        fv_response = None
         try:
-            import asyncio
-            contract_snap, chain_snap = await asyncio.gather(
-                poly.get_option_contract_snapshot(
-                    symbol.upper(), exp_date, strike, right.upper()
-                ),
-                poly.get_options_chain_snapshot(
-                    symbol.upper(), exp_date
-                ),
-            )
-            if contract_snap:
-                comp_result = gengine.analyze(
-                    contract_snapshot=contract_snap,
-                    chain_data=chain_snap,
-                    vpa_bias=bias,
-                    contract_type=right.upper(),
-                    underlying_trend=underlying_trend,
-                    dte=dte,
-                    volume_regime=vol_regime_info["regime"] if vol_regime_info else None,
-                    sr_result=sr_result_obj,
-                )
-                # Map composite signal → actionable BUY / SELL / HOLD
-                # For calls: bullish underlying = BUY (the call)
-                # For puts:  bearish underlying = BUY (the put), so invert
-                _call_action = {
-                    "strong_buy": "STRONG BUY",
-                    "buy": "BUY",
-                    "lean_bullish": "BUY",
-                    "neutral": "HOLD",
-                    "lean_bearish": "SELL",
-                    "sell": "SELL",
-                    "strong_sell": "STRONG SELL",
-                }
-                _put_action = {
-                    "strong_buy": "STRONG SELL",
-                    "buy": "SELL",
-                    "lean_bullish": "SELL",
-                    "neutral": "HOLD",
-                    "lean_bearish": "BUY",
-                    "sell": "BUY",
-                    "strong_sell": "STRONG BUY",
-                }
-                _action_map = _put_action if right.upper() == "P" else _call_action
-                composite_response = CompositeSignalResponse(
-                    signal=comp_result.signal.value,
-                    action=_action_map.get(comp_result.signal.value, "HOLD"),
-                    score=comp_result.score,
-                    confidence=comp_result.confidence,
-                    trade_archetype=comp_result.trade_archetype.value,
-                    archetype_description=comp_result.archetype_description,
-                    factors=[
-                        FactorScoreResponse(
-                            name=f.name,
-                            score=f.score,
-                            confidence=f.confidence,
-                            weight=f.weight,
-                            detail=f.detail,
+            daily_closes_fv = await poly.get_stock_daily_ohlcv(sym, num_days=45)
+            if daily_closes_fv and underlying_price > 0 and chain_data:
+                exp_date_fv = expirations[0] if expirations else None
+                if exp_date_fv:
+                    # Use nearest ATM call for IV reference
+                    atm_c = min(
+                        (c for c in chain_data if c.get("contract_type", "").lower() == "call"),
+                        key=lambda c: abs(c["strike"] - underlying_price),
+                        default=None,
+                    )
+                    if atm_c:
+                        fv_result = fair_value_engine.analyze(
+                            underlying_price=underlying_price,
+                            strike=float(atm_c["strike"]),
+                            expiration=exp_date_fv,
+                            contract_type="C",
+                            daily_closes=daily_closes_fv,
+                            market_bid=float(atm_c.get("bid", 0) or 0),
+                            market_ask=float(atm_c.get("ask", 0) or 0),
+                            market_iv=float(atm_c.get("iv", 0) or 0),
                         )
-                        for f in comp_result.factors
-                    ],
-                    greeks=GreeksResponse(
-                        delta=comp_result.greeks.delta,
-                        gamma=comp_result.greeks.gamma,
-                        theta=comp_result.greeks.theta,
-                        vega=comp_result.greeks.vega,
-                        iv=comp_result.greeks.iv,
-                        open_interest=comp_result.greeks.open_interest,
-                        volume=comp_result.greeks.volume,
-                        underlying_price=comp_result.greeks.underlying_price,
-                        break_even=comp_result.greeks.break_even,
-                        last_price=comp_result.greeks.last_price,
-                    ),
-                    chain_metrics=ChainMetricsResponse(
-                        iv_rank=comp_result.chain_metrics.iv_rank,
-                        iv_percentile=comp_result.chain_metrics.iv_percentile,
-                        put_call_oi_ratio=comp_result.chain_metrics.put_call_oi_ratio,
-                        put_call_volume_ratio=comp_result.chain_metrics.put_call_volume_ratio,
-                        total_call_oi=comp_result.chain_metrics.total_call_oi,
-                        total_put_oi=comp_result.chain_metrics.total_put_oi,
-                        total_call_volume=comp_result.chain_metrics.total_call_volume,
-                        total_put_volume=comp_result.chain_metrics.total_put_volume,
-                        net_gex=comp_result.chain_metrics.net_gex,
-                        gex_regime=comp_result.chain_metrics.gex_regime,
-                        max_pain=comp_result.chain_metrics.max_pain,
-                        uoa_detected=comp_result.chain_metrics.uoa_detected,
-                        uoa_details=comp_result.chain_metrics.uoa_details,
-                        weighted_iv=comp_result.chain_metrics.weighted_iv,
-                    ),
-                    recommendation=comp_result.recommendation,
-                    warnings=comp_result.warnings,
-                )
-        except Exception as comp_err:
-            print(f"Composite analysis error (non-fatal): {comp_err}")
-
-        # ── Fair Value (Black-Scholes) ───────────────────
-        fair_value_response = None
-        try:
-            # Fetch daily closes for historical vol (30-day window needs ~45 daily prices)
-            daily_closes = await poly.get_stock_daily_ohlcv(symbol.upper(), num_days=45)
-
-            # Get bid/ask from contract snapshot (already fetched above)
-            fv_bid = 0.0
-            fv_ask = 0.0
-            fv_iv = 0.0
-            fv_underlying = 0.0
-            if contract_snap:
-                fv_bid = float(contract_snap.get("bid", 0) or 0)
-                fv_ask = float(contract_snap.get("ask", 0) or 0)
-                fv_iv = float(contract_snap.get("iv", 0) or 0)
-                fv_underlying = float(contract_snap.get("underlying_price", 0) or 0)
-            # Fallback underlying price from price cache
-            if fv_underlying <= 0:
-                try:
-                    fv_underlying = await poly.get_underlying_price(symbol.upper())
-                except Exception:
-                    pass
-
-            if daily_closes and fv_underlying > 0:
-                fv_result = fair_value_engine.analyze(
-                    underlying_price=fv_underlying,
-                    strike=strike,
-                    expiration=exp_date,
-                    contract_type=right.upper(),
-                    daily_closes=daily_closes,
-                    market_bid=fv_bid,
-                    market_ask=fv_ask,
-                    market_iv=fv_iv,
-                )
-                fair_value_response = FairValueResponse(
-                    underlying_price=fv_result.underlying_price,
-                    strike=fv_result.strike,
-                    time_to_expiry=fv_result.time_to_expiry,
-                    risk_free_rate=fv_result.risk_free_rate,
-                    historical_vol=fv_result.historical_vol,
-                    dividend_yield=fv_result.dividend_yield,
-                    contract_type=fv_result.contract_type,
-                    theoretical_price=fv_result.theoretical_price,
-                    d1=fv_result.d1,
-                    d2=fv_result.d2,
-                    market_price=fv_result.market_price,
-                    market_iv=fv_result.market_iv,
-                    price_difference=fv_result.price_difference,
-                    pct_difference=fv_result.pct_difference,
-                    is_cheap=fv_result.is_cheap,
-                    is_expensive=fv_result.is_expensive,
-                    verdict=fv_result.verdict,
-                    detail=fv_result.detail,
-                    bid=fv_result.bid,
-                    ask=fv_result.ask,
-                    spread=fv_result.spread,
-                    spread_pct=fv_result.spread_pct,
-                    hv_vs_iv=fv_result.hv_vs_iv,
-                )
+                        fv_response = FairValueResponse(
+                            underlying_price=fv_result.underlying_price,
+                            strike=fv_result.strike,
+                            time_to_expiry=fv_result.time_to_expiry,
+                            risk_free_rate=fv_result.risk_free_rate,
+                            historical_vol=fv_result.historical_vol,
+                            dividend_yield=fv_result.dividend_yield,
+                            contract_type=fv_result.contract_type,
+                            theoretical_price=fv_result.theoretical_price,
+                            d1=fv_result.d1,
+                            d2=fv_result.d2,
+                            market_price=fv_result.market_price,
+                            market_iv=fv_result.market_iv,
+                            price_difference=fv_result.price_difference,
+                            pct_difference=fv_result.pct_difference,
+                            is_cheap=fv_result.is_cheap,
+                            is_expensive=fv_result.is_expensive,
+                            verdict=fv_result.verdict,
+                            detail=fv_result.detail,
+                            bid=fv_result.bid,
+                            ask=fv_result.ask,
+                            spread=fv_result.spread,
+                            spread_pct=fv_result.spread_pct,
+                            hv_vs_iv=fv_result.hv_vs_iv,
+                        )
         except Exception as fv_err:
-            print(f"Fair value analysis error (non-fatal): {fv_err}")
+            print(f"[Signals] Fair value non-fatal: {fv_err}")
 
-        bars = [
+        # ── Setup Detection → Edge Score → Risk Plan → Alerts ─
+        if (
+            regime_result is not None
+            and sr_result_obj is not None
+            and not intraday_df.empty
+            and underlying_price > 0
+        ):
+            try:
+                rv = rolling_rv(intraday_df)
+                setups = setup_engine.detect_all(
+                    df=intraday_df,
+                    regime=regime_result,
+                    sr=sr_result_obj,
+                    chain=chain_data,
+                    symbol=sym,
+                )
+
+                edge_results: list[EdgeResult] = []
+                for setup in setups:
+                    # Pick best contract
+                    pick = option_picker.pick(
+                        chain=chain_data,
+                        direction=setup.direction,
+                        spot=underlying_price,
+                        edge_score=60,   # preliminary — will update after scoring
+                        expiration_date=expirations[0] if expirations else None,
+                    )
+                    scored = edge_scorer.score(
+                        setup=setup,
+                        regime=regime_result,
+                        option=pick,
+                        df=intraday_df,
+                        rv=float(rv.iloc[-1]) if len(rv) > 0 else 0.0,
+                    )
+                    if scored.tier != "NO_EDGE":
+                        edge_results.append(scored)
+
+                # Feed into alert manager
+                current_time = datetime.utcnow()
+                new_alerts = alert_manager.process_tick(
+                    edge_results=edge_results,
+                    current_price=underlying_price,
+                    current_time=current_time,
+                )
+                # Evaluate active alerts for kill-switch conditions
+                alert_manager.process_tick(
+                    edge_results=[],
+                    current_price=underlying_price,
+                    current_time=current_time,
+                )
+            except Exception as pipe_err:
+                import traceback
+                print(f"[Signals] Pipeline error: {pipe_err}")
+                traceback.print_exc()
+
+        # ── Build indicator series ──────────────────────────
+        indicators_response: IndicatorsResponse | None = None
+        if not intraday_df.empty and len(intraday_df) >= 5:
+            try:
+                _vwap_s = vwap(intraday_df)
+                _vwap_u, _vwap_l = vwap_bands(intraday_df, 1.0)
+                _ema9 = ema(intraday_df["close"], 9)
+                _ema20 = ema(intraday_df["close"], 20)
+                _rsi_s = rsi(intraday_df)
+                _atr = atr_value(intraday_df)
+
+                def _to_floats(s: pd.Series) -> list[float]:
+                    return [round(float(v), 4) if not pd.isna(v) else 0.0 for v in s]
+
+                indicators_response = IndicatorsResponse(
+                    vwap=_to_floats(_vwap_s),
+                    vwap_upper=_to_floats(_vwap_u),
+                    vwap_lower=_to_floats(_vwap_l),
+                    ema_9=_to_floats(_ema9),
+                    ema_20=_to_floats(_ema20),
+                    rsi=_to_floats(_rsi_s),
+                    atr=round(_atr, 4),
+                )
+            except Exception as ind_err:
+                print(f"[Signals] Indicators error: {ind_err}")
+
+        # ── Build response ────────────────────────────────────
+        bars_out = [
             OHLCVBar(
                 datetime=str(row["datetime"]),
                 open=float(row["open"]),
@@ -1255,56 +1185,236 @@ async def analyze_option(
                 close=float(row["close"]),
                 volume=int(row["volume"]),
             )
-            for _, row in df.iterrows()
-        ]
+            for _, row in intraday_df.iterrows()
+        ] if not intraday_df.empty else []
 
-        signals = [
-            VPASignalResponse(
-                signal=r.signal.value,
-                confidence=r.confidence,
-                description=r.description,
-                datetime=r.datetime,
-                price=r.price,
-                volume=r.volume,
-                volume_ratio=round(r.volume_ratio, 2),
+        regime_out: RegimeResponse | None = None
+        if regime_result:
+            regime_out = RegimeResponse(
+                regime=regime_result.regime.value,
+                confidence=round(regime_result.confidence, 3),
+                detail=regime_result.detail,
+                vwap_current=round(regime_result.vwap_current, 4),
+                atr_current=round(regime_result.atr_current, 4),
+                rsi_current=round(regime_result.rsi_current, 2),
+                price_vs_vwap=regime_result.price_vs_vwap,
             )
-            for r in vpa_results
-            if r.signal != VPASignal.NEUTRAL
-        ]
 
-        # Build underlying bars
-        underlying_bars = [
-            OHLCVBar(
-                datetime=str(row["datetime"]),
-                open=float(row["open"]),
-                high=float(row["high"]),
-                low=float(row["low"]),
-                close=float(row["close"]),
-                volume=int(row["volume"]),
+        key_levels_out: list[SRLevelResponse] = []
+        if sr_result_obj:
+            key_levels_out = [
+                SRLevelResponse(
+                    price=l.price, kind=l.kind, source=l.source,
+                    strength=l.strength, label=l.label,
+                )
+                for l in sr_result_obj.levels[:30]
+            ]
+
+        chain_snap_out: ChainSnapshotResponse | None = None
+        if chain_metrics_obj:
+            chain_snap_out = ChainSnapshotResponse(
+                iv_rank=round(chain_metrics_obj.iv_rank, 2),
+                iv_percentile=round(chain_metrics_obj.iv_percentile, 2),
+                put_call_oi_ratio=round(chain_metrics_obj.put_call_oi_ratio, 3),
+                put_call_volume_ratio=round(chain_metrics_obj.put_call_volume_ratio, 3),
+                net_gex=round(chain_metrics_obj.net_gex, 0),
+                gex_regime=chain_metrics_obj.gex_regime,
+                max_pain=round(chain_metrics_obj.max_pain, 2),
+                uoa_detected=chain_metrics_obj.uoa_detected,
+                uoa_details=getattr(chain_metrics_obj, 'uoa_details', [])[:5],
+                call_wall=round(chain_metrics_obj.call_wall, 2),
+                put_wall=round(chain_metrics_obj.put_wall, 2),
+                weighted_iv=round(chain_metrics_obj.weighted_iv, 4),
             )
-            for _, row in stock_df.iterrows()
-        ] if not stock_df.empty else []
 
-        return AnalysisResponse(
-            symbol=symbol.upper(),
-            expiration=expiration,
-            strike=strike,
-            right=right.upper(),
-            interval=interval,
-            bars=bars,
-            signals=signals,
-            bias=bias,
-            composite=composite_response,
-            underlying_bars=underlying_bars,
-            volume_regime=vol_regime_info,
-            fair_value=fair_value_response,
-            support_resistance=sr_response,
+        # Collect active alerts
+        active_alerts_out: list[AlertResponse] = []
+        for alert in alert_manager.get_active_alerts():
+            p = alert.plan
+            opt = alert.option
+            opt_out = None
+            if opt:
+                opt_out = AlertOptionResponse(
+                    ticker=opt.ticker,
+                    strike=opt.strike,
+                    expiration=str(opt.expiration) if opt.expiration else "",
+                    option_type=opt.option_type,
+                    delta=round(opt.delta, 3),
+                    spread_pct=round(opt.spread_pct, 2),
+                    iv=round(opt.iv, 4),
+                    entry_premium_est=round(opt.entry_premium_est, 2),
+                    dte=opt.dte,
+                    notes=opt.notes,
+                )
+            active_alerts_out.append(AlertResponse(
+                id=alert.id,
+                state=alert.state.value,
+                created_at=alert.detected_at,
+                expires_at=alert.expires_at or "",
+                setup_name=alert.setup_name,
+                direction=alert.direction,
+                edge_score=alert.edge_score,
+                tier=alert.tier,
+                regime=alert.regime,
+                trigger_price=p.entry_price,
+                entry_condition=alert.setup_name,
+                stop_price=p.stop_price,
+                target_1=p.target_1,
+                target_2=p.target_2,
+                reward_risk_ratio=round(p.reward_risk_ratio, 2),
+                time_stop_minutes=p.time_stop_minutes,
+                kill_switch_conditions=p.kill_switch_conditions,
+                reasons=alert.reasons,
+                option=opt_out,
+                activated_premium=getattr(alert, 'activated_premium', None),
+            ))
+
+        # ── Volume regime ────────────────────────────────────
+        vol_regime_out: dict | None = None
+        if not intraday_df.empty:
+            try:
+                vol_regime_out = engine.get_volume_regime(intraday_df)
+            except Exception:
+                pass
+
+        # ── Proximity ────────────────────────────────────────
+        prox_score_out = 0.0
+        prox_detail_out = ""
+        if sr_result_obj:
+            prox_score_out = sr_result_obj.proximity_score
+            prox_detail_out = sr_result_obj.proximity_detail
+
+        return SignalResponse(
+            symbol=sym,
+            as_of=now_ts,
+            bars=bars_out,
+            regime=regime_out,
+            active_alerts=active_alerts_out,
+            key_levels=key_levels_out,
+            indicators=indicators_response,
+            chain_snapshot=chain_snap_out,
+            vpa={"bias": vpa_bias, "signals": vpa_signals_out} if vpa_bias else None,
+            fair_value=fv_response,
+            volume_regime=vol_regime_out,
+            proximity_score=round(prox_score_out, 3),
+            proximity_detail=prox_detail_out,
         )
 
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/alerts/{alert_id}/activate")
+async def activate_alert(alert_id: str, premium: float = Query(...)):
+    """Mark an alert as activated (entered) at a given premium."""
+    alert_manager.mark_activated(alert_id, premium)
+    return {"ok": True}
+
+
+@app.post("/api/alerts/{alert_id}/resolve")
+async def resolve_alert(
+    alert_id: str,
+    state: str = Query(..., description="STOPPED | HIT_T1 | HIT_T2 | TIMED_OUT"),
+    exit_premium: float = Query(0.0),
+):
+    """Resolve an active alert (stopped, target hit, etc.)."""
+    try:
+        alert_state = AlertState(state.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown state: {state}")
+
+    # Look up alert before resolving for perf tracking
+    alert_obj = alert_manager._active.get(alert_id)
+    entry_prem = getattr(alert_obj, "activated_premium", 0.0) if alert_obj else 0.0
+    plan = getattr(alert_obj, "plan", None) if alert_obj else None
+
+    alert_manager.resolve_alert(alert_id, alert_state, exit_premium)
+
+    # Record win/loss in risk engine for capital mode
+    is_win = alert_state in (AlertState.HIT_T1, AlertState.HIT_T2)
+    risk_engine.record_outcome(is_win)
+
+    # Log trade to MongoDB (fire-and-forget)
+    try:
+        pnl = exit_premium - entry_prem if entry_prem else 0.0
+        asyncio.create_task(perf_tracker.log_trade(
+            symbol=plan.symbol if plan else "QQQ",
+            direction=plan.direction if plan else "",
+            setup_type=plan.reason if plan else "",
+            entry_price=entry_prem,
+            exit_price=exit_premium,
+            stop_price=getattr(plan, "stop", 0.0) if plan else 0.0,
+            target_price=getattr(plan, "target_1", 0.0) if plan else 0.0,
+            pnl=pnl,
+            alert_id=alert_id,
+        ))
+    except Exception:
+        pass  # don't block resolve on logging failures
+
+    return {"ok": True}
+
+
+@app.post("/api/alerts/reset")
+async def reset_alerts():
+    """Clear all alerts and reset the alert manager (admin use)."""
+    alert_manager.reset()
+    regime_engine.reset()
+    return {"ok": True}
+
+
+# ── Performance & Scanner endpoints ──────────────────────────
+
+@app.get("/api/performance/stats")
+async def get_performance_stats(
+    symbol: str = Query("", description="Filter by symbol (optional)"),
+    days: int = Query(30, ge=1, le=365),
+):
+    """Return trade performance stats from MongoDB."""
+    try:
+        stats = await perf_tracker.get_stats(symbol=symbol, days=days)
+        by_setup = await perf_tracker.get_stats_by_setup(days=days)
+        stats["by_setup"] = by_setup
+        return stats
+    except Exception as e:
+        logger.warning("Performance stats error: %s", e)
+        return {"total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
+                "avg_r": 0, "total_pnl": 0, "expectancy": 0, "best_r": 0,
+                "worst_r": 0, "avg_score": 0, "recent_trades": [], "by_setup": []}
+
+@app.get("/api/performance/session")
+async def get_session_stats():
+    """Return today's session stats from risk_engine (in-memory)."""
+    return risk_engine.get_session_stats()
+
+@app.get("/api/tickers")
+async def search_tickers(
+    q: str = Query("", description="Search query"),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Autocomplete ticker search from cached Polygon directory."""
+    return ticker_service.search(q.strip(), limit=limit)
+
+
+@app.get("/api/scanner")
+async def run_scanner(
+    symbols: str = Query("QQQ,SPY,NVDA,TSLA,AMD,META", description="Comma-separated symbols"),
+):
+    """On-demand multi-symbol scan."""
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    try:
+        results = await scanner_engine.scan(
+            symbols=sym_list,
+            polygon_client=polygon_client,
+            data_layer=None,
+        )
+        return [r.to_dict() for r in results]
+    except Exception as e:
+        logger.warning("Scanner error: %s", e)
+        return []
 
 
 # ── User-submitted Ideas endpoints ───────────────────────────
@@ -1401,23 +1511,17 @@ async def get_trade_ideas_scan(
     symbols: str = Query("QQQ,SPY,IWM,AAPL,MSFT,NVDA,TSLA,AMD,AMZN,META,GOOGL"),
     refresh: bool = Query(False, description="Force bypass cache"),
     poly: PolygonClient = Depends(get_polygon),
-    gengine: GreeksSignalEngine = Depends(get_greeks_engine),
     engine: VPAEngine = Depends(get_vpa),
 ):
     """
-    Scan watchlist symbols for trade ideas.
+    Scan watchlist symbols for trade ideas using the new signal engine.
+    Uses VPA bias + chain metrics + liquidity gates to surface actionable setups.
     Results are cached per-symbol for 5 minutes.
-    For each symbol, check nearest expiration chain and find setups
-    where the composite signal is BUY / STRONG_BUY / SELL / STRONG_SELL.
-    Returns top ideas sorted by |score| × confidence.
     """
-    import asyncio
-
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     ideas: list[dict] = []
     now = _time.time()
 
-    # Separate symbols into cached vs need-scan
     symbols_to_scan: list[str] = []
     for sym in symbol_list:
         cached = _ideas_cache.get(sym)
@@ -1426,179 +1530,92 @@ async def get_trade_ideas_scan(
         else:
             symbols_to_scan.append(sym)
 
-    # Per-symbol results collector for cache storage
     _sym_ideas: dict[str, list[dict]] = {sym: [] for sym in symbols_to_scan}
 
     async def scan_symbol(sym: str):
         try:
-            # Get expirations — use first 2 nearest
             expirations = await poly.get_expirations(sym)
             if not expirations:
                 return
 
-            # Get underlying price for ATM calculation
             price_data = await poly.get_snapshot_prices([sym])
             snap_data = price_data.get(sym, {})
             underlying_price = float(snap_data.get("lastPrice", 0) or snap_data.get("prevClose", 0))
             if underlying_price == 0:
                 return
 
-            # ── Fetch stock bars for VPA bias + underlying trend ──
-            import pandas as pd
-            vpa_bias = None
-            underlying_trend = None
-            vol_regime = None
+            # VPA direction bias
+            vpa_direction: str | None = None
             try:
                 stock_df = await poly.get_stock_ohlcv(
-                    symbol=sym,
-                    start_date=date.today(),
-                    end_date=date.today(),
-                    interval_min=5,
+                    symbol=sym, start_date=date.today(), end_date=date.today(), interval_min=5,
                 )
                 if not stock_df.empty and len(stock_df) >= 2:
-                    # VPA bias
                     vpa_results = engine.analyze(stock_df)
-                    vpa_bias = engine.get_bias(vpa_results)
+                    bias = engine.get_bias(vpa_results)
+                    b = bias.get("bias", "neutral") if bias else "neutral"
+                    if b in ("bullish", "strong_bullish"):
+                        vpa_direction = "CALL"
+                    elif b in ("bearish", "strong_bearish"):
+                        vpa_direction = "PUT"
+            except Exception:
+                pass
 
-                    # Underlying trend from open→close
-                    day_open = stock_df.iloc[0]["open"]
-                    day_close = stock_df.iloc[-1]["close"]
-                    pct_change = (day_close - day_open) / day_open * 100 if day_open else 0
-                    if pct_change > 0.15:
-                        underlying_trend = "UP"
-                    elif pct_change < -0.15:
-                        underlying_trend = "DOWN"
-                    else:
-                        underlying_trend = "FLAT"
+            if not vpa_direction:
+                return
 
-                    # Volume regime
-                    vol_regime_info = engine.get_volume_regime(stock_df)
-                    vol_regime = vol_regime_info.get("regime") if vol_regime_info else None
-            except Exception as vpa_err:
-                print(f"[IDEAS] VPA/trend fetch failed for {sym}: {vpa_err}")
+            exp = expirations[0]
+            dte = (exp - date.today()).days
+            if dte < 0:
+                return
 
-            for exp in expirations[:2]:  # Check nearest 2 expirations
-                dte = (exp - date.today()).days
-                if dte < 0:
-                    continue
+            chain = await poly.get_options_chain_snapshot(sym, exp)
+            if not chain:
+                return
 
-                # Get chain snapshot
-                chain = await poly.get_options_chain_snapshot(sym, exp)
-                if not chain:
-                    continue
+            ct_filter = "call" if vpa_direction == "CALL" else "put"
+            candidates = [
+                c for c in chain
+                if c.get("contract_type", "").lower() == ct_filter
+                and abs(c.get("strike", 0) - underlying_price) / underlying_price < 0.03
+                and (c.get("volume", 0) or 0) >= 50
+                and (c.get("open_interest", 0) or 0) >= 100
+            ]
+            if not candidates:
+                return
 
-                # Find ATM strikes (2 closest to underlying price for calls + puts)
-                strikes_seen = sorted(set(c["strike"] for c in chain if c["strike"] > 0))
-                if not strikes_seen:
-                    continue
+            best = min(candidates, key=lambda c: abs(c.get("strike", 0) - underlying_price))
+            last_price = best.get("last_price", 0) or 0
+            if last_price < 0.10:
+                return
 
-                # Find the ATM strike
-                atm_strike = min(strikes_seen, key=lambda s: abs(s - underlying_price))
-                atm_idx = strikes_seen.index(atm_strike)
-
-                # Check ATM and 1 strike OTM for both calls and puts
-                check_strikes = set()
-                check_strikes.add(atm_strike)
-                if atm_idx + 1 < len(strikes_seen):
-                    check_strikes.add(strikes_seen[atm_idx + 1])  # 1 OTM call
-                if atm_idx - 1 >= 0:
-                    check_strikes.add(strikes_seen[atm_idx - 1])  # 1 OTM put
-
-                for strike_val in check_strikes:
-                    for ct in ["call", "put"]:
-                        # Find the contract in chain
-                        contract = next(
-                            (c for c in chain
-                             if c["strike"] == strike_val
-                             and c["contract_type"].lower() == ct),
-                            None,
-                        )
-                        if not contract:
-                            continue
-
-                        # Skip illiquid contracts
-                        if (contract.get("volume", 0) or 0) < 10 and (contract.get("open_interest", 0) or 0) < 50:
-                            continue
-
-                        # Skip too-cheap contracts
-                        last_price = contract.get("last_price", 0) or 0
-                        if last_price < 0.10:
-                            continue
-
-                        # Build snapshot dict for greeks engine
-                        contract_snap = {
-                            "greeks": contract.get("greeks", {}),
-                            "iv": contract.get("iv", 0),
-                            "open_interest": contract.get("open_interest", 0),
-                            "volume": contract.get("volume", 0),
-                            "underlying_price": underlying_price,
-                            "break_even": 0,
-                            "last_price": last_price,
-                        }
-
-                        right = "C" if ct == "call" else "P"
-                        try:
-                            result = gengine.analyze(
-                                contract_snapshot=contract_snap,
-                                chain_data=chain,
-                                vpa_bias=vpa_bias,
-                                contract_type=right,
-                                underlying_trend=underlying_trend,
-                                dte=dte,
-                                volume_regime=vol_regime,
-                            )
-                        except Exception:
-                            continue
-
-                        # Only keep actionable signals (skip neutral)
-                        sig = result.signal.value
-                        if sig == "neutral":
-                            continue
-
-                        # Map signal to action
-                        _call_action = {
-                            "strong_buy": "STRONG BUY", "buy": "BUY",
-                            "lean_bullish": "LEAN BUY",
-                            "strong_sell": "STRONG SELL", "sell": "SELL",
-                            "lean_bearish": "LEAN SELL",
-                        }
-                        _put_action = {
-                            "strong_buy": "STRONG SELL", "buy": "SELL",
-                            "lean_bullish": "LEAN SELL",
-                            "strong_sell": "STRONG BUY", "sell": "BUY",
-                            "lean_bearish": "LEAN BUY",
-                        }
-                        action_map = _put_action if right == "P" else _call_action
-                        action = action_map.get(sig, "HOLD")
-
-                        exp_str = exp.strftime("%Y-%m-%d")
-                        # Friendly exp label
-                        exp_short = exp.strftime("%b %d")
-
-                        idea_dict = {
-                            "symbol": sym,
-                            "expiration": exp_str,
-                            "exp_label": f"{exp_short} ({dte}d)",
-                            "strike": strike_val,
-                            "right": right,
-                            "type_label": "CALL" if right == "C" else "PUT",
-                            "price": round(last_price, 2),
-                            "signal": sig,
-                            "action": action,
-                            "score": result.score,
-                            "confidence": result.confidence,
-                            "archetype": result.trade_archetype.value,
-                            "recommendation": result.recommendation[:120],
-                        }
-                        ideas.append(idea_dict)
-                        _sym_ideas[sym].append(idea_dict)
+            delta = abs(float((best.get("greeks") or {}).get("delta", 0) or 0))
+            exp_str = exp.strftime("%Y-%m-%d")
+            exp_short = exp.strftime("%b %d")
+            action = "BUY" if vpa_direction == "CALL" else "BUY PUT"
+            idea_dict = {
+                "symbol": sym,
+                "expiration": exp_str,
+                "exp_label": f"{exp_short} ({dte}d)",
+                "strike": best["strike"],
+                "right": "C" if vpa_direction == "CALL" else "P",
+                "type_label": vpa_direction,
+                "price": round(last_price, 2),
+                "signal": "call_bias" if vpa_direction == "CALL" else "put_bias",
+                "action": action,
+                "score": round(delta, 3),
+                "confidence": round(delta, 3),
+                "archetype": "momentum",
+                "recommendation": f"VPA {vpa_direction} bias. Delta {delta:.2f}, {dte}d exp.",
+            }
+            ideas.append(idea_dict)
+            _sym_ideas[sym].append(idea_dict)
 
         except Exception as e:
             print(f"[IDEAS] Error scanning {sym}: {e}")
 
-    # Scan uncached symbols in parallel (with concurrency limit)
     if symbols_to_scan:
-        sem = asyncio.Semaphore(3)  # Max 3 concurrent to avoid rate limits
+        sem = asyncio.Semaphore(3)
 
         async def throttled_scan(sym):
             async with sem:
@@ -1606,14 +1623,10 @@ async def get_trade_ideas_scan(
 
         await asyncio.gather(*(throttled_scan(sym) for sym in symbols_to_scan))
 
-        # Store results in per-symbol cache
         for sym in symbols_to_scan:
             _ideas_cache[sym] = {"ideas": _sym_ideas[sym], "ts": _time.time()}
 
-    # Sort by |score| × confidence descending → best ideas first
     ideas.sort(key=lambda x: abs(x["score"]) * x["confidence"], reverse=True)
-
-    # Return top 20 ideas
     return {"ideas": ideas[:20]}
 
 
@@ -1664,6 +1677,105 @@ async def get_watchlist_prices(
         return {"prices": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── WebSocket price ticker ──────────────────────────────────
+
+@app.websocket("/ws/prices")
+async def websocket_prices(ws: WebSocket):
+    """
+    Lightweight price-tick WebSocket for the dashboard.
+
+    Client → server:
+      {"action": "sub",   "tickers": ["QQQ", "O:QQQ260225C00610000"]}
+      {"action": "unsub", "tickers": ["O:QQQ260225C00610000"]}
+
+    Server → client (for every completed 1-minute bar from live_feed):
+      {"type": "tick", "ticker": "QQQ",   "price": 512.34, "prev": 512.10, "change": 0.24}
+      {"type": "tick", "ticker": "O:...", "price": 3.45,   "prev": 3.30,   "change": 0.15}
+    """
+    await ws.accept()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=300)
+    subscribed: set[str] = set()
+    last_prices: dict[str, float] = {}
+
+    async def _sender():
+        try:
+            while True:
+                raw = await queue.get()
+                try:
+                    msg = json.loads(raw)
+                    if msg.get("type") not in ("bar", "analysis"):
+                        continue
+                    ticker = msg.get("ticker", "")
+                    if not ticker:
+                        continue
+                    # bar messages carry the close price
+                    bar = msg.get("bar")
+                    if bar:
+                        price = float(bar.get("close", 0) or 0)
+                    else:
+                        # analysis messages carry last_price
+                        price = float(msg.get("last_price", 0) or 0)
+                    if not price:
+                        continue
+                    prev = last_prices.get(ticker, price)
+                    last_prices[ticker] = price
+                    await ws.send_text(json.dumps({
+                        "type": "tick",
+                        "ticker": ticker,
+                        "price": round(price, 4),
+                        "prev": round(prev, 4),
+                        "change": round(price - prev, 4),
+                    }))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    sender_task = asyncio.create_task(_sender())
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                cmd = json.loads(raw)
+            except Exception:
+                continue
+            action = cmd.get("action", "")
+            tickers = [str(t) for t in cmd.get("tickers", []) if t]
+            if action == "sub":
+                for t in tickers:
+                    if t not in subscribed:
+                        try:
+                            await live_feed_manager.subscribe(t, queue)
+                        except Exception as e:
+                            await ws.send_text(json.dumps({
+                                "type": "error", "ticker": t, "message": str(e)
+                            }))
+                            continue
+                        subscribed.add(t)
+                await ws.send_text(json.dumps({
+                    "type": "subbed", "tickers": list(subscribed)
+                }))
+            elif action == "unsub":
+                for t in tickers:
+                    if t in subscribed:
+                        try:
+                            await live_feed_manager.unsubscribe(t, queue)
+                        except Exception:
+                            pass
+                        subscribed.discard(t)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"[PriceWS] Error: {e}")
+    finally:
+        sender_task.cancel()
+        for t in list(subscribed):
+            try:
+                await live_feed_manager.unsubscribe(t, queue)
+            except Exception:
+                pass
 
 
 # ── WebSocket live feed ─────────────────────────────────────
@@ -1743,6 +1855,7 @@ async def websocket_live(ws: WebSocket):
                 # Full VPA analysis
                 vpa_results = vpa_engine.analyze(df)
                 bias = vpa_engine.get_bias(vpa_results)
+                last_vpa_signal_str = vpa_results[-1].signal.value if vpa_results else None
 
                 # ── Underlying trend + volume regime for new engine params
                 underlying_trend = None
@@ -1756,7 +1869,11 @@ async def websocket_live(ws: WebSocket):
                         day_open = stock_df.iloc[0]["open"]
                         day_close = stock_df.iloc[-1]["close"]
                         pct = (day_close - day_open) / day_open * 100 if day_open else 0
-                        underlying_trend = "UP" if pct > 0.15 else "DOWN" if pct < -0.15 else "FLAT"
+                        if pct > 0.50:    underlying_trend = "STRONG_UP"
+                        elif pct > 0.15:  underlying_trend = "UP"
+                        elif pct < -0.50: underlying_trend = "STRONG_DOWN"
+                        elif pct < -0.15: underlying_trend = "DOWN"
+                        else:             underlying_trend = "FLAT"
                         vol_regime_info = vpa_engine.get_volume_regime(stock_df)
                         vol_regime = vol_regime_info.get("regime")
                 except Exception:
@@ -1787,90 +1904,138 @@ async def websocket_live(ws: WebSocket):
                     "last_price": float(df.iloc[-1]["close"]),
                 }
 
-                # Composite (greeks + chain)
+                # ── New engine: regime → setupdetect → edge → alerts ─
                 try:
-                    # Clear snapshot cache for fresh greeks/price data
                     if hasattr(polygon_client, '_contract_snapshot_cache'):
                         snap_key = ("snapshot", symbol, exp_date, strike, right)
                         polygon_client._contract_snapshot_cache.pop(snap_key, None)
 
-                    contract_snap, chain_snap = await asyncio.gather(
-                        polygon_client.get_option_contract_snapshot(
-                            symbol, exp_date, strike, right
+                    _und_bars, _daily_bars, _chain_snap_data, _daily_fv = await asyncio.gather(
+                        polygon_client.get_stock_ohlcv(
+                            symbol=symbol, start_date=start_dt, end_date=end_dt, interval_min=5,
                         ),
-                        polygon_client.get_options_chain_snapshot(
-                            symbol, exp_date
-                        ),
+                        _data_layer.get_daily_bars(symbol, num_days=90),
+                        polygon_client.get_options_chain_snapshot(symbol, exp_date),
+                        polygon_client.get_stock_daily_ohlcv(symbol, num_days=45),
                     )
-                    if contract_snap:
-                        comp = greeks_engine.analyze(
-                            contract_snapshot=contract_snap,
-                            chain_data=chain_snap,
-                            vpa_bias=bias,
-                            contract_type=right,
-                            underlying_trend=underlying_trend,
-                            dte=dte,
-                            volume_regime=vol_regime,
-                        )
-                        _call_action = {
-                            "strong_buy": "STRONG BUY", "buy": "BUY",
-                            "lean_bullish": "BUY", "neutral": "HOLD",
-                            "lean_bearish": "SELL", "sell": "SELL",
-                            "strong_sell": "STRONG SELL",
+
+                    _und_price = float(_und_bars.iloc[-1]["close"]) if not _und_bars.empty else 0.0
+
+                    # Regime
+                    _regime = None
+                    if not _und_bars.empty and len(_und_bars) >= 10:
+                        try:
+                            _regime = regime_engine.classify(_und_bars, symbol=symbol)
+                        except Exception:
+                            pass
+
+                    # S/R
+                    _sr = None
+                    if _und_price > 0 and not _daily_bars.empty:
+                        try:
+                            _intra5 = await _data_layer.get_intraday_bars(symbol, lookback_days=20, interval_min=5)
+                            _sr = sr_engine.analyze(
+                                daily_bars=_daily_bars,
+                                underlying_price=_und_price,
+                                intraday_bars=_intra5,
+                            )
+                        except Exception:
+                            pass
+
+                    # Chain metrics
+                    _chain_m = None
+                    if _chain_snap_data and _und_price > 0:
+                        try:
+                            _chain_m = compute_chain_metrics(_chain_snap_data, _und_price)
+                        except Exception:
+                            pass
+
+                    # Setups → edge → alerts
+                    if _regime and _sr and not _und_bars.empty:
+                        try:
+                            _rv = rolling_rv(_und_bars)
+                            _setups = setup_engine.detect_all(
+                                df=_und_bars, regime=_regime, sr=_sr,
+                                chain=_chain_snap_data or [], symbol=symbol,
+                            )
+                            _edge_results = []
+                            _exps = await polygon_client.get_expirations(symbol)
+                            for _s in _setups:
+                                _pick = option_picker.pick(
+                                    chain=_chain_snap_data or [],
+                                    direction=_s.direction,
+                                    spot=_und_price,
+                                    edge_score=60,
+                                    expiration_date=_exps[0] if _exps else None,
+                                )
+                                _scored = edge_scorer.score(
+                                    setup=_s, regime=_regime, option=_pick,
+                                    df=_und_bars,
+                                    rv=float(_rv.iloc[-1]) if len(_rv) > 0 else 0.0,
+                                )
+                                if _scored.tier != "NO_EDGE":
+                                    _edge_results.append(_scored)
+                            _now = datetime.utcnow()
+                            alert_manager.process_tick(
+                                edge_results=_edge_results,
+                                current_price=_und_price,
+                                current_time=_now,
+                            )
+                        except Exception as _pe:
+                            print(f"[WS-Analysis] Pipeline error: {_pe}")
+
+                    # Fair value on ATM call for reference
+                    fv_result = None
+                    if _daily_fv and _und_price > 0 and _chain_snap_data:
+                        try:
+                            _atm_c = min(
+                                (c for c in _chain_snap_data if c.get("contract_type","").lower()=="call"),
+                                key=lambda c: abs(c["strike"] - _und_price), default=None,
+                            )
+                            if _atm_c:
+                                fv_result = fair_value_engine.analyze(
+                                    underlying_price=_und_price,
+                                    strike=float(_atm_c["strike"]),
+                                    expiration=exp_date,
+                                    contract_type="C",
+                                    daily_closes=_daily_fv,
+                                    market_bid=float(_atm_c.get("bid", 0) or 0),
+                                    market_ask=float(_atm_c.get("ask", 0) or 0),
+                                    market_iv=float(_atm_c.get("iv", 0) or 0),
+                                )
+                        except Exception:
+                            pass
+
+                    # Enrich payload
+                    if _regime:
+                        payload["regime"] = {
+                            "regime": _regime.regime.value,
+                            "confidence": round(_regime.confidence, 3),
+                            "detail": _regime.detail,
+                            "vwap_current": round(_regime.vwap_current, 4),
+                            "rsi": round(_regime.rsi_current, 2),
                         }
-                        _put_action = {
-                            "strong_buy": "STRONG SELL", "buy": "SELL",
-                            "lean_bullish": "SELL", "neutral": "HOLD",
-                            "lean_bearish": "BUY", "sell": "BUY",
-                            "strong_sell": "STRONG BUY",
+                    if _chain_m:
+                        payload["chain_snapshot"] = {
+                            "iv_rank": round(_chain_m.iv_rank, 2),
+                            "put_call_oi_ratio": round(_chain_m.put_call_oi_ratio, 3),
+                            "gex_regime": _chain_m.gex_regime,
+                            "max_pain": round(_chain_m.max_pain, 2),
+                            "uoa_detected": _chain_m.uoa_detected,
                         }
-                        _action_map = _put_action if right == "P" else _call_action
-                        payload["composite"] = {
-                            "signal": comp.signal.value,
-                            "action": _action_map.get(comp.signal.value, "HOLD"),
-                            "score": comp.score,
-                            "confidence": comp.confidence,
-                            "trade_archetype": comp.trade_archetype.value,
-                            "archetype_description": comp.archetype_description,
-                            "factors": [
-                                {"name": f.name, "score": f.score,
-                                 "confidence": f.confidence, "weight": f.weight,
-                                 "detail": f.detail}
-                                for f in comp.factors
-                            ],
-                            "greeks": {
-                                "delta": comp.greeks.delta,
-                                "gamma": comp.greeks.gamma,
-                                "theta": comp.greeks.theta,
-                                "vega": comp.greeks.vega,
-                                "iv": comp.greeks.iv,
-                                "open_interest": comp.greeks.open_interest,
-                                "volume": comp.greeks.volume,
-                                "underlying_price": comp.greeks.underlying_price,
-                                "break_even": comp.greeks.break_even,
-                                "last_price": comp.greeks.last_price,
-                            },
-                            "chain_metrics": {
-                                "iv_rank": comp.chain_metrics.iv_rank,
-                                "iv_percentile": comp.chain_metrics.iv_percentile,
-                                "put_call_oi_ratio": comp.chain_metrics.put_call_oi_ratio,
-                                "put_call_volume_ratio": comp.chain_metrics.put_call_volume_ratio,
-                                "total_call_oi": comp.chain_metrics.total_call_oi,
-                                "total_put_oi": comp.chain_metrics.total_put_oi,
-                                "total_call_volume": comp.chain_metrics.total_call_volume,
-                                "total_put_volume": comp.chain_metrics.total_put_volume,
-                                "net_gex": comp.chain_metrics.net_gex,
-                                "gex_regime": comp.chain_metrics.gex_regime,
-                                "max_pain": comp.chain_metrics.max_pain,
-                                "uoa_detected": comp.chain_metrics.uoa_detected,
-                                "uoa_details": comp.chain_metrics.uoa_details,
-                                "weighted_iv": comp.chain_metrics.weighted_iv,
-                            },
-                            "recommendation": comp.recommendation,
-                            "warnings": comp.warnings,
+                    payload["active_alerts"] = [
+                        a.to_dict() for a in alert_manager.get_active_alerts()
+                    ]
+                    if fv_result:
+                        payload["fair_value"] = {
+                            "verdict": fv_result.verdict,
+                            "theoretical_price": fv_result.theoretical_price,
+                            "historical_vol": fv_result.historical_vol,
+                            "market_iv": fv_result.market_iv,
                         }
+
                 except Exception as comp_err:
-                    print(f"[WS-Analysis] Composite error (non-fatal): {comp_err}")
+                    print(f"[WS-Analysis] Engine error (non-fatal): {comp_err}")
 
                 # Push to client queue (drop if full)
                 try:
@@ -2139,5 +2304,1160 @@ async def websocket_watchlist(ws: WebSocket):
         print(f"[WS-Watchlist] Client disconnected")
 
 
+# ── Briefing endpoint (Idea Engine) ────────────────────────
+
+class StrikeWallResponse(BaseModel):
+    strike: float
+    wall_type: str
+    open_interest: int
+    distance_pct: float
+    label: str
+
+class StrikeMagnetResponse(BaseModel):
+    strike: float
+    net_gamma_exp: float
+    distance_pct: float
+    polarity: str
+    label: str
+
+class PositioningResponse(BaseModel):
+    call_walls: list[StrikeWallResponse] = []
+    put_walls: list[StrikeWallResponse] = []
+    gamma_magnets: list[StrikeMagnetResponse] = []
+    max_pain: float = 0.0
+    net_gex: float = 0.0
+    gex_regime: str = "neutral"
+    summary: str = ""
+
+class TradeThemeResponse(BaseModel):
+    title: str
+    description: str
+    direction: str
+    confidence: float
+    emoji: str = ""
+
+class BiasSummaryResponse(BaseModel):
+    direction: str
+    strength: float
+    headline: str
+    bullets: list[str] = []
+    kill_switch: str = ""
+
+class DayTypeProbResponse(BaseModel):
+    most_likely: str
+    probabilities: dict[str, float] = {}
+    description: str = ""
+    setup_implications: str = ""
+
+class ConditionalPlanResponse(BaseModel):
+    condition: str
+    action: str
+    option_description: str
+    direction: str
+    trigger_level: float
+    stop_description: str
+    targets: list[float] = []
+    suitable_for: list[str] = []
+
+class TradeIdeaResponse(BaseModel):
+    idea_type: str
+    direction: str
+    symbol: str
+    headline: str
+    rationale: str
+    entry_level: float
+    stop_level: float
+    target_1: float
+    target_2: float
+    reward_risk: float
+    option_hint: str
+    suitable_for: list[str] = []
+    confidence: float = 0.0
+    score: int = 0
+    score_breakdown: dict = {}
+    ai_narrative: Optional[str] = None
+    warning: str = ""
+    trade_state: str = "PENDING"       # PENDING / ACTIVE / INVALIDATED
+    trade_state_reason: str = ""
+
+class DecisionResponse(BaseModel):
+    decision: str          # BUY_CALLS / BUY_PUTS / WAIT
+    call_score: int = 0
+    put_score: int = 0
+    wait_reason: str = ""
+    trigger: str = ""
+    invalidation: str = ""
+    because: list[str] = []
+    entry_zone_low: Optional[float] = None
+    entry_zone_high: Optional[float] = None
+    stop_level: Optional[float] = None
+    targets: list[float] = []
+    confidence: float = 0.0
+    hard_guard_active: bool = False
+    hard_guard_reason: str = ""
+    capital_mode: str = "NORMAL"
+    capital_mode_reason: str = ""
+    max_size_mult: float = 1.0
+    locked_until: Optional[str] = None
+    call_sub: dict = {}
+    put_sub: dict = {}
+    # Action Engine fields
+    wait_until: list[dict] = []
+    execution_mode: str = "STAND_ASIDE"
+    execution_mode_reason: str = ""
+    wait_confidence: str = ""
+    next_move_map: list[dict] = []
+
+
+class PerformanceStatsResponse(BaseModel):
+    total_trades: int = 0
+    wins: int = 0
+    losses: int = 0
+    win_rate: float = 0.0
+    avg_r: float = 0.0
+    total_pnl: float = 0.0
+    expectancy: float = 0.0
+    best_r: float = 0.0
+    worst_r: float = 0.0
+    avg_score: int = 0
+    recent_trades: list[dict] = []
+    by_setup: list[dict] = []
+
+class ScanResultResponse(BaseModel):
+    symbol: str
+    score: int = 0
+    clean_trend: int = 0
+    compression: int = 0
+    breakout_prox: int = 0
+    positioning_edge: int = 0
+    regime: str = ""
+    spot: float = 0.0
+    atr: float = 0.0
+    note: str = ""
+
+
+class BriefingResponse(BaseModel):
+    symbol: str
+    as_of: str
+    underlying_price: float
+    bias: BiasSummaryResponse
+    day_type: DayTypeProbResponse
+    themes: list[TradeThemeResponse] = []
+    positioning: Optional[PositioningResponse] = None
+    conditional_plans: list[ConditionalPlanResponse] = []
+    trade_ideas: list[TradeIdeaResponse] = []
+    regime_name: str = ""
+    regime_confidence: float = 0.0
+    vwap_position: str = "at"
+    rsi: float = 50.0
+    atr: float = 0.0
+    posture: Optional[DecisionResponse] = None
+    ai_briefing_narrative: Optional[str] = None
+    llm_available: bool = False
+
+
+# ── Helpers for DecisionResponse + TradeState ────────────────
+
+def _build_decision_response(dr) -> Optional[DecisionResponse]:
+    """Build DecisionResponse from a TradeDecision dataclass."""
+    if dr is None:
+        return None
+    return DecisionResponse(
+        decision=dr.decision,
+        call_score=dr.call_score,
+        put_score=dr.put_score,
+        wait_reason=dr.wait_reason,
+        trigger=dr.trigger,
+        invalidation=dr.invalidation,
+        because=dr.because,
+        entry_zone_low=dr.entry_zone_low,
+        entry_zone_high=dr.entry_zone_high,
+        stop_level=dr.stop_level,
+        targets=dr.targets,
+        confidence=dr.confidence,
+        hard_guard_active=dr.hard_guard_active,
+        hard_guard_reason=dr.hard_guard_reason,
+        capital_mode=dr.capital_mode,
+        capital_mode_reason=dr.capital_mode_reason,
+        max_size_mult=dr.max_size_mult,
+        locked_until=dr.locked_until,
+        call_sub=dr.call_sub.__dict__,
+        put_sub=dr.put_sub.__dict__,
+        wait_until=dr.wait_until,
+        execution_mode=dr.execution_mode,
+        execution_mode_reason=dr.execution_mode_reason,
+        wait_confidence=dr.wait_confidence,
+        next_move_map=dr.next_move_map,
+    )
+
+
+def _compute_trade_state(idea, underlying_price: float) -> tuple[str, str]:
+    """Determine trade state: PENDING / ACTIVE / INVALIDATED."""
+    if underlying_price <= 0:
+        return "PENDING", "Waiting for price data"
+
+    entry = float(idea.entry_level or 0)
+    stop = float(idea.stop_level or 0)
+    direction = (idea.direction or "").upper()
+
+    if entry <= 0:
+        return "PENDING", "No entry level defined"
+
+    if direction == "CALL":
+        # CALL is invalidated if price broke below stop
+        if stop > 0 and underlying_price < stop:
+            return "INVALIDATED", f"Price {underlying_price:.2f} below stop {stop:.2f}"
+        # ACTIVE if price is at or above entry
+        if underlying_price >= entry * 0.998:
+            return "ACTIVE", f"Price at entry zone ({entry:.2f})"
+        return "PENDING", f"Waiting for price to reach {entry:.2f}"
+    else:
+        # PUT is invalidated if price broke above stop
+        if stop > 0 and underlying_price > stop:
+            return "INVALIDATED", f"Price {underlying_price:.2f} above stop {stop:.2f}"
+        # ACTIVE if price is at or below entry
+        if underlying_price <= entry * 1.002:
+            return "ACTIVE", f"Price at entry zone ({entry:.2f})"
+        return "PENDING", f"Waiting for price to reach {entry:.2f}"
+
+
+@app.get("/api/briefing/{sym}", response_model=BriefingResponse)
+async def get_briefing(
+    sym: str,
+    playbook: str = Query("all", description="all | 0dte | swing | scalp"),
+    interval: int = Query(5, ge=1, le=60),
+    poly: PolygonClient = Depends(get_polygon),
+    dl: DataLayer = Depends(get_data_layer),
+):
+    """
+    Idea Engine briefing for a symbol.
+    Returns bias, day-type, trade themes, IF/THEN plans, trade ideas, and positioning.
+    Optionally filtered by playbook mode.
+    """
+    try:
+        sym = sym.upper()
+
+        # ── Fetch underlying data (reuse same pipeline as /api/signals) ──
+        today = date.today()
+        intraday_df = pd.DataFrame()
+        try:
+            intraday_df = await poly.get_stock_ohlcv(
+                symbol=sym,
+                start_date=today,
+                end_date=today,
+                interval_min=interval,
+            )
+        except Exception:
+            pass
+
+        if intraday_df.empty:
+            try:
+                intraday_df = await dl.get_intraday(sym, today, interval_min=interval)
+            except Exception:
+                pass
+
+        underlying_price = 0.0
+        if not intraday_df.empty:
+            underlying_price = float(intraday_df["close"].iloc[-1])
+        else:
+            try:
+                price_data = await poly.get_snapshot_prices([sym])
+                snap = price_data.get(sym, {})
+                underlying_price = float(snap.get("lastPrice", 0) or snap.get("prevClose", 0))
+            except Exception:
+                pass
+
+        # ── Regime ──────────────────────────────────────────────
+        regime_res = None
+        if not intraday_df.empty and len(intraday_df) >= 5:
+            try:
+                regime_res = regime_engine.classify(intraday_df, symbol=sym)
+            except Exception:
+                pass
+
+        # ── SR ──────────────────────────────────────────────────
+        sr_res = None
+        try:
+            daily_df = await dl.get_daily(sym)
+            if not daily_df.empty:
+                sr_res = sr_engine.analyze(
+                    daily_df=daily_df,
+                    intraday_df=intraday_df if not intraday_df.empty else None,
+                    current_price=underlying_price,
+                )
+        except Exception:
+            pass
+
+        # ── Chain metrics ────────────────────────────────────────
+        chain_metrics_res = None
+        chain_data_raw = None
+        try:
+            expirations = await poly.get_expirations(sym)
+            if expirations:
+                chain_data_raw = await poly.get_options_chain_snapshot(sym, expirations[0])
+                if chain_data_raw:
+                    chain_metrics_res = compute_chain_metrics(chain_data_raw, underlying_price)
+        except Exception:
+            pass
+
+        # ── ATM option quality for Decision Engine ───────────────
+        _atm_spread_pct = 0.0
+        _atm_delta = 0.0
+        try:
+            if chain_data_raw and underlying_price > 0:
+                _atm_calls = [c for c in chain_data_raw if c.get("contract_type", "").lower() == "call"]
+                if _atm_calls:
+                    _atm = min(_atm_calls, key=lambda c: abs(c["strike"] - underlying_price))
+                    _bid = float(_atm.get("bid", 0) or 0)
+                    _ask = float(_atm.get("ask", 0) or 0)
+                    _mid = (_bid + _ask) / 2
+                    if _mid > 0:
+                        _atm_spread_pct = (_ask - _bid) / _mid * 100
+                    _greeks = _atm.get("greeks", {}) or {}
+                    _atm_delta = float(_greeks.get("delta", 0) or 0)
+        except Exception:
+            pass
+
+        # ── VPA ─────────────────────────────────────────────────
+        vpa_bias_dict: dict = {}
+        vpa_vol_regime: dict = {}
+        try:
+            if not intraday_df.empty and len(intraday_df) >= 2:
+                vpa_results = vpa_engine.analyze(intraday_df)
+                vpa_bias_dict = vpa_engine.get_bias(vpa_results) or {}
+                vpa_vol_regime = vpa_engine.get_volume_regime(intraday_df) or {}
+        except Exception:
+            pass
+
+        # ── Active alerts ────────────────────────────────────────
+        active_alerts_list = alert_manager.get_active_alerts()
+
+        # ── Run Idea Engine ───────────────────────────────────────
+        briefing_input = BriefingInput(
+            symbol=sym,
+            underlying_price=underlying_price,
+            df=intraday_df,
+            regime=regime_res,
+            sr=sr_res,
+            chain_metrics=chain_metrics_res,
+            vpa_bias=vpa_bias_dict,
+            active_alerts=active_alerts_list,
+        )
+        briefing = idea_engine.generate_briefing(briefing_input)
+
+        # ── Playbook filter ───────────────────────────────────────
+        try:
+            pb_mode = PlaybookMode(playbook.lower())
+        except ValueError:
+            pb_mode = PlaybookMode.ALL
+        briefing = idea_engine.filter_by_playbook(briefing, pb_mode)
+
+        # ── Decision Engine ────────────────────────────────────────
+        decision_result: Optional[TradeDecision] = None
+        try:
+            decision_result = decision_engine.compute(
+                regime=regime_res,
+                sr=sr_res,
+                chain_metrics=chain_metrics_res,
+                vpa_bias=vpa_bias_dict,
+                vol_regime=vpa_vol_regime,
+                underlying_price=underlying_price,
+                df=intraday_df,
+                spread_pct=_atm_spread_pct,
+                delta=_atm_delta,
+            )
+        except Exception as _pe:
+            pass
+
+        # ── Optional LLM narration ────────────────────────────────
+        if llm_narrator.is_available():
+            try:
+                briefing.ai_briefing_narrative = llm_narrator.narrate_briefing(briefing)
+                for idea in briefing.trade_ideas:
+                    idea.ai_narrative = llm_narrator.narrate_idea(idea)
+            except Exception:
+                pass
+
+        # ── Serialise to response model ───────────────────────────
+        def _pos_resp(pos):
+            if pos is None:
+                return None
+            return PositioningResponse(
+                call_walls=[StrikeWallResponse(**{k: getattr(w, k) for k in ('strike','wall_type','open_interest','distance_pct','label')}) for w in pos.call_walls],
+                put_walls=[StrikeWallResponse(**{k: getattr(w, k) for k in ('strike','wall_type','open_interest','distance_pct','label')}) for w in pos.put_walls],
+                gamma_magnets=[StrikeMagnetResponse(**{k: getattr(m, k) for k in ('strike','net_gamma_exp','distance_pct','polarity','label')}) for m in pos.gamma_magnets],
+                max_pain=pos.max_pain,
+                net_gex=pos.net_gex,
+                gex_regime=pos.gex_regime,
+                summary=pos.summary,
+            )
+
+        return BriefingResponse(
+            symbol=briefing.symbol,
+            as_of=briefing.as_of,
+            underlying_price=briefing.underlying_price,
+            bias=BiasSummaryResponse(
+                direction=briefing.bias.direction,
+                strength=briefing.bias.strength,
+                headline=briefing.bias.headline,
+                bullets=briefing.bias.bullets,
+                kill_switch=briefing.bias.kill_switch,
+            ),
+            day_type=DayTypeProbResponse(
+                most_likely=briefing.day_type.most_likely.value,
+                probabilities=briefing.day_type.probabilities,
+                description=briefing.day_type.description,
+                setup_implications=briefing.day_type.setup_implications,
+            ),
+            themes=[TradeThemeResponse(
+                title=t.title, description=t.description,
+                direction=t.direction, confidence=t.confidence, emoji=t.emoji,
+            ) for t in briefing.themes],
+            positioning=_pos_resp(briefing.positioning),
+            conditional_plans=[ConditionalPlanResponse(
+                condition=p.condition, action=p.action,
+                option_description=p.option_description, direction=p.direction,
+                trigger_level=p.trigger_level, stop_description=p.stop_description,
+                targets=p.targets, suitable_for=p.suitable_for,
+            ) for p in briefing.conditional_plans],
+            trade_ideas=[TradeIdeaResponse(
+                idea_type=i.idea_type.value, direction=i.direction, symbol=i.symbol,
+                headline=i.headline, rationale=i.rationale,
+                entry_level=i.entry_level, stop_level=i.stop_level,
+                target_1=i.target_1, target_2=i.target_2,
+                reward_risk=i.reward_risk, option_hint=i.option_hint,
+                suitable_for=i.suitable_for, confidence=i.confidence,
+                score=i.score, score_breakdown=i.score_breakdown,
+                ai_narrative=i.ai_narrative, warning=i.warning,
+                trade_state=_compute_trade_state(i, underlying_price)[0],
+                trade_state_reason=_compute_trade_state(i, underlying_price)[1],
+            ) for i in briefing.trade_ideas],
+            regime_name=briefing.regime_name,
+            regime_confidence=briefing.regime_confidence,
+            vwap_position=briefing.vwap_position,
+            rsi=briefing.rsi,
+            atr=briefing.atr,
+            posture=_build_decision_response(decision_result),
+            ai_briefing_narrative=briefing.ai_briefing_narrative,
+            llm_available=llm_narrator.is_available(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Live Feed WebSocket — replaces REST polling in live mode ─────
+
+@app.websocket("/ws/feed/{sym}")
+async def websocket_feed(ws: WebSocket, sym: str):
+    """
+    Market data push WebSocket.  No more REST polling.
+
+    Server pushes on connect and every `interval` seconds:
+      {"type":"pulse",    "as_of":…, "underlying_price":…,
+                          "regime":…, "active_alerts":[…],
+                          "chain_snapshot":…, "volume_regime":…,
+                          "proximity_score":…, "proximity_detail":…,
+                          "posture":…}
+      {"type":"briefing", …BriefingResponse fields… (every 2nd cycle)}
+      {"type":"error",    "detail":"…"}
+
+    Client → server:
+      {"action":"refresh"}                  — force immediate push
+      {"action":"set_interval","interval":N} — set cadence in seconds (≥10)
+    """
+    await ws.accept()
+    sym = sym.upper()
+    refresh_event = asyncio.Event()
+    running = True
+    interval_sec = 30
+    cycle_count = 0
+
+    # ── Receive loop ──────────────────────────────────────────
+    async def _recv():
+        nonlocal interval_sec, running
+        try:
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    msg = json.loads(raw)
+                    act = msg.get("action")
+                    if act == "refresh":
+                        refresh_event.set()
+                    elif act == "set_interval":
+                        interval_sec = max(10, int(msg.get("interval", 30)))
+                except Exception:
+                    pass
+        except Exception:
+            running = False
+
+    recv_task = asyncio.create_task(_recv())
+
+    # ── Pulse: regime + alerts + chain + posture (fast) ───────
+    async def _push_pulse():
+        try:
+            today = date.today()
+            intraday_df = pd.DataFrame()
+            try:
+                intraday_df = await polygon_client.get_stock_ohlcv(
+                    sym, start_date=today, end_date=today, interval_min=5,
+                )
+            except Exception:
+                pass
+
+            underlying_price = 0.0
+            if not intraday_df.empty:
+                underlying_price = float(intraday_df.iloc[-1]["close"])
+
+            # Regime
+            regime_res = None
+            if not intraday_df.empty and len(intraday_df) >= 5:
+                try:
+                    regime_res = regime_engine.classify(intraday_df, symbol=sym)
+                except Exception:
+                    pass
+
+            # VPA / volume regime
+            vpa_bias_p: dict = {}
+            vol_regime_p: dict = {}
+            if not intraday_df.empty and len(intraday_df) >= 2:
+                try:
+                    _vpa = vpa_engine.analyze(intraday_df)
+                    vpa_bias_p = vpa_engine.get_bias(_vpa) or {}
+                    vol_regime_p = vpa_engine.get_volume_regime(intraday_df) or {}
+                except Exception:
+                    pass
+
+            # SR
+            sr_p = None
+            try:
+                daily_df = await _data_layer.get_daily(sym)
+                if not daily_df.empty and underlying_price > 0:
+                    sr_p = sr_engine.analyze(
+                        daily_df=daily_df,
+                        intraday_df=intraday_df if not intraday_df.empty else None,
+                        current_price=underlying_price,
+                    )
+            except Exception:
+                pass
+
+            # Chain
+            chain_snap_p = None
+            chain_metrics_p = None
+            _cd_p_raw = None
+            try:
+                exps_p = await polygon_client.get_expirations(sym)
+                if exps_p:
+                    _cd_p_raw = await polygon_client.get_options_chain_snapshot(sym, exps_p[0])
+                    if _cd_p_raw and underlying_price > 0:
+                        chain_metrics_p = compute_chain_metrics(_cd_p_raw, underlying_price)
+                        chain_snap_p = ChainSnapshotResponse(
+                            iv_rank=round(chain_metrics_p.iv_rank, 2),
+                            iv_percentile=round(chain_metrics_p.iv_percentile, 2),
+                            put_call_oi_ratio=round(chain_metrics_p.put_call_oi_ratio, 3),
+                            put_call_volume_ratio=round(chain_metrics_p.put_call_volume_ratio, 3),
+                            net_gex=round(chain_metrics_p.net_gex, 0),
+                            gex_regime=chain_metrics_p.gex_regime,
+                            max_pain=round(chain_metrics_p.max_pain, 2),
+                            uoa_detected=chain_metrics_p.uoa_detected,
+                            uoa_details=getattr(chain_metrics_p, "uoa_details", [])[:5],
+                            call_wall=round(chain_metrics_p.call_wall, 2),
+                            put_wall=round(chain_metrics_p.put_wall, 2),
+                            weighted_iv=round(chain_metrics_p.weighted_iv, 4),
+                        )
+            except Exception:
+                pass
+
+            # ATM option quality for Decision
+            _ws_spread = 0.0
+            _ws_delta = 0.0
+            try:
+                if _cd_p_raw and underlying_price > 0:
+                    _ws_calls = [c for c in _cd_p_raw if c.get("contract_type", "").lower() == "call"]
+                    if _ws_calls:
+                        _ws_atm = min(_ws_calls, key=lambda c: abs(c["strike"] - underlying_price))
+                        _wb = float(_ws_atm.get("bid", 0) or 0)
+                        _wa = float(_ws_atm.get("ask", 0) or 0)
+                        _wm = (_wb + _wa) / 2
+                        if _wm > 0:
+                            _ws_spread = (_wa - _wb) / _wm * 100
+                        _wg = _ws_atm.get("greeks", {}) or {}
+                        _ws_delta = float(_wg.get("delta", 0) or 0)
+            except Exception:
+                pass
+
+            # Decision
+            decision_p = None
+            try:
+                dt = decision_engine.compute(
+                    regime=regime_res, sr=sr_p, chain_metrics=chain_metrics_p,
+                    vpa_bias=vpa_bias_p, vol_regime=vol_regime_p,
+                    underlying_price=underlying_price, df=intraday_df,
+                    spread_pct=_ws_spread, delta=_ws_delta,
+                )
+                _dr = _build_decision_response(dt)
+                decision_p = _dr.dict() if _dr else None
+            except Exception:
+                pass
+
+            # Active alerts (in-memory singleton)
+            def _alert_dict(alert):
+                p = alert.plan
+                opt = alert.option
+                opt_d = None
+                if opt:
+                    opt_d = AlertOptionResponse(
+                        ticker=opt.ticker, strike=opt.strike,
+                        expiration=str(opt.expiration) if opt.expiration else "",
+                        option_type=opt.option_type, delta=round(opt.delta, 3),
+                        spread_pct=round(opt.spread_pct, 2), iv=round(opt.iv, 4),
+                        entry_premium_est=round(opt.entry_premium_est, 2),
+                        dte=opt.dte, notes=opt.notes,
+                    ).dict()
+                return AlertResponse(
+                    id=alert.id, state=alert.state.value,
+                    created_at=alert.detected_at, expires_at=alert.expires_at or "",
+                    setup_name=alert.setup_name, direction=alert.direction,
+                    edge_score=alert.edge_score, tier=alert.tier, regime=alert.regime,
+                    trigger_price=p.entry_price, entry_condition=alert.setup_name,
+                    stop_price=p.stop_price, target_1=p.target_1, target_2=p.target_2,
+                    reward_risk_ratio=round(p.reward_risk_ratio, 2),
+                    time_stop_minutes=p.time_stop_minutes,
+                    kill_switch_conditions=p.kill_switch_conditions,
+                    reasons=alert.reasons, option=opt_d,
+                    activated_premium=getattr(alert, "activated_premium", None),
+                ).dict()
+
+            regime_out = None
+            if regime_res:
+                regime_out = RegimeResponse(
+                    regime=regime_res.regime.value, confidence=round(regime_res.confidence, 3),
+                    detail=regime_res.detail, vwap_current=round(regime_res.vwap_current, 4),
+                    atr_current=round(regime_res.atr_current, 4),
+                    rsi_current=round(regime_res.rsi_current, 2),
+                    price_vs_vwap=regime_res.price_vs_vwap,
+                ).dict()
+
+            prox_score = 0.0
+            prox_detail = ""
+            if sr_p:
+                prox_score = round(sr_p.proximity_score, 3)
+                prox_detail = sr_p.proximity_detail or ""
+
+            await ws.send_text(json.dumps({
+                "type": "pulse",
+                "as_of": datetime.utcnow().isoformat(),
+                "underlying_price": underlying_price,
+                "regime": regime_out,
+                "active_alerts": [_alert_dict(a) for a in alert_manager.get_active_alerts()],
+                "chain_snapshot": chain_snap_p.dict() if chain_snap_p else None,
+                "volume_regime": vol_regime_p,
+                "proximity_score": prox_score,
+                "proximity_detail": prox_detail,
+                "posture": decision_p,
+            }, default=str))
+
+        except Exception as e:
+            try:
+                await ws.send_text(json.dumps({"type": "error", "detail": f"pulse: {e}"}))
+            except Exception:
+                pass
+
+    # ── Briefing: ideas + themes + posture (every 2nd cycle) ─
+    async def _push_briefing():
+        try:
+            today = date.today()
+            intraday_df = pd.DataFrame()
+            try:
+                intraday_df = await polygon_client.get_stock_ohlcv(
+                    sym, start_date=today, end_date=today, interval_min=5,
+                )
+            except Exception:
+                pass
+
+            underlying_price = 0.0
+            if not intraday_df.empty:
+                underlying_price = float(intraday_df.iloc[-1]["close"])
+            else:
+                try:
+                    snap = await polygon_client.get_snapshot_prices([sym])
+                    s = snap.get(sym, {})
+                    underlying_price = float(s.get("lastPrice", 0) or s.get("prevClose", 0))
+                except Exception:
+                    pass
+
+            regime_res = None
+            if not intraday_df.empty and len(intraday_df) >= 5:
+                try:
+                    regime_res = regime_engine.classify(intraday_df, symbol=sym)
+                except Exception:
+                    pass
+
+            sr_res = None
+            try:
+                daily_df = await _data_layer.get_daily(sym)
+                if not daily_df.empty:
+                    sr_res = sr_engine.analyze(
+                        daily_df=daily_df,
+                        intraday_df=intraday_df if not intraday_df.empty else None,
+                        current_price=underlying_price,
+                    )
+            except Exception:
+                pass
+
+            chain_metrics_res = None
+            _cd_b_raw = None
+            try:
+                exps = await polygon_client.get_expirations(sym)
+                if exps:
+                    _cd_b_raw = await polygon_client.get_options_chain_snapshot(sym, exps[0])
+                    if _cd_b_raw:
+                        chain_metrics_res = compute_chain_metrics(_cd_b_raw, underlying_price)
+            except Exception:
+                pass
+
+            # ATM option quality for Decision
+            _b_spread = 0.0
+            _b_delta = 0.0
+            try:
+                if _cd_b_raw and underlying_price > 0:
+                    _b_calls = [c for c in _cd_b_raw if c.get("contract_type", "").lower() == "call"]
+                    if _b_calls:
+                        _b_atm = min(_b_calls, key=lambda c: abs(c["strike"] - underlying_price))
+                        _bb = float(_b_atm.get("bid", 0) or 0)
+                        _ba = float(_b_atm.get("ask", 0) or 0)
+                        _bm = (_bb + _ba) / 2
+                        if _bm > 0:
+                            _b_spread = (_ba - _bb) / _bm * 100
+                        _bg = _b_atm.get("greeks", {}) or {}
+                        _b_delta = float(_bg.get("delta", 0) or 0)
+            except Exception:
+                pass
+
+            vpa_bias_dict: dict = {}
+            vpa_vol_regime: dict = {}
+            try:
+                if not intraday_df.empty and len(intraday_df) >= 2:
+                    vpa_res = vpa_engine.analyze(intraday_df)
+                    vpa_bias_dict = vpa_engine.get_bias(vpa_res) or {}
+                    vpa_vol_regime = vpa_engine.get_volume_regime(intraday_df) or {}
+            except Exception:
+                pass
+
+            briefing_input = BriefingInput(
+                symbol=sym, underlying_price=underlying_price, df=intraday_df,
+                regime=regime_res, sr=sr_res, chain_metrics=chain_metrics_res,
+                vpa_bias=vpa_bias_dict, active_alerts=alert_manager.get_active_alerts(),
+            )
+            briefing = idea_engine.generate_briefing(briefing_input)
+            briefing = idea_engine.filter_by_playbook(briefing, PlaybookMode.ALL)
+
+            decision_result = None
+            try:
+                decision_result = decision_engine.compute(
+                    regime=regime_res, sr=sr_res, chain_metrics=chain_metrics_res,
+                    vpa_bias=vpa_bias_dict, vol_regime=vpa_vol_regime,
+                    underlying_price=underlying_price, df=intraday_df,
+                    spread_pct=_b_spread, delta=_b_delta,
+                )
+            except Exception:
+                pass
+
+            def _pos_resp_b(pos):
+                if pos is None:
+                    return None
+                return PositioningResponse(
+                    call_walls=[StrikeWallResponse(**{k: getattr(w, k) for k in ('strike','wall_type','open_interest','distance_pct','label')}) for w in pos.call_walls],
+                    put_walls=[StrikeWallResponse(**{k: getattr(w, k) for k in ('strike','wall_type','open_interest','distance_pct','label')}) for w in pos.put_walls],
+                    gamma_magnets=[StrikeMagnetResponse(**{k: getattr(m, k) for k in ('strike','net_gamma_exp','distance_pct','polarity','label')}) for m in pos.gamma_magnets],
+                    max_pain=pos.max_pain, net_gex=pos.net_gex,
+                    gex_regime=pos.gex_regime, summary=pos.summary,
+                )
+
+            briefing_resp = BriefingResponse(
+                symbol=briefing.symbol, as_of=briefing.as_of,
+                underlying_price=briefing.underlying_price,
+                bias=BiasSummaryResponse(
+                    direction=briefing.bias.direction, strength=briefing.bias.strength,
+                    headline=briefing.bias.headline, bullets=briefing.bias.bullets,
+                    kill_switch=briefing.bias.kill_switch,
+                ),
+                day_type=DayTypeProbResponse(
+                    most_likely=briefing.day_type.most_likely.value,
+                    probabilities=briefing.day_type.probabilities,
+                    description=briefing.day_type.description,
+                    setup_implications=briefing.day_type.setup_implications,
+                ),
+                themes=[TradeThemeResponse(
+                    title=t.title, description=t.description,
+                    direction=t.direction, confidence=t.confidence, emoji=t.emoji,
+                ) for t in briefing.themes],
+                positioning=_pos_resp_b(briefing.positioning),
+                conditional_plans=[ConditionalPlanResponse(
+                    condition=p.condition, action=p.action,
+                    option_description=p.option_description, direction=p.direction,
+                    trigger_level=p.trigger_level, stop_description=p.stop_description,
+                    targets=p.targets, suitable_for=p.suitable_for,
+                ) for p in briefing.conditional_plans],
+                trade_ideas=[TradeIdeaResponse(
+                    idea_type=i.idea_type.value, direction=i.direction, symbol=i.symbol,
+                    headline=i.headline, rationale=i.rationale,
+                    entry_level=i.entry_level, stop_level=i.stop_level,
+                    target_1=i.target_1, target_2=i.target_2,
+                    reward_risk=i.reward_risk, option_hint=i.option_hint,
+                    suitable_for=i.suitable_for, confidence=i.confidence,
+                    score=i.score, score_breakdown=i.score_breakdown,
+                    ai_narrative=i.ai_narrative, warning=i.warning,
+                    trade_state=_compute_trade_state(i, underlying_price)[0],
+                    trade_state_reason=_compute_trade_state(i, underlying_price)[1],
+                ) for i in briefing.trade_ideas],
+                regime_name=briefing.regime_name, regime_confidence=briefing.regime_confidence,
+                vwap_position=briefing.vwap_position, rsi=briefing.rsi, atr=briefing.atr,
+                posture=_build_decision_response(decision_result),
+                llm_available=llm_narrator.is_available(),
+            )
+            payload = json.loads(briefing_resp.json())
+            payload["type"] = "briefing"
+            await ws.send_text(json.dumps(payload, default=str))
+
+        except Exception as e:
+            try:
+                await ws.send_text(json.dumps({"type": "error", "detail": f"briefing: {e}"}))
+            except Exception:
+                pass
+
+    # ── Main loop ─────────────────────────────────────────────
+    try:
+        while running:
+            await _push_pulse()
+            if cycle_count % 2 == 0:   # briefing every 2nd cycle (60s by default)
+                await _push_briefing()
+            cycle_count += 1
+            refresh_event.clear()
+            try:
+                await asyncio.wait_for(refresh_event.wait(), timeout=float(interval_sec))
+            except asyncio.TimeoutError:
+                pass
+    except Exception:
+        pass
+    finally:
+        running = False
+        recv_task.cancel()
+
+
 # ── Static files (must be last so it doesn't shadow API routes) ─
+
+# ── Backtest Replay endpoint ─────────────────────────────────
+
+from pathlib import Path as _Path
+
+_BACKTEST_DATA_DIR = _Path(__file__).parent.parent / "data" / "qqq"
+
+
+def _bt_load_day(date_str: str) -> pd.DataFrame:
+    """Load a single day's QQQ bars from local CSV, filter to RTH."""
+    path = _BACKTEST_DATA_DIR / f"{date_str}.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    for c in ["open", "close", "high", "low"]:
+        df[c] = df[c].astype(float)
+    df["volume"] = df["volume"].astype(int)
+    df["datetime"] = pd.to_datetime(df["window_start"].astype(int), unit="ns").dt.strftime("%Y-%m-%d %H:%M:%S")
+    df = df.sort_values("datetime").reset_index(drop=True)
+    dt_col = pd.to_datetime(df["datetime"])
+    mask_start = (dt_col.dt.hour > 14) | ((dt_col.dt.hour == 14) & (dt_col.dt.minute >= 30))
+    mask_end = dt_col.dt.hour < 21
+    df = df[mask_start & mask_end]
+    return df.reset_index(drop=True)
+
+
+def _bt_build_daily(all_dates: list[str]) -> pd.DataFrame:
+    """Build pseudo-daily OHLCV from minute CSVs for S/R engine."""
+    rows = []
+    for d in all_dates:
+        ddf = _bt_load_day(d)
+        if ddf.empty:
+            continue
+        rows.append({
+            "date": d, "open": ddf["open"].iloc[0], "high": ddf["high"].max(),
+            "low": ddf["low"].min(), "close": ddf["close"].iloc[-1],
+            "volume": int(ddf["volume"].sum()),
+        })
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+@app.get("/api/backtest/dates")
+async def backtest_dates():
+    """Return list of available backtest dates."""
+    dates = sorted(p.stem for p in _BACKTEST_DATA_DIR.glob("*.csv"))
+    return {"dates": dates}
+
+
+@app.get("/api/backtest/replay/{sym}")
+async def backtest_replay(
+    sym: str,
+    bt_date: str = Query(..., description="YYYY-MM-DD"),
+    step_bars: int = Query(10, ge=5, le=120, description="Bars between checkpoints"),
+    playbook: str = Query("all"),
+):
+    """
+    Backtest-replay endpoint.
+    Runs the full engine stack at each checkpoint and returns an array of snapshots
+    that the frontend can step through like a VCR.
+    Each snapshot mirrors the shape of the live /api/signals + /api/briefing responses.
+    """
+    sym = sym.upper()
+    all_csv_dates = sorted(p.stem for p in _BACKTEST_DATA_DIR.glob("*.csv"))
+    if bt_date not in all_csv_dates:
+        raise HTTPException(status_code=404, detail=f"No data for {bt_date}")
+
+    df = _bt_load_day(bt_date)
+    if df.empty or len(df) < 30:
+        raise HTTPException(status_code=400, detail="Insufficient bars for that date")
+
+    daily_df = _bt_build_daily([d for d in all_csv_dates if d <= bt_date])
+
+    # Fresh engines per replay
+    _re = RegimeEngine()
+    _sr = SREngine()
+    _de = DecisionEngine()
+    _ve = VPAEngine()
+    _ie = IdeaEngine()
+
+    try:
+        pb_mode = PlaybookMode(playbook.lower())
+    except ValueError:
+        pb_mode = PlaybookMode.ALL
+
+    # Warmup: always start at 60 bars so engines have enough data
+    warmup = min(60, len(df))
+    checkpoints = list(range(warmup, len(df) + 1, step_bars))
+    if not checkpoints or checkpoints[-1] < len(df):
+        checkpoints.append(len(df))
+
+    snapshots = []
+
+    for cp in checkpoints:
+        window = df.iloc[:cp].copy()
+        spot = float(window["close"].iloc[-1])
+        cp_time = str(window["datetime"].iloc[-1])
+
+        # ── Bars ──
+        bars_out = [
+            {"datetime": str(r["datetime"]), "open": float(r["open"]),
+             "high": float(r["high"]), "low": float(r["low"]),
+             "close": float(r["close"]), "volume": int(r["volume"])}
+            for _, r in window.iterrows()
+        ]
+
+        # ── Indicators ──
+        ind_out = None
+        if len(window) >= 5:
+            try:
+                _v = vwap(window); _vu, _vl = vwap_bands(window, 1.0)
+                _e9 = ema(window["close"], 9); _e20 = ema(window["close"], 20)
+                _rs = rsi(window); _at = atr_value(window)
+                def _fl(s): return [round(float(v), 4) if not pd.isna(v) else 0.0 for v in s]
+                ind_out = {"vwap": _fl(_v), "vwap_upper": _fl(_vu), "vwap_lower": _fl(_vl),
+                           "ema_9": _fl(_e9), "ema_20": _fl(_e20), "rsi": _fl(_rs), "atr": round(_at, 4)}
+            except Exception:
+                pass
+
+        # ── Regime ──
+        regime_out = None
+        regime_res = None
+        if len(window) >= 10:
+            try:
+                regime_res = _re.classify(window, force_reclassify=True)
+                regime_out = {
+                    "regime": regime_res.regime.value,
+                    "confidence": round(regime_res.confidence, 3),
+                    "detail": regime_res.detail,
+                    "vwap_current": round(regime_res.vwap_current, 4),
+                    "atr_current": round(regime_res.atr_current, 4),
+                    "rsi_current": round(regime_res.rsi_current, 2),
+                    "price_vs_vwap": regime_res.price_vs_vwap,
+                }
+            except Exception:
+                pass
+
+        # ── S/R ──
+        sr_res = None
+        levels_out = []
+        if not daily_df.empty:
+            try:
+                sr_res = _sr.analyze(daily_df, spot, intraday_bars=window)
+                levels_out = [
+                    {"price": l.price, "kind": l.kind, "source": l.source,
+                     "strength": l.strength, "label": l.label}
+                    for l in sr_res.levels[:30]
+                ]
+            except Exception:
+                pass
+
+        # ── VPA ──
+        vpa_out = None
+        vpa_bias = {}
+        vol_regime = {}
+        if len(window) >= 2:
+            try:
+                vpa_results = _ve.analyze(window[["datetime", "open", "high", "low", "close", "volume"]].copy())
+                vpa_bias = _ve.get_bias(vpa_results) or {}
+                vol_regime = _ve.get_volume_regime(window) or {}
+                vpa_sigs = [
+                    {"signal": r.signal.value, "confidence": r.confidence,
+                     "description": r.description, "datetime": r.datetime}
+                    for r in vpa_results if r.signal != VPASignal.NEUTRAL
+                ]
+                vpa_out = {"bias": vpa_bias, "signals": vpa_sigs[-7:]}
+            except Exception:
+                pass
+
+        # ── Volume regime ──
+        vol_out = None
+        if vol_regime:
+            ratio_val = vol_regime.get("ratio", 1.0)
+            if ratio_val < 0.5:
+                vr_label = "LOW"
+            elif ratio_val > 2.0:
+                vr_label = "HIGH"
+            else:
+                vr_label = "NORMAL"
+            vol_out = {"regime": vr_label, "ratio": round(ratio_val, 2),
+                       "detail": vol_regime.get("detail", "")}
+
+        # ── S/R proximity ──
+        prox_score = 0.0
+        prox_detail = ""
+        if sr_res and spot > 0:
+            try:
+                nearest = min(sr_res.levels, key=lambda l: abs(l.price - spot)) if sr_res.levels else None
+                if nearest:
+                    dist_pct = (spot - nearest.price) / spot * 100
+                    prox_score = round(dist_pct, 3)
+                    proximity_label = "Near" if abs(dist_pct) < 0.2 else "Moderate" if abs(dist_pct) < 0.5 else "Far"
+                    prox_detail = f"At {nearest.kind} ${nearest.price:.2f} ({abs(dist_pct):.1f}% away, strength {nearest.strength:.0f}%) → {'bounce' if nearest.kind == 'support' else 'rejection'} expected"
+            except Exception:
+                pass
+
+        # ── Decision ──
+        posture_out = None
+        decision_res = None
+        try:
+            decision_res = _de.compute(
+                regime=regime_res, sr=sr_res, chain_metrics=None,
+                vpa_bias=vpa_bias, vol_regime=vol_regime,
+                underlying_price=spot, df=window,
+            )
+            posture_out = {
+                "decision": decision_res.decision,
+                "call_score": decision_res.call_score,
+                "put_score": decision_res.put_score,
+                "wait_reason": decision_res.wait_reason,
+                "trigger": decision_res.trigger,
+                "invalidation": decision_res.invalidation,
+                "because": decision_res.because,
+                "entry_zone_low": decision_res.entry_zone_low,
+                "entry_zone_high": decision_res.entry_zone_high,
+                "stop_level": decision_res.stop_level,
+                "targets": decision_res.targets,
+                "confidence": decision_res.confidence,
+                "hard_guard_active": decision_res.hard_guard_active,
+                "hard_guard_reason": decision_res.hard_guard_reason,
+                "capital_mode": decision_res.capital_mode,
+                "capital_mode_reason": decision_res.capital_mode_reason,
+                "max_size_mult": decision_res.max_size_mult,
+                "locked_until": decision_res.locked_until,
+                "call_sub": decision_res.call_sub.__dict__,
+                "put_sub": decision_res.put_sub.__dict__,
+            }
+        except Exception:
+            pass
+
+        # ── Ideas via idea engine ──
+        ideas_out = []
+        briefing_data = {}
+        try:
+            bi = BriefingInput(
+                symbol=sym, underlying_price=spot, df=window,
+                regime=regime_res, sr=sr_res, chain_metrics=ChainMetrics(),
+                vpa_bias=vpa_bias, active_alerts=[], expirations=[],
+            )
+            briefing = _ie.generate_briefing(bi)
+            briefing = _ie.filter_by_playbook(briefing, pb_mode)
+
+            ideas_out = [
+                {"idea_type": i.idea_type.value, "direction": i.direction,
+                 "symbol": i.symbol, "headline": i.headline, "rationale": i.rationale,
+                 "entry_level": i.entry_level, "stop_level": i.stop_level,
+                 "target_1": i.target_1, "target_2": i.target_2,
+                 "reward_risk": i.reward_risk, "option_hint": i.option_hint,
+                 "suitable_for": i.suitable_for, "confidence": i.confidence,
+                 "score": i.score, "score_breakdown": i.score_breakdown,
+                 "warning": i.warning}
+                for i in briefing.trade_ideas
+            ]
+
+            briefing_data = {
+                "bias": {"direction": briefing.bias.direction,
+                         "strength": briefing.bias.strength,
+                         "headline": briefing.bias.headline,
+                         "bullets": briefing.bias.bullets,
+                         "kill_switch": briefing.bias.kill_switch} if briefing.bias else None,
+                "day_type": {"most_likely": briefing.day_type.most_likely.value,
+                             "probabilities": briefing.day_type.probabilities,
+                             "description": briefing.day_type.description,
+                             "setup_implications": briefing.day_type.setup_implications} if briefing.day_type else None,
+                "themes": [{"title": t.title, "description": t.description,
+                            "direction": t.direction, "confidence": t.confidence,
+                            "emoji": t.emoji} for t in briefing.themes],
+                "conditional_plans": [{"condition": p.condition, "action": p.action,
+                                       "option_description": p.option_description,
+                                       "direction": p.direction,
+                                       "trigger_level": p.trigger_level,
+                                       "stop_description": p.stop_description,
+                                       "targets": p.targets,
+                                       "suitable_for": p.suitable_for}
+                                      for p in briefing.conditional_plans],
+            }
+        except Exception:
+            pass
+
+        snapshot = {
+            "checkpoint": cp,
+            "time": cp_time,
+            "underlying_price": spot,
+            "bars": bars_out,
+            "regime": regime_out,
+            "key_levels": levels_out,
+            "indicators": ind_out,
+            "vpa": vpa_out,
+            "volume_regime": vol_out,
+            "proximity_score": prox_score,
+            "proximity_detail": prox_detail,
+            "posture": posture_out,
+            "trade_ideas": ideas_out,
+            "briefing": briefing_data,
+        }
+        snapshots.append(snapshot)
+
+    # Summary
+    return {
+        "symbol": sym,
+        "date": bt_date,
+        "total_bars": len(df),
+        "step_bars": step_bars,
+        "num_snapshots": len(snapshots),
+        "open": float(df["open"].iloc[0]),
+        "close": float(df["close"].iloc[-1]),
+        "day_change_pct": round((float(df["close"].iloc[-1]) - float(df["open"].iloc[0])) / float(df["open"].iloc[0]) * 100, 2),
+        "snapshots": snapshots,
+    }
+
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

@@ -679,16 +679,22 @@ class PolygonClient:
                 if not results_batch:
                     break
                 for r in results_batch:
+                    day     = r.get("day", {})
+                    quote   = r.get("last_quote", {})
+                    details = r.get("details", {})
                     all_results.append({
-                        "ticker": r.get("details", {}).get("ticker", ""),
-                        "strike": r.get("details", {}).get("strike_price", 0),
-                        "expiration": r.get("details", {}).get("expiration_date", ""),
-                        "contract_type": r.get("details", {}).get("contract_type", ""),
+                        "ticker": details.get("ticker", ""),
+                        "strike": details.get("strike_price", 0),
+                        "expiration_date": details.get("expiration_date", ""),
+                        "expiration": details.get("expiration_date", ""),
+                        "contract_type": details.get("contract_type", ""),
                         "greeks": r.get("greeks", {}),
                         "iv": r.get("implied_volatility", 0),
                         "open_interest": r.get("open_interest", 0),
-                        "volume": r.get("day", {}).get("volume", 0),
-                        "last_price": r.get("day", {}).get("close", 0),
+                        "volume": day.get("volume", 0),
+                        "last_price": day.get("close", 0) or day.get("vwap", 0) or 0,
+                        "bid": quote.get("bid", 0) or day.get("close", 0) or 0,
+                        "ask": quote.get("ask", 0) or day.get("close", 0) or 0,
                     })
                 page_count += 1
                 next_url = data.get("next_url")
@@ -720,6 +726,90 @@ class PolygonClient:
         """Clear a specific entry from the OHLCV cache."""
         cache_key = (symbol, expiration, strike, right, start_date, end_date, interval_min)
         self._ohlcv_cache.pop(cache_key, None)
+
+
+    # ── Premarket bars ─────────────────────────────────────────
+
+    _premarket_cache: dict = {}
+
+    async def get_premarket_bars(
+        self,
+        symbol: str,
+        trade_date: date | None = None,
+        interval_min: int = 1,
+    ) -> pd.DataFrame:
+        """
+        Fetch pre-market OHLCV bars for a symbol on a given date.
+        Pre-market window: 04:00-09:30 ET.
+        Uses Polygon extended-hours aggregates (adjusted=false).
+
+        Parameters
+        ----------
+        symbol       : underlying ticker, e.g. "QQQ"
+        trade_date   : date to fetch; defaults to today
+        interval_min : bar width in minutes (default 1)
+
+        Returns
+        -------
+        DataFrame with columns: datetime, open, high, low, close, volume
+        Sorted ascending by datetime. May be empty if no pre-market data.
+        """
+        if trade_date is None:
+            trade_date = date.today()
+
+        cache_key = (symbol.upper(), trade_date, interval_min)
+        if cache_key in self._premarket_cache:
+            return self._premarket_cache[cache_key]
+
+        # Polygon v2 aggs supports extended hours via multiplier/timespan
+        # We fetch the full day and filter to pre-market window.
+        url = (
+            f"{self.BASE_URL}/v2/aggs/ticker/{symbol.upper()}"
+            f"/range/{interval_min}/minute/{trade_date}/{trade_date}"
+        )
+        params = {
+            "limit": 5000,
+            "sort": "asc",
+            "adjusted": "false",
+            "extended_hours": "true",  # include pre/after market
+        }
+
+        try:
+            data = await self._get_json(url, params)
+            bars = data.get("results", [])
+
+            if not bars:
+                empty = pd.DataFrame(
+                    columns=["datetime", "open", "high", "low", "close", "volume"]
+                )
+                self._premarket_cache[cache_key] = empty
+                return empty
+
+            records = []
+            for bar in bars:
+                dt_utc = datetime.fromtimestamp(bar["t"] / 1000, tz=ZoneInfo("UTC"))
+                dt_et  = dt_utc.astimezone(_ET).replace(tzinfo=None)
+                # Keep only pre-market bars: 04:00 – 09:29
+                if dt_et.hour < 4 or (dt_et.hour == 9 and dt_et.minute >= 30) or dt_et.hour > 9:
+                    continue
+                records.append({
+                    "datetime": dt_et,
+                    "open":  bar["o"],
+                    "high":  bar["h"],
+                    "low":   bar["l"],
+                    "close": bar["c"],
+                    "volume": bar.get("v", 0),
+                })
+
+            df = pd.DataFrame(records).sort_values("datetime").reset_index(drop=True)
+            self._premarket_cache[cache_key] = df
+            return df
+
+        except Exception as e:
+            print(f"[Premarket] Error fetching premarket bars for {symbol}: {e}")
+            return pd.DataFrame(
+                columns=["datetime", "open", "high", "low", "close", "volume"]
+            )
 
 
 # Singleton – lifecycle managed via FastAPI lifespan

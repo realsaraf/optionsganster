@@ -69,6 +69,7 @@ class SREngine:
         daily_bars: pd.DataFrame,
         underlying_price: float,
         intraday_bars: pd.DataFrame | None = None,
+        premarket_bars: pd.DataFrame | None = None,
     ) -> SRResult:
         """
         Run full S/R analysis.
@@ -80,6 +81,8 @@ class SREngine:
         underlying_price : current price of the underlying.
         intraday_bars : (optional) DataFrame with 5-min bars for volume profile.
                         columns [datetime, open, high, low, close, volume]
+        premarket_bars : (optional) DataFrame with 1-min pre-market bars.
+                         columns [datetime, open, high, low, close, volume]
 
         Returns
         -------
@@ -91,7 +94,7 @@ class SREngine:
         all_levels: list[SRLevel] = []
 
         # 1. Swing-point S/R
-        swing_levels = self._find_swing_levels(daily_bars, underlying_price)
+        swing_levels = self._swing_levels(daily_bars, underlying_price)
         all_levels.extend(swing_levels)
 
         # 2. Fibonacci retracement + extensions
@@ -112,13 +115,27 @@ class SREngine:
         round_levels = self._round_number_levels(underlying_price)
         all_levels.extend(round_levels)
 
-        # 5. Cluster nearby levels to avoid clutter
+        # 5. Prior-day High / Low / Close as key levels
+        prior_day_levels = self._prior_day_levels(daily_bars, underlying_price)
+        all_levels.extend(prior_day_levels)
+
+        # 6. Premarket High / Low (if available)
+        if premarket_bars is not None and not premarket_bars.empty:
+            pm_levels = self._premarket_levels(premarket_bars, underlying_price)
+            all_levels.extend(pm_levels)
+
+        # 7. Opening Range (if intraday available)
+        if intraday_bars is not None and not intraday_bars.empty:
+            or_levels = self._opening_range_levels(intraday_bars, underlying_price)
+            all_levels.extend(or_levels)
+
+        # 8. Cluster nearby levels to avoid clutter
         all_levels = self._cluster_levels(all_levels)
 
-        # 6. Sort by proximity to current price
+        # 9. Sort by proximity to current price
         all_levels.sort(key=lambda l: abs(l.price - underlying_price))
 
-        # 7. Score proximity for greeks engine
+        # 10. Score proximity for greeks engine
         nearest_sup, nearest_res = self._find_nearest(all_levels, underlying_price)
         prox_score, prox_detail = self._score_proximity(
             underlying_price, nearest_sup, nearest_res, all_levels
@@ -139,7 +156,7 @@ class SREngine:
 
     # ── Swing detection ──────────────────────────────────────
 
-    def _find_swing_levels(
+    def _swing_levels(
         self, df: pd.DataFrame, current_price: float, lookback: int = 5
     ) -> list[SRLevel]:
         """
@@ -413,6 +430,130 @@ class SREngine:
                         strength=strength,
                         label=f"${price}",
                     ))
+
+        return levels
+
+    # ── Prior-day levels ─────────────────────────────────────
+
+    def _prior_day_levels(
+        self, daily_bars: pd.DataFrame, current_price: float
+    ) -> list[SRLevel]:
+        """
+        Prior trading day High, Low, and Close are key institutional levels.
+        Uses the second-to-last row of the daily bars DataFrame.
+        """
+        if len(daily_bars) < 2:
+            return []
+
+        prev = daily_bars.iloc[-2]
+        levels: list[SRLevel] = []
+
+        prev_high  = float(prev["high"])
+        prev_low   = float(prev["low"])
+        prev_close = float(prev["close"])
+
+        levels.append(SRLevel(
+            price=round(prev_high, 2),
+            kind="resistance" if prev_high >= current_price else "support",
+            source="swing",
+            strength=0.80,
+            label="Prior Day High",
+        ))
+        levels.append(SRLevel(
+            price=round(prev_low, 2),
+            kind="support" if prev_low <= current_price else "resistance",
+            source="swing",
+            strength=0.80,
+            label="Prior Day Low",
+        ))
+        levels.append(SRLevel(
+            price=round(prev_close, 2),
+            kind="support" if prev_close <= current_price else "resistance",
+            source="swing",
+            strength=0.75,
+            label="Prior Day Close",
+        ))
+
+        return levels
+
+    # ── Premarket levels ──────────────────────────────────────
+
+    def _premarket_levels(
+        self, premarket_bars: pd.DataFrame, current_price: float
+    ) -> list[SRLevel]:
+        """
+        Premarket High / Low act as first-hour reference levels.
+        Breakouts/breakdowns of these levels are actionable.
+        """
+        if premarket_bars.empty:
+            return []
+
+        pm_high = float(premarket_bars["high"].max())
+        pm_low  = float(premarket_bars["low"].min())
+        levels: list[SRLevel] = []
+
+        levels.append(SRLevel(
+            price=round(pm_high, 2),
+            kind="resistance" if pm_high >= current_price else "support",
+            source="swing",
+            strength=0.70,
+            label="Premarket High",
+        ))
+        levels.append(SRLevel(
+            price=round(pm_low, 2),
+            kind="support" if pm_low <= current_price else "resistance",
+            source="swing",
+            strength=0.70,
+            label="Premarket Low",
+        ))
+
+        return levels
+
+    # ── Opening Range levels ──────────────────────────────────
+
+    def _opening_range_levels(
+        self, intraday_bars: pd.DataFrame, current_price: float, minutes: int = 15
+    ) -> list[SRLevel]:
+        """
+        Opening Range High / Low from the first N minutes.
+        ORH and ORL are key breakout levels throughout the session.
+        """
+        if intraday_bars.empty or "datetime" not in intraday_bars.columns:
+            return []
+
+        df = intraday_bars.copy()
+        df["_dt"] = pd.to_datetime(df["datetime"])
+        today = df["_dt"].dt.date.max()
+        today_bars = df[df["_dt"].dt.date == today].sort_values("_dt")
+
+        if today_bars.empty:
+            return []
+
+        session_open = today_bars["_dt"].iloc[0]
+        cutoff = session_open + pd.Timedelta(minutes=minutes)
+        or_bars = today_bars[today_bars["_dt"] < cutoff]
+
+        if or_bars.empty:
+            return []
+
+        orh = float(or_bars["high"].max())
+        orl = float(or_bars["low"].min())
+        levels: list[SRLevel] = []
+
+        levels.append(SRLevel(
+            price=round(orh, 2),
+            kind="resistance" if orh >= current_price else "support",
+            source="swing",
+            strength=0.75,
+            label="Opening Range High",
+        ))
+        levels.append(SRLevel(
+            price=round(orl, 2),
+            kind="support" if orl <= current_price else "resistance",
+            source="swing",
+            strength=0.75,
+            label="Opening Range Low",
+        ))
 
         return levels
 

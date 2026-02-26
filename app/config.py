@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
     ENVIRONMENT: str = "development"
+    OPENAI_API_KEY: str = ""   # optional — enables LLM narrative layer
+
+    # MongoDB Atlas
+    MONGO_URI: str = "mongodb+srv://optionsgangster:optionsgangster@hakmacluster.as3cgyn.mongodb.net/?appName=HakmaCluster"
+    MONGO_DB: str = "optionsgangster"
 
     # Cache TTLs (seconds)
     CACHE_TTL_EXPIRATIONS: int = 3600  # 1 hour – expiry dates rarely change

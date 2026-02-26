@@ -110,16 +110,17 @@ class GreeksSignalEngine:
     dealer positioning (GEX), and flow data into a unified score.
     """
 
-    # Factor weights (sum to 1.0) — 8 factors with S/R proximity
+    # Factor weights (sum to 1.0) — 9 factors
     WEIGHTS = {
         "trend_alignment": 0.22,  # #1 — 77% WR with trend vs 27% against
         "iv_rank": 0.15,
-        "sr_proximity": 0.13,     # NEW — S/R, Fib, POC proximity
+        "sr_proximity": 0.13,     # S/R, Fib, POC proximity
         "greeks_composite": 0.15,
-        "gex": 0.10,
-        "uoa_flow": 0.10,
+        "gex": 0.08,              # reduced to fund fair_value factor
+        "uoa_flow": 0.08,         # reduced to fund fair_value factor
         "vpa_bias": 0.10,
-        "pc_skew": 0.05,
+        "pc_skew": 0.02,          # reduced to fund fair_value factor
+        "fair_value": 0.07,       # NEW — Black-Scholes mispricing detection
     }
 
     # Premium floor — suppress BUY signals for lottery-ticket premiums
@@ -137,6 +138,8 @@ class GreeksSignalEngine:
         dte: int | None = None,
         volume_regime: str | None = None,
         sr_result: object | None = None,
+        fair_value_result: object | None = None,
+        last_vpa_signal: str | None = None,
     ) -> CompositeResult:
         """
         Run full composite analysis.
@@ -147,10 +150,12 @@ class GreeksSignalEngine:
         chain_data : list[dict] from PolygonClient.get_options_chain_snapshot()
         vpa_bias : dict with keys {bias, strength} from VPAEngine.get_bias()
         contract_type : "C" for call, "P" for put
-        underlying_trend : "UP", "DOWN", or "FLAT" — intraday trend of the underlying
+        underlying_trend : "UP", "STRONG_UP", "DOWN", "STRONG_DOWN", or "FLAT"
         dte : days to expiration (0 = expiry day)
         volume_regime : "HIGH_RISK", "LOW", or "NORMAL" from VPA volume regime detector
         sr_result : SRResult from SREngine.analyze() — S/R proximity data
+        fair_value_result : FairValueResult from FairValueEngine.analyze() (optional)
+        last_vpa_signal : last VPA signal string value for multi-bar pattern boost
 
         Returns
         -------
@@ -174,8 +179,8 @@ class GreeksSignalEngine:
         # 4. Unusual Options Activity factor
         factors.append(self._score_uoa(chain_metrics))
 
-        # 5. VPA Bias integration
-        factors.append(self._score_vpa_bias(vpa_bias))
+        # 5. VPA Bias integration (with last-bar signal for multi-bar boost)
+        factors.append(self._score_vpa_bias(vpa_bias, last_vpa_signal))
 
         # 6. Put/Call Skew factor
         factors.append(self._score_pc_skew(chain_metrics))
@@ -187,20 +192,50 @@ class GreeksSignalEngine:
         # 8. S/R Proximity factor
         factors.append(self._score_sr_proximity(sr_result))
 
+        # 9. Fair Value factor (Black-Scholes mispricing)
+        factors.append(self._score_fair_value(fair_value_result))
+
         # Compute composite score
         composite_score = sum(f.score * f.confidence * f.weight for f in factors)
         overall_confidence = self._compute_confidence(factors)
 
-        # ── Premium floor gate ───────────────────────────────
+        # ── Triple-confirmation bonus ────────────────────────────────────────
+        # When Trend, VPA, and UOA all agree in direction → reinforced conviction
+        _trend_f = next((f for f in factors if f.name == "Trend Alignment"), None)
+        _vpa_f   = next((f for f in factors if f.name == "VPA Bias"), None)
+        _uoa_f   = next((f for f in factors if f.name == "Flow / UOA"), None)
+        if _trend_f and _vpa_f and _uoa_f:
+            _all_bull = all(f.score > 0.1 and f.confidence > 0.4 for f in [_trend_f, _vpa_f, _uoa_f])
+            _all_bear = all(f.score < -0.1 and f.confidence > 0.4 for f in [_trend_f, _vpa_f, _uoa_f])
+            if _all_bull:
+                composite_score += 0.05
+            elif _all_bear:
+                composite_score -= 0.05
+
+        # ── Conviction amplifier ─────────────────────────────────────────────
+        # 6+ of 9 factors in same direction → push signal out of neutral zone
+        _bullish_cnt = sum(1 for f in factors if f.score > 0.1 and f.confidence > 0.4)
+        _bearish_cnt = sum(1 for f in factors if f.score < -0.1 and f.confidence > 0.4)
+        _max_agree = max(_bullish_cnt, _bearish_cnt)
+        if _max_agree >= 6:
+            composite_score *= 1.25
+            warnings.append(
+                f"🎯 HIGH CONVICTION: {_max_agree}/9 factors aligned — score amplified"
+            )
+
+        # ── Post-composite gates (combined dampening with floor) ─────────────
+        _damp_mult = 1.0  # track combined multiplicative dampening
+
+        # Premium floor gate
         if greeks.last_price > 0 and greeks.last_price < self.PREMIUM_FLOOR:
             warnings.append(
                 f"⚠️ PREMIUM FLOOR: Option at ${greeks.last_price:.2f} is below "
                 f"${self.PREMIUM_FLOOR:.2f} minimum — lottery-ticket risk, near-zero EV"
             )
-            composite_score *= 0.3   # Crush the score
+            _damp_mult *= 0.3
             overall_confidence *= 0.5
 
-        # ── Expiry day stop-loss gate ────────────────────────
+        # Expiry day stop-loss (absolute override, not dampening)
         if dte is not None and dte == 0:
             delta_abs = abs(greeks.delta)
             if delta_abs < 0.5:  # OTM or ATM on expiry day
@@ -208,28 +243,39 @@ class GreeksSignalEngine:
                     f"🚨 EXPIRY DAY: DTE=0 with delta={greeks.delta:.2f} — "
                     f"not safely ITM, EXIT to avoid expiring worthless"
                 )
-                composite_score = min(composite_score, -0.5)  # Force bearish
-            elif dte == 0:
+                # Push composite toward SELL-the-option direction (contract-type aware).
+                # For CALL: SELL call = negative composite → cap at -0.5.
+                # For PUT:  SELL put  = positive composite → floor at +0.5.
+                # This ensures the action map shows EXIT/SELL, not BUY.
+                if contract_type == "P":
+                    composite_score = max(composite_score, 0.5)
+                else:
+                    composite_score = min(composite_score, -0.5)
+            else:
                 warnings.append(
                     f"⏰ EXPIRY DAY: DTE=0 — monitor closely, theta decay is maximum"
                 )
 
-        # ── Continuous DTE decay ──────────────────────────────
+        # Continuous DTE decay
         if dte is not None and 0 < dte <= 5:
             dte_mult = 0.5 + (dte / 5) * 0.5   # DTE=1 → 0.6, DTE=5 → 1.0
-            composite_score *= dte_mult
+            _damp_mult *= dte_mult
             warnings.append(
-                f"⏳ SHORT DTE: {dte} days — score dampened by {1 - dte_mult:.0%} "
+                f"⏳ SHORT DTE: {dte} days — score dampened {1 - dte_mult:.0%} "
                 f"(theta acceleration)"
             )
 
-        # ── Volume regime warning ────────────────────────────
+        # Volume regime dampening (softened: ×0.6 vs old ×0.4 — preserves more signal)
         if volume_regime == "HIGH_RISK":
             warnings.append(
                 "📊 HIGH VOLUME REGIME: Institutional activity detected — "
                 "23.5% historical WR on high-vol days, reduce position size"
             )
-            composite_score *= 0.4  # Stronger dampening (was 0.7)
+            _damp_mult *= 0.6
+
+        # Apply combined dampening — floor at 0.40 to prevent near-zero signals
+        if _damp_mult != 1.0:
+            composite_score *= max(0.40, _damp_mult)
 
         # Determine signal
         signal = self._classify_signal(composite_score, overall_confidence)
@@ -321,33 +367,50 @@ class GreeksSignalEngine:
                 detail="Underlying trend FLAT – no directional edge",
             )
 
-        # Counter-trend: buying calls on DOWN day, or buying puts on UP day
+        # Normalize STRONG_* to base direction for alignment logic
+        base_trend = underlying_trend.replace("STRONG_", "")  # "STRONG_UP" -> "UP"
+        is_strong = underlying_trend.startswith("STRONG_")
+
+        # Counter-trend: bullish signal on DOWN day, or bearish signal on UP day
         counter_trend = (
-            (trade_direction == "bullish" and underlying_trend == "DOWN")
-            or (trade_direction == "bearish" and underlying_trend == "UP")
+            (trade_direction == "bullish" and base_trend == "DOWN")
+            or (trade_direction == "bearish" and base_trend == "UP")
         )
         with_trend = (
-            (trade_direction == "bullish" and underlying_trend == "UP")
-            or (trade_direction == "bearish" and underlying_trend == "DOWN")
+            (trade_direction == "bullish" and base_trend == "UP")
+            or (trade_direction == "bearish" and base_trend == "DOWN")
         )
 
         if counter_trend:
+            # Underlying is going the OPPOSITE way to the signal.
+            # Score = underlying direction (positive if UP, negative if DOWN).
+            # This correctly suppresses the option trade: if underlying is STRONG_UP
+            # and signal is bearish (put), this bumps composite toward +0.5 (bullish
+            # underlying) → _put_action maps positive → SELL/EXIT put. ✓
+            # Low confidence reflects high uncertainty for counter-trend.
+            _up = base_trend == "UP"
+            score = (0.5 if is_strong else 0.4) if _up else (-0.5 if is_strong else -0.4)
+            confidence = 0.50
             return FactorScore(
                 name="Trend Alignment",
-                score=-0.8,
-                confidence=0.85,
+                score=score,
+                confidence=confidence,
                 weight=self.WEIGHTS["trend_alignment"],
-                detail=f"⚠️ COUNTER-TREND: {trade_direction} signal vs {underlying_trend} "
-                       f"underlying – historically 27% WR, STRONG SUPPRESS",
+                detail=f"COUNTER-TREND: {trade_direction} signal vs {underlying_trend} "
+                       f"underlying - historically 27% WR, SUPPRESS (score reflects underlying direction)",
             )
         elif with_trend:
+            # Signal aligns with underlying — score confirms the underlying direction.
+            _up = base_trend == "UP"
+            score = (0.7 if is_strong else 0.5) if _up else (-0.7 if is_strong else -0.5)
+            confidence = 0.90 if is_strong else 0.80
             return FactorScore(
                 name="Trend Alignment",
-                score=0.5,
-                confidence=0.80,
+                score=score,
+                confidence=confidence,
                 weight=self.WEIGHTS["trend_alignment"],
-                detail=f"✅ WITH-TREND: {trade_direction} signal aligns with {underlying_trend} "
-                       f"underlying – historically 77% WR, BOOST",
+                detail=f"WITH-TREND: {trade_direction} signal aligns with {underlying_trend} "
+                       f"underlying - historically 77% WR, BOOST",
             )
         else:
             return FactorScore(
@@ -776,26 +839,40 @@ class GreeksSignalEngine:
             detail=detail,
         )
 
-    def _score_vpa_bias(self, vpa_bias: dict | None) -> FactorScore:
+    def _score_vpa_bias(self, vpa_bias: dict | None, last_vpa_signal: str | None = None) -> FactorScore:
         """Integrate VPA engine bias as a timing factor.
-        Neutral VPA now ACTIVELY penalizes — most losses happened on neutral VPA days."""
+        Neutral VPA actively penalizes - most losses happened on neutral VPA days.
+        Multi-bar confirmation patterns (confirmed reversal, no-supply/demand, pin bars)
+        add a +0.15 directional boost.
+        """
+        # Multi-bar patterns that provide stronger-than-single-bar confirmation
+        _BULLISH_CONFIRM = {"confirmed_reversal_up", "no_supply", "pin_bar_bull"}
+        _BEARISH_CONFIRM = {"confirmed_reversal_down", "no_demand", "pin_bar_bear"}
+
         if not vpa_bias or vpa_bias.get("bias") == "neutral":
             return FactorScore(
                 name="VPA Bias",
-                score=-0.2,         # was 0.0 — now actively penalizes (99/120 entries on neutral days)
-                confidence=0.50,    # was 0.30
+                score=-0.2,         # actively penalizes neutral (99/120 losses on neutral days)
+                confidence=0.50,
                 weight=self.WEIGHTS["vpa_bias"],
-                detail="⚠️ VPA neutral – no price-volume confirmation, CAUTION",
+                detail="VPA neutral - no price-volume confirmation, CAUTION",
             )
 
         bias = vpa_bias["bias"]
         strength = vpa_bias.get("strength", 0.5)
         reason = vpa_bias.get("reason", "")
+        boost_note = ""
 
         if bias == "bullish":
             score = min(0.9, 0.3 + strength * 0.6)
+            if last_vpa_signal in _BULLISH_CONFIRM:
+                score = min(0.9, score + 0.15)
+                boost_note = f" +multi-bar confirm ({last_vpa_signal})"
         elif bias == "bearish":
             score = max(-0.9, -0.3 - strength * 0.6)
+            if last_vpa_signal in _BEARISH_CONFIRM:
+                score = max(-0.9, score - 0.15)
+                boost_note = f" +multi-bar confirm ({last_vpa_signal})"
         else:
             score = 0.0
 
@@ -804,7 +881,7 @@ class GreeksSignalEngine:
             score=round(score, 2),
             confidence=round(min(0.85, 0.4 + strength * 0.4), 2),
             weight=self.WEIGHTS["vpa_bias"],
-            detail=f"VPA {bias} (strength {strength:.0%}) – {reason}",
+            detail=f"VPA {bias} (strength {strength:.0%}) - {reason}{boost_note}",
         )
 
     def _score_pc_skew(self, metrics: ChainMetrics) -> FactorScore:
@@ -846,10 +923,63 @@ class GreeksSignalEngine:
 
     # ── Composite computation ────────────────────────────────
 
+    def _score_fair_value(self, fv_result: object | None) -> FactorScore:
+        """
+        Score based on Black-Scholes mispricing relative to market price.
+        Cheap options (theoretical > market) are favorable for buyers.
+        Expensive options (market > theoretical) are unfavorable.
+        Direction-agnostic: applies equally to calls and puts as instruments.
+        """
+        if fv_result is None:
+            return FactorScore(
+                name="Fair Value",
+                score=0.0,
+                confidence=0.15,
+                weight=self.WEIGHTS["fair_value"],
+                detail="Fair value data unavailable",
+            )
+
+        pct_diff = getattr(fv_result, "pct_difference", 0.0)
+
+        if pct_diff >= 15.0:
+            score = 0.5
+            confidence = 0.65
+            detail = (
+                f"Deep discount: BS theoretical {pct_diff:+.0f}% above market - "
+                f"option significantly underpriced, favorable for buyers"
+            )
+        elif pct_diff >= 5.0:
+            score = 0.2
+            confidence = 0.50
+            detail = f"Slight discount: BS theoretical {pct_diff:+.0f}% above market"
+        elif pct_diff <= -15.0:
+            score = -0.5
+            confidence = 0.65
+            detail = (
+                f"Deep premium: market {abs(pct_diff):.0f}% above BS theoretical - "
+                f"option significantly overpriced for buyers"
+            )
+        elif pct_diff <= -5.0:
+            score = -0.2
+            confidence = 0.50
+            detail = f"Slight premium: market {abs(pct_diff):.0f}% above BS theoretical"
+        else:
+            score = 0.0
+            confidence = 0.30
+            detail = f"Fair Value: within +/-5% of BS theoretical ({pct_diff:+.1f}%)"
+
+        return FactorScore(
+            name="Fair Value",
+            score=round(score, 2),
+            confidence=confidence,
+            weight=self.WEIGHTS["fair_value"],
+            detail=detail,
+        )
+
     def _compute_confidence(self, factors: list[FactorScore]) -> float:
         """
         Overall confidence increases when multiple factors agree.
-        Convergence bonus: 4+ factors in same direction → high confidence.
+        Convergence bonus: 4+ factors in same direction -> high confidence.
         """
         bullish_count = sum(1 for f in factors if f.score > 0.1 and f.confidence > 0.4)
         bearish_count = sum(1 for f in factors if f.score < -0.1 and f.confidence > 0.4)
@@ -876,20 +1006,22 @@ class GreeksSignalEngine:
         return min(0.95, base_conf + bonus)
 
     def _classify_signal(self, score: float, confidence: float) -> CompositeSignal:
-        """Map composite score to a signal classification."""
+        """Map composite score to a signal classification.
+        Narrowed neutral band (\u00b10.03 vs old \u00b10.05) and lowered STRONG threshold
+        (\u00b10.35 vs old \u00b10.40) for sharper, clearer signals."""
         effective = score * confidence
 
-        if effective > 0.4:
+        if effective > 0.35:
             return CompositeSignal.STRONG_BUY
-        elif effective > 0.2:
+        elif effective > 0.18:
             return CompositeSignal.BUY
-        elif effective > 0.05:
+        elif effective > 0.03:
             return CompositeSignal.LEAN_BULLISH
-        elif effective < -0.4:
+        elif effective < -0.35:
             return CompositeSignal.STRONG_SELL
-        elif effective < -0.2:
+        elif effective < -0.18:
             return CompositeSignal.SELL
-        elif effective < -0.05:
+        elif effective < -0.03:
             return CompositeSignal.LEAN_BEARISH
         else:
             return CompositeSignal.NEUTRAL
@@ -977,7 +1109,8 @@ class GreeksSignalEngine:
         agreement = max(bullish, bearish)
         direction = "bullish" if bullish > bearish else "bearish" if bearish > bullish else "mixed"
 
-        parts = [f"{agreement}/8 factors align {direction}."]
+        n_factors = len(factors)
+        parts = [f"{agreement}/{n_factors} factors align {direction}."]
 
         # Key metrics summary
         parts.append(
