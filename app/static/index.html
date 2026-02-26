@@ -363,26 +363,26 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   body[data-mob-tab] #tab-levels,
   body[data-mob-tab] #tab-intel{display:none !important}
 
-  /* TAB: trade (default) — verdict + triggers + chart */
+  /* TAB: trade (default) — verdict + chart + active alerts */
   body[data-mob-tab="trade"] #ltab-insight{display:flex !important}
   body[data-mob-tab="trade"] #ltab-insight .panel{display:none !important}
   body[data-mob-tab="trade"] .chart-wrapper{display:block !important}
   body[data-mob-tab="trade"] .sidebar{display:none !important}
+  body[data-mob-tab="trade"] .alerts-col{display:flex !important}
+  body[data-mob-tab="trade"] .sec-title{display:flex !important}
 
   /* TAB: insight — bias + themes + chain + FV + perf + day type + VPA */
   body[data-mob-tab="insight"] #ltab-insight{display:flex !important}
-  body[data-mob-tab="insight"] #verdictCard,
-  body[data-mob-tab="insight"] #actionCards{display:none !important}
+  body[data-mob-tab="insight"] #verdictCard{display:none !important}
   body[data-mob-tab="insight"] .chart-wrapper{display:none !important}
   body[data-mob-tab="insight"] #tab-action{display:flex !important}
   body[data-mob-tab="insight"] #tab-intel{display:flex !important}
 
-  /* TAB: ideas — trade ideas / alerts */
+  /* TAB: ideas — triggers → next move → trade ideas, single column */
   body[data-mob-tab="ideas"] #ltab-insight{display:none !important}
-  body[data-mob-tab="ideas"] #ltab-ideas{display:flex !important}
+  body[data-mob-tab="ideas"] #ltab-ideas{display:flex !important;flex-direction:column !important;gap:10px}
+  body[data-mob-tab="ideas"] #ltab-ideas .act-cards{flex-direction:column !important}
   body[data-mob-tab="ideas"] .chart-wrapper{display:none !important}
-  body[data-mob-tab="ideas"] .alerts-col{display:flex !important}
-  body[data-mob-tab="ideas"] .sec-title{display:flex !important}
   body[data-mob-tab="ideas"] .sidebar{display:none !important}
 
   /* TAB: levels — key levels + proximity + positioning */
@@ -589,12 +589,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .lv-val{font-size:.84rem;font-weight:700}
 .rr-line{text-align:center;font-size:.72rem;color:var(--muted);margin-bottom:6px}
 .rr-line b{color:var(--text)}
-.reasons{margin-bottom:6px}
+.reasons{display:none}
 .rtag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:.66rem;
   background:var(--surface2);color:var(--muted);margin:2px 2px 2px 0;border:1px solid var(--border2)}
 .opt-row{background:var(--surface2);border:1px solid var(--border2);border-radius:6px;
   padding:6px 8px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:6px;font-size:.71rem}
-.opt-ticker{font-family:monospace;font-size:.67rem;color:var(--accent);flex:1;word-break:break-all}
+.opt-ticker{font-family:monospace;font-size:.67rem;color:var(--accent);flex-basis:100%;word-break:break-all;margin-bottom:3px}
 .opt-k{color:var(--muted)}.opt-v{font-weight:600}
 .killswitches{border-top:1px solid var(--border);padding-top:6px;margin-top:2px}
 .ks-title{font-size:.61rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
@@ -826,7 +826,6 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
     </div>
     <div class="ltab-pane active" id="ltab-insight">
       <div class="verdict-card" id="verdictCard"></div>
-      <div class="act-cards" id="actionCards"></div>
       <div class="panel">
         <div class="pnl-title">Market Bias</div>
         <div id="biasCard"><div class="no-data">—</div></div>
@@ -837,6 +836,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
       </div>
     </div>
     <div class="ltab-pane" id="ltab-ideas">
+      <div class="act-cards" id="actionCards"></div>
       <div class="sec-title">Trade Ideas <span class="cnt" id="ideaCount">0</span></div>
       <div id="ideasCol"><div class="no-data" style="padding:18px">Run Analyze to generate ideas</div></div>
     </div>
