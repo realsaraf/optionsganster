@@ -557,6 +557,7 @@ class SignalResponse(BaseModel):
     volume_regime: Optional[dict] = None
     proximity_score: float = 0.0
     proximity_detail: str = ""
+    prev_close: float = 0.0       # Yesterday's close for day-change calc
 
 
 # ── Legacy models (kept while old endpoints coexist) ──────────
@@ -1406,6 +1407,18 @@ async def get_signals(
             prox_score_out = sr_result_obj.proximity_score
             prox_detail_out = sr_result_obj.proximity_detail
 
+        # ── Previous close (yesterday) ────────────────────
+        prev_close_val = 0.0
+        if not daily_bars_df.empty:
+            today_str = date.today().isoformat()
+            # daily_bars_df may have "date" or "datetime" column
+            date_col = "datetime" if "datetime" in daily_bars_df.columns else "date"
+            prev_days = daily_bars_df[
+                daily_bars_df[date_col].astype(str).str[:10] < today_str
+            ]
+            if not prev_days.empty:
+                prev_close_val = float(prev_days.iloc[-1]["close"])
+
         return SignalResponse(
             symbol=sym_raw,
             as_of=now_ts,
@@ -1422,6 +1435,7 @@ async def get_signals(
             volume_regime=vol_regime_out,
             proximity_score=round(prox_score_out, 3),
             proximity_detail=prox_detail_out,
+            prev_close=prev_close_val,
         )
 
     except HTTPException:
@@ -3040,6 +3054,48 @@ async def websocket_feed(ws: WebSocket, sym: str):
                 decision_p = _dr.dict() if _dr else None
             except Exception:
                 pass
+
+            # ── Setup Detection → Alerts (same pipeline as /api/signals) ──
+            try:
+                if (
+                    regime_res is not None
+                    and sr_p is not None
+                    and not intraday_df.empty
+                    and underlying_price > 0
+                ):
+                    _rv_p = rolling_rv(intraday_df)
+                    _setups_p = setup_engine.detect_all(
+                        df=intraday_df, regime=regime_res, sr=sr_p,
+                        chain=_cd_p_raw or [], symbol=sym,
+                    )
+                    _edge_p: list[EdgeResult] = []
+                    _exps_for_pick = None
+                    try:
+                        _exps_for_pick_list = await polygon_client.get_expirations(sym)
+                        if _exps_for_pick_list:
+                            _exps_for_pick = _exps_for_pick_list[0]
+                    except Exception:
+                        pass
+                    for _sp in _setups_p:
+                        _pick_p = option_picker.pick(
+                            chain=_cd_p_raw or [], direction=_sp.direction,
+                            spot=underlying_price, edge_score=60,
+                            expiration_date=_exps_for_pick,
+                        )
+                        _scored_p = edge_scorer.score(
+                            setup=_sp, regime=regime_res, option=_pick_p,
+                            df=intraday_df,
+                            rv=float(_rv_p.iloc[-1]) if len(_rv_p) > 0 else 0.0,
+                        )
+                        if _scored_p.tier != "NO_EDGE":
+                            _edge_p.append(_scored_p)
+                    alert_manager.process_tick(
+                        edge_results=_edge_p,
+                        current_price=underlying_price,
+                        current_time=datetime.utcnow(),
+                    )
+            except Exception as _alert_err:
+                print(f"[Feed] Alert pipeline error: {_alert_err}")
 
             # Active alerts (in-memory singleton)
             def _alert_dict(alert):
