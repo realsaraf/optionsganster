@@ -1,5 +1,5 @@
 """
-OptionsGanster – VPA Options Analysis Tool
+OptionsGangster – VPA Options Analysis Tool
 Main FastAPI Application
 
 Changes from v1:
@@ -11,13 +11,13 @@ Changes from v1:
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Optional
-import hashlib, json, logging, math, random, re, secrets, time
+import hashlib, json, logging, math, random, re, time
 import asyncio
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Cookie, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import httpx
@@ -45,33 +45,28 @@ from app.data_layer import DataLayer
 from app.idea_engine import idea_engine, IdeaEngine, BriefingInput, PlaybookMode
 from app.decision_engine import decision_engine, DecisionEngine, TradeDecision
 from app.performance_tracker import perf_tracker
+from app.alert_store import alert_store
+from app.auth_store import auth_store
+from app.firebase_auth import FirebaseAuthError, firebase_enabled, get_firebase_web_config, verify_firebase_token
 from app.scanner_engine import scanner_engine
+from app.subscription_scanner import SubscriptionScanner
 from app.ticker_service import ticker_service
+from app.user_alert_store import DEFAULT_ALERT_TYPES, user_alert_store
 from app.mongo import close_db
 import app.llm_narrator as llm_narrator
 
 logger = logging.getLogger("optionsganster")
 
 # ── Auth config ─────────────────────────────────────────────
-# Multi-user store: email → {password_hash, role, display_name}
+# Legacy seed users migrated into Mongo-backed auth on startup.
 _USERS: dict[str, dict] = {
     "realsaraf@gmail.com": {
         "password_hash": hashlib.sha256("saraf1237".encode()).hexdigest(),
         "role": "admin",
         "display_name": "realsaraf",
-    },
-    "user@og.com": {
-        "password_hash": hashlib.sha256("og1236".encode()).hexdigest(),
-        "role": "general",
-        "display_name": "OG Trader",
-    },    
-    "kutubtalukder@gmail.com": {
-        "password_hash": hashlib.sha256("kt1236".encode()).hexdigest(),
-        "role": "general",
-        "display_name": "KT Trader",
     }
 }
-_sessions: dict[str, dict] = {}  # token → {email, role, display_name}
+_PROTECTED_ACCOUNT_EMAILS = {email.lower() for email, record in _USERS.items() if record.get("role") == "admin"}
 
 
 # ── Ideas Hub (user-submitted ideas + WS broadcast) ─────────
@@ -275,23 +270,29 @@ async def lifespan(application: FastAPI):
     asyncio.create_task(polygon_client.warm_cache(["QQQ"]))
     # Load ticker directory from local JSON file (instant)
     ticker_service.load()
+    await auth_store.ensure_seed_users(_USERS)
+    await subscription_scanner.start()
     yield
     # shutdown – stop live feed + close the shared httpx client
+    await subscription_scanner.stop()
     await live_feed_manager.stop()
     await polygon_client.close()
     await close_db()
 
 
 app = FastAPI(
-    title="OptionsGanster",
+    title="OptionsGangster",
     description="Volume Price Analysis for Options Trading",
     version="2.0.0",
     lifespan=lifespan,
 )
 
+alert_manager.register_listener(alert_store.handle_alert_event)
+alert_manager.register_listener(user_alert_store.handle_alert_event)
+
 
 # ── Auth middleware ─────────────────────────────────────────
-PUBLIC_PATHS = {"/login", "/api/login"}
+PUBLIC_PATHS = {"/login", "/api/login", "/api/auth/config", "/api/auth/google", "/api/logout"}
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -299,15 +300,26 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in PUBLIC_PATHS or path.startswith("/static"):
             return await call_next(request)
         token = request.cookies.get("session")
-        if not token or token not in _sessions:
+        session_user = await auth_store.get_session(token) if token else None
+        if not session_user:
             if path.startswith("/api/") or path.startswith("/ws/"):
                 return Response(status_code=401, content="Unauthorized")
             return RedirectResponse("/login", status_code=302)
         # Attach user info to request state for downstream use
-        request.state.user = _sessions[token]
+        request.state.user = session_user
         return await call_next(request)
 
 app.add_middleware(AuthMiddleware)
+
+
+async def _require_websocket_user(ws: WebSocket) -> Optional[dict]:
+    """Resolve the current user from the session cookie for websocket endpoints."""
+    token = ws.cookies.get("session")
+    user = await auth_store.get_session(token) if token else None
+    if not user:
+        await ws.close(code=4401)
+        return None
+    return user
 
 
 # ── Dependency helpers ──────────────────────────────────────
@@ -516,6 +528,32 @@ class AlertResponse(BaseModel):
     activated_premium: Optional[float] = None
 
 
+class AlertHistoryResponse(BaseModel):
+    id: str
+    symbol: str
+    state: str
+    detected_at: str
+    activated_at: Optional[str] = None
+    resolved_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    setup_name: str
+    entry_condition: str = ""
+    direction: str
+    edge_score: int
+    tier: str
+    regime: str
+    trigger_price: float
+    stop_price: float
+    target_1: float
+    target_2: Optional[float] = None
+    reward_risk_ratio: float = 0.0
+    reasons: list[str] = []
+    option: Optional[AlertOptionResponse] = None
+    entry_premium: float = 0.0
+    exit_premium: float = 0.0
+    pnl_pct: float = 0.0
+
+
 class IndicatorsResponse(BaseModel):
     vwap: list[float] = []
     vwap_upper: list[float] = []
@@ -560,6 +598,123 @@ class SignalResponse(BaseModel):
     prev_close: float = 0.0       # Yesterday's close for day-change calc
 
 
+def _build_alert_option_response(alert: ActiveAlert) -> Optional[AlertOptionResponse]:
+    opt = alert.option
+    if not opt:
+        return None
+    return AlertOptionResponse(
+        ticker=opt.ticker,
+        strike=opt.strike,
+        expiration=str(opt.expiration) if opt.expiration else "",
+        option_type=opt.option_type,
+        delta=round(opt.delta, 3),
+        spread_pct=round(opt.spread_pct, 2),
+        iv=round(opt.iv, 4),
+        entry_premium_est=round(opt.entry_premium_est, 2),
+        dte=opt.dte,
+        notes=opt.notes,
+    )
+
+
+def _build_alert_response(alert: ActiveAlert) -> AlertResponse:
+    p = alert.plan
+    return AlertResponse(
+        id=alert.id,
+        state=alert.state.value,
+        created_at=alert.detected_at,
+        expires_at=alert.expires_at or "",
+        setup_name=alert.setup_name,
+        direction=alert.direction,
+        edge_score=alert.edge_score,
+        tier=alert.tier,
+        regime=alert.regime,
+        trigger_price=p.entry_price,
+        entry_condition=alert.entry_condition,
+        stop_price=p.stop_price,
+        target_1=p.target_1,
+        target_2=p.target_2,
+        reward_risk_ratio=round(p.reward_risk_ratio, 2),
+        time_stop_minutes=p.time_stop_minutes,
+        kill_switch_conditions=p.kill_switch_conditions,
+        reasons=alert.reasons,
+        option=_build_alert_option_response(alert),
+        activated_premium=alert.entry_premium or None,
+    )
+
+
+def _build_alert_history_response(alert: ActiveAlert) -> AlertHistoryResponse:
+    p = alert.plan
+    return AlertHistoryResponse(
+        id=alert.id,
+        symbol=alert.symbol,
+        state=alert.state.value,
+        detected_at=alert.detected_at,
+        activated_at=alert.activated_at,
+        resolved_at=alert.resolved_at,
+        expires_at=alert.expires_at,
+        setup_name=alert.setup_name,
+        entry_condition=alert.entry_condition,
+        direction=alert.direction,
+        edge_score=alert.edge_score,
+        tier=alert.tier,
+        regime=alert.regime,
+        trigger_price=p.entry_price,
+        stop_price=p.stop_price,
+        target_1=p.target_1,
+        target_2=p.target_2,
+        reward_risk_ratio=round(p.reward_risk_ratio, 2),
+        reasons=alert.reasons,
+        option=_build_alert_option_response(alert),
+        entry_premium=alert.entry_premium,
+        exit_premium=alert.exit_premium,
+        pnl_pct=alert.pnl_pct,
+    )
+
+
+def _build_alert_history_response_from_doc(doc: dict) -> AlertHistoryResponse:
+    opt = doc.get("option") or None
+    opt_out = None
+    if opt:
+        opt_out = AlertOptionResponse(
+            ticker=opt.get("ticker", ""),
+            strike=float(opt.get("strike", 0.0) or 0.0),
+            expiration=str(opt.get("expiration", "") or ""),
+            option_type=opt.get("option_type", ""),
+            delta=float(opt.get("delta", 0.0) or 0.0),
+            spread_pct=float(opt.get("spread_pct", 0.0) or 0.0),
+            iv=float(opt.get("iv", 0.0) or 0.0),
+            entry_premium_est=float(opt.get("entry_premium_est", 0.0) or 0.0),
+            dte=int(opt.get("dte", 0) or 0),
+            notes=opt.get("notes", "") or "",
+        )
+
+    return AlertHistoryResponse(
+        id=doc.get("alert_id", doc.get("id", "")),
+        symbol=doc.get("symbol", ""),
+        state=doc.get("state", ""),
+        detected_at=doc.get("detected_at", ""),
+        activated_at=doc.get("activated_at"),
+        resolved_at=doc.get("resolved_at"),
+        expires_at=doc.get("expires_at"),
+        setup_name=doc.get("setup_name", ""),
+        entry_condition=doc.get("entry_condition", ""),
+        direction=doc.get("direction", ""),
+        edge_score=int(doc.get("edge_score", 0) or 0),
+        tier=doc.get("tier", ""),
+        regime=doc.get("regime", ""),
+        trigger_price=float(doc.get("trigger_price", doc.get("entry_price", 0.0)) or 0.0),
+        stop_price=float(doc.get("stop_price", 0.0) or 0.0),
+        target_1=float(doc.get("target_1", 0.0) or 0.0),
+        target_2=doc.get("target_2"),
+        reward_risk_ratio=float(doc.get("reward_risk_ratio", 0.0) or 0.0),
+        reasons=doc.get("reasons", []) or [],
+        option=opt_out,
+        entry_premium=float(doc.get("entry_premium", 0.0) or 0.0),
+        exit_premium=float(doc.get("exit_premium", 0.0) or 0.0),
+        pnl_pct=float(doc.get("pnl_pct", 0.0) or 0.0),
+    )
+
+
 # ── Legacy models (kept while old endpoints coexist) ──────────
 
 class ExpirationResponse(BaseModel):
@@ -580,19 +735,19 @@ LOGIN_HTML = """
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>OptionsGanster – AI-Powered Options Signals</title>
+<title>OptionsGangster – AI-Powered Options Signals</title>
 <meta name="description" content="AI-driven options signals that cut through the noise. One actionable verdict — BUY, SELL, or HOLD — with a confidence score. Free to use.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://optionsganster.com">
-<meta property="og:title" content="OptionsGanster – AI-Powered Options Signals">
+<meta property="og:url" content="https://optionsgangster.com">
+<meta property="og:title" content="OptionsGangster – AI-Powered Options Signals">
 <meta property="og:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score. Free.">
-<meta property="og:image" content="https://optionsganster.com/static/og-image.png">
+<meta property="og:image" content="https://optionsgangster.com/static/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="OptionsGanster – AI-Powered Options Signals">
+<meta name="twitter:title" content="OptionsGangster – AI-Powered Options Signals">
 <meta name="twitter:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score.">
-<meta name="twitter:image" content="https://optionsganster.com/static/og-image.png">
+<meta name="twitter:image" content="https://optionsgangster.com/static/og-image.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
@@ -700,7 +855,7 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
 
 <!-- NAV -->
 <nav>
-  <div class="nav-logo">Options<span>Ganster</span></div>
+  <div class="nav-logo">Options<span>Gangster</span></div>
   <div class="nav-links">
     <a href="#features">Features</a>
     <a href="#how">How It Works</a>
@@ -796,7 +951,7 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
   </div>
 </section>
 
-<footer>&copy; 2026 OptionsGanster. Built for traders who want an edge.</footer>
+<footer>&copy; 2026 OptionsGangster. Built for traders who want an edge.</footer>
 
 <!-- LOGIN MODAL -->
 <div class="modal-overlay" id="modal">
@@ -833,27 +988,72 @@ document.getElementById('lf').addEventListener('submit',async e=>{
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
-    return HTMLResponse(LOGIN_HTML)
+    return FileResponse(
+        "app/static/login.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
-class LoginRequest(BaseModel):
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+
+
+class AuthorizedUserCreateRequest(BaseModel):
     email: str
-    password: str
+    display_name: str = ""
+    role: str = "general"
+
+
+class AuthorizedUserUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    is_authorized: Optional[bool] = None
+
+
+class SymbolAlertSettingsRequest(BaseModel):
+    symbol: str
+    alert_types: dict[str, bool] = Field(default_factory=dict)
+
+
+class AlertSettingsUpdateRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list)
+    alert_mode: str = "shared"
+    shared_alert_types: dict[str, bool] = Field(default_factory=dict)
+    symbol_settings: list[SymbolAlertSettingsRequest] = Field(default_factory=list)
+
+
+class AlertNotificationReadRequest(BaseModel):
+    notification_keys: list[str] = Field(default_factory=list)
 
 @app.post("/api/login")
-async def login(body: LoginRequest):
-    pw_hash = hashlib.sha256(body.password.encode()).hexdigest()
-    user_record = _USERS.get(body.email)
-    if not user_record or pw_hash != user_record["password_hash"]:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    token = secrets.token_hex(32)
-    _sessions[token] = {
-        "email": body.email,
-        "role": user_record["role"],
-        "display_name": user_record["display_name"],
+async def login_removed():
+    raise HTTPException(status_code=410, detail="Password login has been removed. Use Google sign-in.")
+
+
+@app.get("/api/auth/config")
+async def get_auth_config():
+    return {
+        "enabled": firebase_enabled(),
+        "firebase": get_firebase_web_config(),
     }
+
+
+@app.post("/api/auth/google")
+async def google_login(body: GoogleLoginRequest):
+    try:
+        claims = verify_firebase_token(body.id_token)
+    except FirebaseAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    email = claims.get("email", "").lower()
+    user_record = await auth_store.get_authorized_user(email)
+    if not user_record:
+        raise HTTPException(status_code=403, detail="This Google account is not authorized for this app")
+
+    user = await auth_store.record_google_login(claims, user_record)
+    token = await auth_store.create_session(user)
     resp = Response(
-        content=json.dumps({"ok": True, "role": user_record["role"], "display_name": user_record["display_name"]}),
+        content=json.dumps({"ok": True, "role": user.get("role", "general"), "display_name": user.get("display_name", email)}),
         media_type="application/json",
     )
     resp.set_cookie(key="session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
@@ -864,7 +1064,7 @@ async def login(body: LoginRequest):
 async def logout(request: Request):
     token = request.cookies.get("session")
     if token:
-        _sessions.pop(token, None)
+        await auth_store.delete_session(token)
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie("session")
     return resp
@@ -876,7 +1076,171 @@ async def get_me(request: Request):
     user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return {"email": user["email"], "role": user["role"], "display_name": user["display_name"]}
+    email = user["email"]
+    return {
+        "email": email,
+        "role": user["role"],
+        "display_name": user["display_name"],
+        "can_delete_account": email.lower() not in _PROTECTED_ACCOUNT_EMAILS,
+    }
+
+
+def _require_admin(request: Request) -> dict:
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def _require_user(request: Request) -> dict:
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def _isoformat_fields(payload: dict, fields: tuple[str, ...]) -> dict:
+    cloned = dict(payload)
+    for field in fields:
+        if hasattr(cloned.get(field), "isoformat"):
+            cloned[field] = cloned[field].isoformat()
+    return cloned
+
+
+async def _build_alert_settings_payload(email: str) -> dict:
+    settings_doc = await user_alert_store.get_settings(email)
+    notifications = await user_alert_store.list_notifications(email, limit=25)
+    unread_count = await user_alert_store.unread_count(email)
+    settings_doc = _isoformat_fields(settings_doc, ("created_at", "updated_at"))
+    notifications = [
+        _isoformat_fields(doc, ("created_at", "read_at"))
+        for doc in notifications
+    ]
+    return {
+        "symbols": settings_doc.get("symbols", []),
+        "alert_mode": settings_doc.get("alert_mode", "shared"),
+        "shared_alert_types": settings_doc.get("shared_alert_types", dict(DEFAULT_ALERT_TYPES)),
+        "symbol_settings": settings_doc.get("symbol_settings", []),
+        "alert_types": settings_doc.get("shared_alert_types", dict(DEFAULT_ALERT_TYPES)),
+        "notifications": notifications,
+        "unread_count": unread_count,
+        "scan_interval_seconds": 60,
+    }
+
+
+@app.get("/api/admin/users")
+async def list_authorized_users(request: Request):
+    _require_admin(request)
+    users = await auth_store.list_users()
+    for user in users:
+        user["is_active"] = bool(user.get("is_authorized", True)) and not bool(user.get("is_deleted", False))
+        user["is_protected"] = user.get("email", "").lower() in _PROTECTED_ACCOUNT_EMAILS
+        if hasattr(user.get("created_at"), "isoformat"):
+            user["created_at"] = user["created_at"].isoformat()
+        if hasattr(user.get("updated_at"), "isoformat"):
+            user["updated_at"] = user["updated_at"].isoformat()
+        if hasattr(user.get("last_login_at"), "isoformat"):
+            user["last_login_at"] = user["last_login_at"].isoformat()
+    return users
+
+
+@app.post("/api/admin/users")
+async def create_authorized_user(request: Request, body: AuthorizedUserCreateRequest):
+    _require_admin(request)
+    try:
+        return await auth_store.create_user(body.email, body.display_name, body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.patch("/api/admin/users/{email:path}")
+async def update_authorized_user(email: str, request: Request, body: AuthorizedUserUpdateRequest):
+    _require_admin(request)
+    if body.is_authorized is False and email.lower() in _PROTECTED_ACCOUNT_EMAILS:
+        raise HTTPException(status_code=403, detail="Protected admin account cannot be deactivated")
+    user = await auth_store.update_user(
+        email,
+        display_name=body.display_name,
+        role=body.role,
+        is_authorized=body.is_authorized,
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User not found: {email}")
+    if body.is_authorized is False:
+        await auth_store.delete_sessions_for_email(email)
+    user["is_active"] = bool(user.get("is_authorized", True)) and not bool(user.get("is_deleted", False))
+    user["is_protected"] = user.get("email", "").lower() in _PROTECTED_ACCOUNT_EMAILS
+    for field in ("created_at", "updated_at", "last_login_at"):
+        if hasattr(user.get(field), "isoformat"):
+            user[field] = user[field].isoformat()
+    return user
+
+
+@app.delete("/api/admin/users/{email:path}")
+async def remove_authorized_user(email: str, request: Request):
+    actor = _require_admin(request)
+    normalized = email.lower()
+    if normalized in _PROTECTED_ACCOUNT_EMAILS:
+        raise HTTPException(status_code=403, detail="Protected admin account cannot be removed")
+    user = await auth_store.soft_delete_user(normalized, deleted_by=actor["email"])
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User not found: {email}")
+    return {"ok": True, "email": normalized}
+
+
+@app.get("/api/settings/alerts")
+async def get_alert_settings(request: Request):
+    user = _require_user(request)
+    return await _build_alert_settings_payload(user["email"])
+
+
+@app.put("/api/settings/alerts")
+async def update_alert_settings(request: Request, body: AlertSettingsUpdateRequest):
+    user = _require_user(request)
+    normalized_symbols: list[str] = []
+    for symbol in body.symbols:
+        data_symbol, _, _ = _normalize_symbol(symbol)
+        normalized_symbols.append(data_symbol)
+    normalized_symbol_settings: list[dict] = []
+    for item in body.symbol_settings:
+        data_symbol, _, _ = _normalize_symbol(item.symbol)
+        normalized_symbol_settings.append({"symbol": data_symbol, "alert_types": item.alert_types})
+    await user_alert_store.update_settings(
+        user["email"],
+        normalized_symbols,
+        body.alert_mode,
+        body.shared_alert_types,
+        normalized_symbol_settings,
+    )
+    return await _build_alert_settings_payload(user["email"])
+
+
+@app.delete("/api/me")
+async def delete_my_account(request: Request):
+    user = _require_user(request)
+    email = user["email"].lower()
+    if email in _PROTECTED_ACCOUNT_EMAILS:
+        raise HTTPException(status_code=403, detail="Protected admin account cannot be deleted")
+    deleted = await auth_store.soft_delete_user(email, deleted_by=email)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    resp = Response(content=json.dumps({"ok": True}), media_type="application/json")
+    resp.delete_cookie("session")
+    return resp
+
+
+@app.post("/api/settings/alert-notifications/read")
+async def mark_alert_notifications_read(request: Request, body: AlertNotificationReadRequest):
+    user = _require_user(request)
+    modified = await user_alert_store.mark_notifications_read(
+        user["email"],
+        body.notification_keys or None,
+    )
+    return {
+        "ok": True,
+        "modified": modified,
+        "unread_count": await user_alert_store.unread_count(user["email"]),
+    }
 
 
 # ── Endpoints ───────────────────────────────────────────────
@@ -1054,6 +1418,122 @@ def _normalize_symbol(sym: str) -> tuple[str, str, str]:
     if re.match(r"^I:[A-Z0-9]+1!$", s):
         return s, "futures", s
     return s, "equity", ""
+
+
+async def _run_alert_pipeline_for_symbol(symbol: str, interval: int = 5) -> None:
+    """Run the existing setup→edge→alert pipeline for a subscribed symbol."""
+    sym_raw = symbol.upper()
+    sym, asset_class, _ = _normalize_symbol(sym_raw)
+    end_dt = date.today()
+    start_dt = end_dt - timedelta(days=7 if asset_class == "futures" else 5)
+
+    intraday_df = pd.DataFrame()
+    try:
+        intraday_df = await polygon_client.get_stock_ohlcv(
+            sym,
+            start_date=start_dt,
+            end_date=end_dt,
+            interval_min=interval,
+        )
+    except Exception:
+        pass
+
+    if intraday_df.empty:
+        try:
+            intraday_df = await _data_layer.get_intraday(sym, end_dt, interval_min=interval)
+        except Exception:
+            return
+
+    if intraday_df.empty:
+        return
+
+    underlying_price = float(intraday_df.iloc[-1]["close"])
+    if underlying_price <= 0:
+        return
+
+    regime_result = None
+    if len(intraday_df) >= 5:
+        try:
+            regime_result = regime_engine.classify(intraday_df, symbol=sym)
+        except Exception:
+            pass
+    if regime_result is None:
+        return
+
+    try:
+        daily_bars_df = await _data_layer.get_daily(sym)
+    except Exception:
+        return
+    if daily_bars_df.empty:
+        return
+
+    try:
+        sr_result_obj = sr_engine.analyze(
+            daily_df=daily_bars_df,
+            intraday_df=intraday_df,
+            current_price=underlying_price,
+        )
+    except Exception:
+        return
+
+    expirations: list[date] = []
+    chain_data: list[dict] = []
+    try:
+        expirations = await polygon_client.get_expirations(sym)
+        if expirations:
+            chain_data = await polygon_client.get_options_chain_snapshot(sym, expirations[0]) or []
+    except Exception:
+        chain_data = []
+
+    rv = rolling_rv(intraday_df)
+    setups = setup_engine.detect_all(
+        df=intraday_df,
+        regime=regime_result,
+        sr=sr_result_obj,
+        chain=chain_data,
+        symbol=sym,
+    )
+
+    edge_results: list[EdgeResult] = []
+    for setup in setups:
+        pick = option_picker.pick(
+            chain=chain_data,
+            direction=setup.direction,
+            spot=underlying_price,
+            edge_score=60,
+            expiration_date=expirations[0] if expirations else None,
+        )
+        scored = edge_scorer.score(
+            setup=setup,
+            regime=regime_result,
+            option=pick,
+            df=intraday_df,
+            rv=float(rv.iloc[-1]) if len(rv) > 0 else 0.0,
+        )
+        if scored.tier != "NO_EDGE":
+            edge_results.append(scored)
+
+    current_time = datetime.utcnow()
+    alert_manager.process_tick(
+        edge_results=edge_results,
+        current_price=underlying_price,
+        current_time=current_time,
+        symbol=sym,
+    )
+    alert_manager.process_tick(
+        edge_results=[],
+        current_price=underlying_price,
+        current_time=current_time,
+        symbol=sym,
+    )
+
+
+subscription_scanner = SubscriptionScanner(
+    get_symbols=user_alert_store.get_all_subscribed_symbols,
+    scan_symbol=_run_alert_pipeline_for_symbol,
+    interval_seconds=60,
+    max_concurrency=3,
+)
 
 
 @app.get("/api/signals/{symbol:path}")
@@ -1260,12 +1740,14 @@ async def get_signals(
                     edge_results=edge_results,
                     current_price=underlying_price,
                     current_time=current_time,
+                    symbol=sym,
                 )
                 # Evaluate active alerts for kill-switch conditions
                 alert_manager.process_tick(
                     edge_results=[],
                     current_price=underlying_price,
                     current_time=current_time,
+                    symbol=sym,
                 )
             except Exception as pipe_err:
                 import traceback
@@ -1351,46 +1833,7 @@ async def get_signals(
             )
 
         # Collect active alerts
-        active_alerts_out: list[AlertResponse] = []
-        for alert in alert_manager.get_active_alerts():
-            p = alert.plan
-            opt = alert.option
-            opt_out = None
-            if opt:
-                opt_out = AlertOptionResponse(
-                    ticker=opt.ticker,
-                    strike=opt.strike,
-                    expiration=str(opt.expiration) if opt.expiration else "",
-                    option_type=opt.option_type,
-                    delta=round(opt.delta, 3),
-                    spread_pct=round(opt.spread_pct, 2),
-                    iv=round(opt.iv, 4),
-                    entry_premium_est=round(opt.entry_premium_est, 2),
-                    dte=opt.dte,
-                    notes=opt.notes,
-                )
-            active_alerts_out.append(AlertResponse(
-                id=alert.id,
-                state=alert.state.value,
-                created_at=alert.detected_at,
-                expires_at=alert.expires_at or "",
-                setup_name=alert.setup_name,
-                direction=alert.direction,
-                edge_score=alert.edge_score,
-                tier=alert.tier,
-                regime=alert.regime,
-                trigger_price=p.entry_price,
-                entry_condition=alert.setup_name,
-                stop_price=p.stop_price,
-                target_1=p.target_1,
-                target_2=p.target_2,
-                reward_risk_ratio=round(p.reward_risk_ratio, 2),
-                time_stop_minutes=p.time_stop_minutes,
-                kill_switch_conditions=p.kill_switch_conditions,
-                reasons=alert.reasons,
-                option=opt_out,
-                activated_premium=getattr(alert, 'activated_premium', None),
-            ))
+        active_alerts_out = [_build_alert_response(alert) for alert in alert_manager.get_active_alerts()]
 
         # ── Volume regime ────────────────────────────────────
         vol_regime_out: dict | None = None
@@ -1449,7 +1892,9 @@ async def get_signals(
 @app.post("/api/alerts/{alert_id}/activate")
 async def activate_alert(alert_id: str, premium: float = Query(...)):
     """Mark an alert as activated (entered) at a given premium."""
-    alert_manager.mark_activated(alert_id, premium)
+    alert = alert_manager.mark_activated(alert_id, premium)
+    if not alert:
+        raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
     return {"ok": True}
 
 
@@ -1466,11 +1911,16 @@ async def resolve_alert(
         raise HTTPException(status_code=400, detail=f"Unknown state: {state}")
 
     # Look up alert before resolving for perf tracking
-    alert_obj = alert_manager._active.get(alert_id)
-    entry_prem = getattr(alert_obj, "activated_premium", 0.0) if alert_obj else 0.0
-    plan = getattr(alert_obj, "plan", None) if alert_obj else None
+    alert_obj = alert_manager.get_active_alert(alert_id)
+    if not alert_obj:
+        raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
 
-    alert_manager.resolve_alert(alert_id, alert_state, exit_premium)
+    entry_prem = alert_obj.entry_premium
+    plan = alert_obj.plan
+
+    resolved_alert = alert_manager.resolve_alert(alert_id, alert_state, exit_premium)
+    if not resolved_alert:
+        raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
 
     # Record win/loss in risk engine for capital mode
     is_win = alert_state in (AlertState.HIT_T1, AlertState.HIT_T2)
@@ -1480,13 +1930,13 @@ async def resolve_alert(
     try:
         pnl = exit_premium - entry_prem if entry_prem else 0.0
         asyncio.create_task(perf_tracker.log_trade(
-            symbol=plan.symbol if plan else "QQQ",
-            direction=plan.direction if plan else "",
-            setup_type=plan.reason if plan else "",
+            symbol=resolved_alert.symbol or "QQQ",
+            direction=resolved_alert.direction,
+            setup_type=resolved_alert.setup_name,
             entry_price=entry_prem,
             exit_price=exit_premium,
-            stop_price=getattr(plan, "stop", 0.0) if plan else 0.0,
-            target_price=getattr(plan, "target_1", 0.0) if plan else 0.0,
+            stop_price=plan.stop_price if plan else 0.0,
+            target_price=plan.target_1 if plan else 0.0,
             pnl=pnl,
             alert_id=alert_id,
         ))
@@ -1502,6 +1952,37 @@ async def reset_alerts():
     alert_manager.reset()
     regime_engine.reset()
     return {"ok": True}
+
+
+@app.get("/api/alerts/history", response_model=list[AlertHistoryResponse])
+async def get_alert_history(
+    symbol: str = Query(..., description="Underlying symbol"),
+    alert_date: Optional[str] = Query(None),
+):
+    """Return actionable alerts for one symbol and trading day."""
+    if not alert_date:
+        alert_date = date.today().isoformat()
+    try:
+        day = date.fromisoformat(alert_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid alert_date: {alert_date}")
+
+    docs = await alert_store.get_day_history(symbol, day)
+    if docs:
+        return [_build_alert_history_response_from_doc(doc) for doc in docs]
+
+    history = []
+    symbol_upper = symbol.upper()
+    day_str = day.isoformat()
+    for alert in alert_manager.get_all_alerts():
+        if (alert.symbol or "").upper() != symbol_upper:
+            continue
+        if not (alert.detected_at or "").startswith(day_str):
+            continue
+        history.append(_build_alert_history_response(alert))
+
+    history.sort(key=lambda item: item.detected_at)
+    return history
 
 
 # ── Performance & Scanner endpoints ──────────────────────────
@@ -1626,6 +2107,9 @@ async def get_user_ideas():
 
 @app.websocket("/ws/ideas")
 async def websocket_ideas(ws: WebSocket):
+    user = await _require_websocket_user(ws)
+    if not user:
+        return
     await ws.accept()
     cid, queue = await _ideas_hub.register()
 
@@ -1844,6 +2328,9 @@ async def websocket_prices(ws: WebSocket):
       {"type": "tick", "ticker": "QQQ",   "price": 512.34, "prev": 512.10, "change": 0.24}
       {"type": "tick", "ticker": "O:...", "price": 3.45,   "prev": 3.30,   "change": 0.15}
     """
+    user = await _require_websocket_user(ws)
+    if not user:
+        return
     await ws.accept()
     queue: asyncio.Queue = asyncio.Queue(maxsize=300)
     subscribed: set[str] = set()
@@ -1945,6 +2432,9 @@ async def websocket_live(ws: WebSocket):
       {"type": "analysis", ...}   (periodic full re-analysis for option tickers)
       {"type": "status", "connected": true, "subscriptions": {...}}
     """
+    user = await _require_websocket_user(ws)
+    if not user:
+        return
     await ws.accept()
 
     # Per-client message queue
@@ -2130,6 +2620,7 @@ async def websocket_live(ws: WebSocket):
                                 edge_results=_edge_results,
                                 current_price=_und_price,
                                 current_time=_now,
+                                symbol=symbol,
                             )
                         except Exception as _pe:
                             print(f"[WS-Analysis] Pipeline error: {_pe}")
@@ -2394,6 +2885,9 @@ async def websocket_watchlist(ws: WebSocket):
       {"type": "prices", "prices": [{symbol, price, change, ...}, ...]}
       (filtered to only the symbols THIS client requested)
     """
+    user = await _require_websocket_user(ws)
+    if not user:
+        return
     await ws.accept()
     cid: int | None = None
 
@@ -2921,6 +3415,9 @@ async def websocket_feed(ws: WebSocket, sym: str):
       {"action":"refresh"}                  — force immediate push
       {"action":"set_interval","interval":N} — set cadence in seconds (≥10)
     """
+    user = await _require_websocket_user(ws)
+    if not user:
+        return
     await ws.accept()
     sym = sym.upper()
     refresh_event = asyncio.Event()
@@ -3093,37 +3590,14 @@ async def websocket_feed(ws: WebSocket, sym: str):
                         edge_results=_edge_p,
                         current_price=underlying_price,
                         current_time=datetime.utcnow(),
+                        symbol=sym,
                     )
             except Exception as _alert_err:
                 print(f"[Feed] Alert pipeline error: {_alert_err}")
 
             # Active alerts (in-memory singleton)
             def _alert_dict(alert):
-                p = alert.plan
-                opt = alert.option
-                opt_d = None
-                if opt:
-                    opt_d = AlertOptionResponse(
-                        ticker=opt.ticker, strike=opt.strike,
-                        expiration=str(opt.expiration) if opt.expiration else "",
-                        option_type=opt.option_type, delta=round(opt.delta, 3),
-                        spread_pct=round(opt.spread_pct, 2), iv=round(opt.iv, 4),
-                        entry_premium_est=round(opt.entry_premium_est, 2),
-                        dte=opt.dte, notes=opt.notes,
-                    ).dict()
-                return AlertResponse(
-                    id=alert.id, state=alert.state.value,
-                    created_at=alert.detected_at, expires_at=alert.expires_at or "",
-                    setup_name=alert.setup_name, direction=alert.direction,
-                    edge_score=alert.edge_score, tier=alert.tier, regime=alert.regime,
-                    trigger_price=p.entry_price, entry_condition=alert.setup_name,
-                    stop_price=p.stop_price, target_1=p.target_1, target_2=p.target_2,
-                    reward_risk_ratio=round(p.reward_risk_ratio, 2),
-                    time_stop_minutes=p.time_stop_minutes,
-                    kill_switch_conditions=p.kill_switch_conditions,
-                    reasons=alert.reasons, option=opt_d,
-                    activated_premium=getattr(alert, "activated_premium", None),
-                ).dict()
+                return _build_alert_response(alert).dict()
 
             regime_out = None
             if regime_res:

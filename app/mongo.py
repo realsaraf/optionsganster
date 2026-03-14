@@ -1,7 +1,7 @@
 """
 MongoDB Atlas Client
 ====================
-Shared async MongoDB connection for OptionsGanster.
+Shared async MongoDB connection for OptionsGangster.
 Uses motor (async driver) for non-blocking access.
 
 Collections:
@@ -17,7 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from app.config import settings
 
-logger = logging.getLogger("optionsganster")
+logger = logging.getLogger("optionsgangster")
 
 _client: Optional[AsyncIOMotorClient] = None
 _db: Optional[AsyncIOMotorDatabase] = None

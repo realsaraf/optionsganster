@@ -27,9 +27,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from app.risk_engine import TradePlan
 from app.setup_engine import SetupAlert
@@ -60,12 +60,14 @@ class ActiveAlert:
     state: AlertState
 
     # Core setup
+    symbol: str
     setup_name: str
     direction: str                  # "CALL" | "PUT"
     edge_score: int
     tier: str
     regime: str
     trigger_price: float
+    entry_condition: str
     reasons: list[str]
 
     # Trade plan
@@ -99,12 +101,14 @@ class ActiveAlert:
         return {
             "id": self.id,
             "state": self.state.value,
+            "symbol": self.symbol,
             "setup_name": self.setup_name,
             "direction": self.direction,
             "edge_score": self.edge_score,
             "tier": self.tier,
             "regime": self.regime,
             "trigger_price": self.trigger_price,
+            "entry_condition": self.entry_condition,
             "reasons": self.reasons,
             "entry_price": self.plan.entry_price,
             "stop_price": self.plan.stop_price,
@@ -135,6 +139,8 @@ class ActiveAlert:
             "detected_at": self.detected_at,
             "activated_at": self.activated_at,
             "resolved_at": self.resolved_at,
+            "entry_premium": self.entry_premium,
+            "exit_premium": self.exit_premium,
             "pnl_pct": self.pnl_pct,
         }
 
@@ -154,7 +160,7 @@ class AlertManager:
     active = manager.get_active_alerts()
     """
 
-    MAX_ACTIVE_ALERTS  = 2
+    MAX_ACTIVE_ALERTS_PER_SYMBOL = 2
     DEBOUNCE_MINUTES   = 5
 
     def __init__(self):
@@ -162,12 +168,14 @@ class AlertManager:
         self._history: list[ActiveAlert] = []         # resolved alerts (performance log)
         self._last_fire: dict[str, datetime] = {}     # setup_name+direction → last fire time
         self._counter = 0
+        self._listeners: list[Callable[[str, ActiveAlert], Any]] = []
 
     def process_tick(
         self,
         edge_results: list[EdgeResult],
         current_price: float,
         current_time: Optional[datetime] = None,
+        symbol: Optional[str] = None,
     ) -> list[ActiveAlert]:
         """
         Main per-tick method.
@@ -182,7 +190,7 @@ class AlertManager:
             current_time = datetime.utcnow()
 
         # 1. Evaluate existing alerts
-        self._evaluate_existing(current_price, current_time)
+        self._evaluate_existing(current_price, current_time, symbol=symbol)
 
         # 2. Try to admit new alerts
         new_alerts: list[ActiveAlert] = []
@@ -208,14 +216,25 @@ class AlertManager:
         """Return all alerts including resolved."""
         return list(self._alerts.values()) + self._history
 
+    def get_active_alert(self, alert_id: str) -> Optional[ActiveAlert]:
+        """Return an active or pending alert by ID."""
+        return self._alerts.get(alert_id)
+
+    def register_listener(self, listener: Callable[[str, ActiveAlert], Any]) -> None:
+        """Register a callback for admitted, activated, and resolved events."""
+        if listener not in self._listeners:
+            self._listeners.append(listener)
+
     def mark_activated(self, alert_id: str, entry_premium: float = 0.0):
         """Call when an alert transitions from PENDING → ACTIVE (trade entered)."""
         alert = self._alerts.get(alert_id)
         if alert and alert.state == AlertState.PENDING:
             alert.state       = AlertState.ACTIVE
-            alert.activated_at = datetime.utcnow().isoformat()
+            alert.activated_at = datetime.now(timezone.utc).isoformat()
             alert.entry_premium = entry_premium
+            self._emit_event("activated", alert)
             logger.info(f"[AlertMgr] Alert {alert_id} ACTIVATED at premium ${entry_premium:.2f}")
+        return alert
 
     def resolve_alert(
         self,
@@ -227,14 +246,16 @@ class AlertManager:
         alert = self._alerts.pop(alert_id, None)
         if alert:
             alert.state         = final_state
-            alert.resolved_at   = datetime.utcnow().isoformat()
+            alert.resolved_at   = datetime.now(timezone.utc).isoformat()
             alert.exit_premium  = exit_premium
             if alert.entry_premium > 0 and exit_premium > 0:
                 alert.pnl_pct = round(
                     (exit_premium - alert.entry_premium) / alert.entry_premium * 100, 1
                 )
             self._history.append(alert)
+            self._emit_event("resolved", alert)
             logger.info(f"[AlertMgr] Alert {alert_id} resolved → {final_state.value} PnL={alert.pnl_pct:.1f}%")
+        return alert
 
     def reset(self):
         """Clear all state (call at session start)."""
@@ -251,12 +272,17 @@ class AlertManager:
         setup = er.setup
 
         # Cap: max 2 active alerts
-        active_count = len([a for a in self._alerts.values() if a.is_active_or_pending])
-        if active_count >= self.MAX_ACTIVE_ALERTS:
+        active_count = len(
+            [
+                a for a in self._alerts.values()
+                if a.is_active_or_pending and a.symbol == setup.symbol
+            ]
+        )
+        if active_count >= self.MAX_ACTIVE_ALERTS_PER_SYMBOL:
             return None
 
         # Debounce: same setup + direction can't re-fire within 5 min
-        fire_key = f"{setup.name}:{setup.direction}"
+        fire_key = f"{setup.symbol}:{setup.name}:{setup.direction}"
         last_fire = self._last_fire.get(fire_key)
         if last_fire and (now - last_fire).total_seconds() < self.DEBOUNCE_MINUTES * 60:
             return None
@@ -265,6 +291,7 @@ class AlertManager:
         for existing in self._alerts.values():
             if (
                 existing.is_active_or_pending
+                and existing.symbol == setup.symbol
                 and existing.direction == setup.direction
                 and abs(existing.trigger_price - setup.trigger_price) < 0.05
             ):
@@ -282,12 +309,14 @@ class AlertManager:
         alert = ActiveAlert(
             id=alert_id,
             state=AlertState.PENDING,
+            symbol=setup.symbol,
             setup_name=setup.name,
             direction=setup.direction,
             edge_score=er.edge_score,
             tier=er.tier,
             regime=setup.regime,
             trigger_price=setup.trigger_price,
+            entry_condition=setup.entry_condition,
             reasons=setup.reasons,
             plan=er.pick and _make_plan_stub(er),  # may be None — handled below
             option=er.pick,
@@ -321,6 +350,7 @@ class AlertManager:
 
         self._alerts[alert_id] = alert
         self._last_fire[fire_key] = now
+        self._emit_event("admitted", alert)
 
         logger.info(
             f"[AlertMgr] Admitted {setup.name} {setup.direction} "
@@ -328,12 +358,25 @@ class AlertManager:
         )
         return alert
 
-    def _evaluate_existing(self, current_price: float, now: datetime):
+    def _emit_event(self, event_type: str, alert: ActiveAlert) -> None:
+        """Fan out lifecycle events to registered listeners."""
+        for listener in self._listeners:
+            try:
+                result = listener(event_type, alert)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as exc:
+                logger.debug("[AlertMgr] listener error on %s: %s", event_type, exc)
+
+    def _evaluate_existing(self, current_price: float, now: datetime, symbol: Optional[str] = None):
         """Check kill-switches and time stops on all active alerts."""
         to_resolve: list[tuple[str, AlertState]] = []
+        scoped_symbol = (symbol or "").upper()
 
         for alert_id, alert in self._alerts.items():
             if alert.is_terminal:
+                continue
+            if scoped_symbol and (alert.symbol or "").upper() != scoped_symbol:
                 continue
 
             plan = alert.plan

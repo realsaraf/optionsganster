@@ -1,4 +1,4 @@
-"""Generate OG image for OptionsGanster (1200x630)."""
+"""Generate OG image for OptionsGangster (1200x630)."""
 from PIL import Image, ImageDraw, ImageFont
 import os
 
@@ -98,13 +98,13 @@ for i, (val, label) in enumerate(stats):
 draw.rectangle([0, H - 4, W, H], fill=(59, 130, 246))
 
 # Logo bottom left
-logo_text = "OptionsGanster"
+logo_text = "OptionsGangster"
 draw.text((40, H - 50), "Options", fill="#e0e0e0", font=font_badge)
 obb = draw.textbbox((0, 0), "Options", font=font_badge)
-draw.text((40 + obb[2] - obb[0], H - 50), "Ganster", fill=(239, 83, 80), font=font_badge)
+draw.text((40 + obb[2] - obb[0], H - 50), "Gangster", fill=(239, 83, 80), font=font_badge)
 
 # URL bottom right
-url = "optionsganster.com"
+url = "optionsgangster.com"
 ubb = draw.textbbox((0, 0), url, font=font_badge)
 draw.text((W - 40 - (ubb[2] - ubb[0]), H - 50), url, fill=(107, 114, 128), font=font_badge)
 

@@ -1,5 +1,5 @@
 """
-OptionsGanster Configuration
+OptionsGangster Configuration
 Uses Pydantic BaseSettings for validated, typed config with .env auto-loading.
 """
 from pathlib import Path
@@ -14,9 +14,18 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     OPENAI_API_KEY: str = ""   # optional — enables LLM narrative layer
 
+    # Firebase / Google Auth
+    FIREBASE_PROJECT_ID: str = ""
+    FIREBASE_API_KEY: str = ""
+    FIREBASE_AUTH_DOMAIN: str = ""
+    FIREBASE_APP_ID: str = ""
+    FIREBASE_MESSAGING_SENDER_ID: str = ""
+    FIREBASE_STORAGE_BUCKET: str = ""
+    FIREBASE_MEASUREMENT_ID: str = ""
+
     # MongoDB Atlas
-    MONGO_URI: str = "mongodb+srv://optionsgangster:optionsgangster@hakmacluster.as3cgyn.mongodb.net/?appName=HakmaCluster"
-    MONGO_DB: str = "optionsgangster"
+    MONGO_URI: str = ""
+    MONGO_DB: str = ""
 
     # Cache TTLs (seconds)
     CACHE_TTL_EXPIRATIONS: int = 3600  # 1 hour – expiry dates rarely change

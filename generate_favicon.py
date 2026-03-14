@@ -1,4 +1,4 @@
-"""Generate OG-letter favicon for OptionsGanster."""
+"""Generate OG-letter favicon for OptionsGangster."""
 from PIL import Image, ImageDraw, ImageFont
 import os, sys
 

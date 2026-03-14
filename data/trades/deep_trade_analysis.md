@@ -401,7 +401,7 @@
 ## 14. ALGORITHM IMPROVEMENT RECOMMENDATIONS
 
 Based on the entry-level analysis, here are specific changes to improve the
-OptionsGanster buy/sell signal algorithm:
+OptionsGangster buy/sell signal algorithm:
 
 ### Signal Filters to ADD:
 

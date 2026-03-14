@@ -62,6 +62,7 @@ class SetupAlert:
     reasons: list[str]              # 3-5 bullet points explaining the setup
     confidence: float               # 0.0-1.0 raw setup score
     is_advanced: bool = False       # Requires more skill (e.g. Exhaustion Fade)
+    symbol: str = ""               # Underlying symbol that produced the setup
 
     # Derived (set after edge scoring)
     detected_at: Optional[str] = None  # ISO timestamp
@@ -136,6 +137,7 @@ class SetupEngine:
             try:
                 alert = detector(df, regime, sr, chain)
                 if alert is not None:
+                    alert.symbol = symbol.upper()
                     alert.detected_at = datetime.utcnow().isoformat()
                     alerts.append(alert)
             except Exception as e:

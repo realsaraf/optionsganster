@@ -1,5 +1,5 @@
 """
-Full-pipeline backtest — runs the complete OptionsGanster engine stack
+Full-pipeline backtest — runs the complete OptionsGangster engine stack
 (Regime → S/R → VPA → Posture → Idea Engine) against minute-bar CSVs.
 
 Usage:
@@ -385,7 +385,7 @@ def main():
     daily_df = build_fake_daily(all_dates)
 
     print("=" * 70)
-    print(f"  OptionsGanster Full-Pipeline Backtest")
+    print(f"  OptionsGangster Full-Pipeline Backtest")
     print(f"  Dates: {dates[0]} to {dates[-1]}  ({len(dates)} days)")
     print(f"  Daily bars for S/R: {len(daily_df)} days")
     print("=" * 70)
