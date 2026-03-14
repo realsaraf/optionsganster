@@ -51,22 +51,25 @@
       .top-user-btn {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        padding: 4px 10px;
+        gap: 7px;
+        padding: 5px 9px;
         border-radius: 999px;
         border: 1px solid var(--border2);
         background: rgba(15, 23, 42, 0.72);
         color: var(--text);
-        font-size: 0.74rem;
+        font-size: 0.72rem;
         font-weight: 700;
         cursor: pointer;
+        white-space: nowrap;
+        max-width: 150px;
       }
-      .top-user-btn .role-badge {
-        font-size: 0.62rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: #93c5fd;
+      .top-user-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+        flex-shrink: 0;
       }
       .spacer {
         flex: 1;
@@ -1224,14 +1227,8 @@
           font-size: 1.05rem;
         }
         #settingsBtn {
-          grid-column: 1 / -1;
-          justify-self: start;
-          padding: 7px 12px;
-          border-radius: 999px;
-        }
-        #liveBtn {
-          padding: 6px 10px !important;
-          font-size: 0.72rem !important;
+          padding: 6px 9px;
+          max-width: 112px;
         }
         .sym-dd {
           min-width: calc(100vw - 24px);

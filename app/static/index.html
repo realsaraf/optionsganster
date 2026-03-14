@@ -25,44 +25,10 @@
           autocomplete="off"
         />
         <div class="sym-dd" id="symDropdown"></div>
-        <button
-          class="mag-btn"
-          onclick="openSearchModal()"
-          title="Search symbols"
-        >
-          🔍
+        <button class="top-user-btn" id="settingsBtn" onclick="openSettings()" title="Account settings">
+          <span class="top-user-dot" aria-hidden="true"></span>
+          <span id="topUserLabel">Account</span>
         </button>
-        <span
-          id="liveBtn"
-          class="live-on"
-          style="
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.4px;
-            padding: 4px 9px;
-            border-radius: 20px;
-            white-space: nowrap;
-            color: #ef4444;
-            border: 1px solid rgba(239, 68, 68, 0.6);
-            background: rgba(239, 68, 68, 0.12);
-          "
-          ><span
-            class="rec-dot"
-            style="
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: #ef4444;
-              box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
-              animation: rec-pulse 1.4s ease-in-out infinite;
-              flex-shrink: 0;
-            "
-          ></span
-          >LIVE</span
-        >
       </div>
       <div class="spacer"></div>
       <button
@@ -80,10 +46,6 @@
         ⏪
       </button>
       <span id="last-update">—</span>
-      <button class="top-user-btn" id="settingsBtn" onclick="openSettings()" title="Account settings">
-        <span id="topUserLabel">Account</span>
-        <span class="role-badge" id="topUserRole">—</span>
-      </button>
     </nav>
 
     <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this) closeSettings()">
@@ -1090,7 +1052,6 @@
       }
       function renderAccountState(){
         document.getElementById('topUserLabel').textContent=ME.display_name||ME.email||'Account';
-        document.getElementById('topUserRole').textContent=(ME.role||'guest').toUpperCase();
         document.getElementById('settingsEmail').textContent=ME.email||'—';
         document.getElementById('settingsName').textContent=ME.display_name||'—';
         document.getElementById('settingsRole').textContent=ME.role||'—';
@@ -2505,7 +2466,15 @@
       (function(){
         const inp=document.getElementById('symInput');
         const dd=document.getElementById('symDropdown');
+        const mobileMq=window.matchMedia('(max-width:900px)');
         let _timer=null, _idx=-1, _items=[];
+
+        function useSearchModal(){ return mobileMq.matches; }
+        function syncInputMode(){
+          inp.readOnly=useSearchModal();
+          inp.setAttribute('aria-haspopup', useSearchModal()?'dialog':'listbox');
+          inp.style.cursor=useSearchModal()?'pointer':'';
+        }
 
         function renderDD(results){
           _items=results; _idx=-1;
@@ -2523,6 +2492,15 @@
           const a=dd.querySelector('.sym-dd-item.active'); if(a) a.scrollIntoView({block:'nearest'});
         }
 
+        syncInputMode();
+        mobileMq.addEventListener('change',syncInputMode);
+
+        inp.addEventListener('pointerdown',e=>{
+          if(!useSearchModal()) return;
+          e.preventDefault();
+          openSearchModal();
+        });
+
         inp.addEventListener('input',()=>{
           const q=inp.value.trim(); clearTimeout(_timer);
           if(!q){ closeDD(); return; }
@@ -2537,7 +2515,15 @@
           else if(e.key==='Escape') closeDD();
         });
         inp.addEventListener('blur',()=>setTimeout(closeDD,200));
-        inp.addEventListener('focus',()=>{ const q=inp.value.trim(); if(q.length>=1) _tickerSearch(q,8).then(renderDD); });
+        inp.addEventListener('focus',()=>{
+          if(useSearchModal()){
+            inp.blur();
+            openSearchModal();
+            return;
+          }
+          const q=inp.value.trim();
+          if(q.length>=1) _tickerSearch(q,8).then(renderDD);
+        });
         document.addEventListener('click',e=>{ if(!e.target.closest('.sym-wrap')) closeDD(); });
       })();
 
