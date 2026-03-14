@@ -507,44 +507,52 @@
         </div>
         <div class="chart-wrapper">
           <div class="chart-toolbar">
-            <span class="price-big" id="priceLbl">—</span>
-            <span id="changeLbl"></span>
-            <div class="spacer"></div>
-            <label class="chk-label"
-              ><input
-                type="checkbox"
-                id="chkVwap"
-                checked
-                onchange="redrawChart()"
-              />
-              VWAP</label
-            >
-            <label class="chk-label"
-              ><input type="checkbox" id="chkEma" onchange="redrawChart()" />
-              EMA</label
-            >
-            <label class="chk-label"
-              ><input type="checkbox" id="chkLvl" onchange="redrawChart()" />
-              Levels</label
-            >
-            <label class="chk-label"
-              ><input
-                type="checkbox"
-                id="chkAlrt"
-                checked
-                onchange="redrawChart()"
-              />
-              Alerts</label
-            >
-            <label class="chk-label"
-              ><input
-                type="checkbox"
-                id="chkRsi"
-                checked
-                onchange="renderRsi()"
-              />
-              RSI</label
-            >
+            <div class="chart-price-strip">
+              <span class="price-big" id="priceLbl">—</span>
+              <span id="changeLbl"></span>
+            </div>
+            <div class="chart-toggle-strip">
+              <div class="chart-toggle-primary">
+                <label class="chk-label"
+                  ><input
+                    type="checkbox"
+                    id="chkVwap"
+                    checked
+                    onchange="redrawChart()"
+                  />
+                  VWAP</label
+                >
+                <label class="chk-label"
+                  ><input
+                    type="checkbox"
+                    id="chkAlrt"
+                    checked
+                    onchange="redrawChart()"
+                  />
+                  Alerts</label
+                >
+                <label class="chk-label"
+                  ><input
+                    type="checkbox"
+                    id="chkRsi"
+                    checked
+                    onchange="renderRsi()"
+                  />
+                  RSI</label
+                >
+              </div>
+              <button class="chart-more-btn" id="chartMoreBtn" type="button" onclick="toggleChartMore()" aria-expanded="false">More</button>
+              <div class="chart-toggle-secondary" id="chartToggleSecondary">
+                <label class="chk-label"
+                  ><input type="checkbox" id="chkEma" onchange="redrawChart()" />
+                  EMA</label
+                >
+                <label class="chk-label"
+                  ><input type="checkbox" id="chkLvl" onchange="redrawChart()" />
+                  Levels</label
+                >
+              </div>
+            </div>
           </div>
           <div class="tf-grp">
             <button class="tf-pill active" data-tf="1" onclick="setTf(1)">
@@ -823,13 +831,6 @@
       >
         <span class="mob-ico">📍</span>Levels
       </button>
-      <button
-        class="mob-nav-btn"
-        data-mob="backtest"
-        onclick="switchMobTab('backtest')"
-      >
-        <span class="mob-ico">⏪</span>Backtest
-      </button>
     </nav>
 
     <script>
@@ -841,6 +842,7 @@
       let _alertSymbolSearchTimer=null;
       let _confirmResolver=null;
       let _alertMarkerDetails=new Map();
+      let _latestPosture=null;
       let _feedWs=null,_topAlert=null,_playbook='all',_chartRange='today',_interval=1;
       const _OPT={active:false,ticker:'',chart:null,series:null,bars:[],optVolSeries:null,undVolSeries:null};
       const DPR=window.devicePixelRatio||1;
@@ -850,12 +852,10 @@
 
       /* ── Mobile bottom nav ── */
       function switchMobTab(tab){
+        if(tab==='backtest') tab='trade';
         document.body.dataset.mobTab=tab;
         document.querySelectorAll('.mob-nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.mob===tab));
-        // Resize chart if switching to trade or backtest tab
-        if(tab==='trade'||tab==='backtest') setTimeout(()=>{ if(window._chart) window._chart.applyOptions({}); },50);
-        // Auto-load backtest dates when switching to backtest tab
-        if(tab==='backtest') mbtInit();
+        if(tab==='trade') setTimeout(()=>{ if(window._chart) window._chart.applyOptions({}); },50);
       }
       function initMobNav(){
         const mq=window.matchMedia('(max-width:900px)');
@@ -871,9 +871,32 @@
       }
       initMobNav();
 
+      function toggleChartMore(){
+        const panel=document.getElementById('chartToggleSecondary');
+        const btn=document.getElementById('chartMoreBtn');
+        if(!panel||!btn) return;
+        const open=panel.classList.toggle('open');
+        btn.textContent=open?'Less':'More';
+        btn.setAttribute('aria-expanded', open?'true':'false');
+      }
+
       function _fmtStamp(value){
         if(!value) return 'Never';
         try{return new Date(value).toLocaleString();}catch{return value;}
+      }
+      function _fmtShortDate(value){
+        if(!value) return '';
+        try{
+          const raw=String(value);
+          const match=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if(match){
+            const [,year,month,day]=match;
+            return new Date(Date.UTC(Number(year), Number(month)-1, Number(day))).toLocaleDateString([], {month:'short', day:'numeric', timeZone:'UTC'});
+          }
+          return new Date(raw).toLocaleDateString([], {month:'short', day:'numeric', timeZone:'UTC'});
+        }catch{
+          return String(value).slice(0,10);
+        }
       }
       function _defaultAlertTypes(){
         return {actionable:true,activated:false,hit_t1:false,hit_t2:false,stopped:false,timed_out:false,invalidated:false};
@@ -1464,6 +1487,22 @@
         _drawHistoricalAlertMarkers(showAlerts?_allChartAlerts():[],S.allBars);
       }
 
+      function _selectTopAlert(alerts){
+        return (alerts||[]).reduce((best, alert)=>alert.edge_score>(best?.edge_score||0)?alert:best,null);
+      }
+
+      function _alertStamp(alert){
+        const raw=alert?.detected_at||alert?.created_at||'';
+        const stamp=Date.parse(raw);
+        return Number.isFinite(stamp)?stamp:0;
+      }
+
+      function _selectChartAlert(){
+        const activeTop=_selectTopAlert(S.alerts||[]);
+        if(activeTop) return activeTop;
+        return (_allChartAlerts()||[]).slice().sort((a,b)=>_alertStamp(b)-_alertStamp(a))[0]||null;
+      }
+
       async function fetchAlertHistory(sym){
         try{
           const alertDate=_currentAlertDate();
@@ -1584,9 +1623,10 @@
           if(msg.volume_regime  !== undefined) S.vol_regime = msg.volume_regime;
           if(msg.proximity_score!== undefined) S.proximity_score = msg.proximity_score;
           if(msg.proximity_detail!==undefined) S.proximity_detail = msg.proximity_detail;
-          _refreshAlertMarkers();
           // Render updated sections (skip chart redraw — bars unchanged mid-session)
           renderAlerts();renderChain();renderVolRegime();renderProximity();
+          if(msg.active_alerts !== undefined && !BT.active) redrawChart();
+          else _refreshAlertMarkers();
           if(msg.posture) renderDecisionBar(msg.posture);
           document.getElementById('last-update').textContent='Live '+new Date().toLocaleTimeString();
         } else if(t==='briefing'){
@@ -1737,6 +1777,7 @@
         const el=document.getElementById('verdictCard');
         if(!el) return;
         if(!d){el.className='verdict-card';el.style.display='none';el.innerHTML='';return;}
+        _latestPosture=d;
         const dec=d.decision||'WAIT';
         const isCall=dec==='BUY_CALLS';
         const isPut=dec==='BUY_PUTS';
@@ -1765,6 +1806,25 @@
         const cardCls=isCall?'vc-buy-calls':isPut?'vc-buy-puts':'vc-wait';
         const dirCls=isCall?'vd-calls':isPut?'vd-puts':'vd-wait';
         const dirLabel=isCall?'Buy Calls':isPut?'Buy Puts':'Wait';
+        const topAlert=_selectTopAlert(S.alerts||[]);
+        const optionType=((topAlert?.option?.option_type)||topAlert?.direction||'').toUpperCase();
+        const contractLabel=topAlert?.option
+          ? `${fp(topAlert.option.strike)} ${optionType==='PUT'?'P':'C'}${topAlert.option.expiration?` · ${_fmtShortDate(topAlert.option.expiration)}`:''}`
+          : (topAlert?.setup_name||'');
+        const premiumLabel=topAlert?.option ? `$${fp(topAlert.option.entry_premium_est)} est` : '';
+        const mobileAlertHtml=topAlert?`
+        <div class="verdict-active-mobile">
+          <div class="verdict-active-mobile-head">
+            <span class="verdict-active-mobile-type ${optionType==='PUT'?'is-put':'is-call'}">${esc(optionType||topAlert.direction||'ALERT')}</span>
+            <span class="verdict-active-mobile-contract">${esc(contractLabel)}</span>
+            ${premiumLabel?`<span class="verdict-active-mobile-premium">${esc(premiumLabel)}</span>`:''}
+          </div>
+          <div class="verdict-active-mobile-levels">
+            <div class="verdict-active-mobile-level"><span>Entry</span><strong>${fp(topAlert.trigger_price)}</strong></div>
+            <div class="verdict-active-mobile-level"><span>T1</span><strong>${fp(topAlert.target_1)}</strong></div>
+            <div class="verdict-active-mobile-level"><span>T2</span><strong>${fp(topAlert.target_2)}</strong></div>
+          </div>
+        </div>`:'';
 
         el.className=`verdict-card visible ${cardCls}`;
         el.style.display='block';
@@ -1774,6 +1834,7 @@
           <span class="verdict-conf">${confPct}%</span>
         </div>
         <div class="verdict-meta">${metaParts.map(p=>`<strong>${esc(p)}</strong>`).join(' · ')}</div>
+        ${mobileAlertHtml}
         ${reason?`<div class="verdict-reason">${esc(reason)}</div>`:''}
         `;
         renderActionCards(d);
@@ -2135,6 +2196,7 @@
           _ema9Series.setData(_buildIndData(S.ind.ema_9));
           _ema20Series.setData(_buildIndData(S.ind.ema_20));
         }
+        _topAlert=_selectChartAlert();
         // Price lines (clear then add)
         _priceLinesRef.forEach(({series,line})=>{try{series.removePriceLine(line);}catch{}});
         _priceLinesRef=[];
@@ -2220,7 +2282,7 @@
           activeHtml=`<div class="no-alerts"><div class="na-icon">📡</div>No active alerts${rn?' in '+rn+' regime':''}.<br><small style="display:block;margin-top:4px;opacity:.7">Setups fire at edge score ≥ 50</small></div>`;
           _topAlert=null;
         } else {
-          _topAlert=as.reduce((b,a)=>a.edge_score>(b?.edge_score||0)?a:b,null);
+          _topAlert=_selectTopAlert(as);
           activeHtml=as.map(a=>`
       <div class="alert-card ${esc(a.direction)}">
         <div class="ac-header">
@@ -2272,6 +2334,7 @@
           </div>`).join(''):`<div class="no-data">No actionable alerts logged for ${esc(_currentAlertDate())}</div>`}
         </div>`;
         col.innerHTML=activeHtml+historyHtml;
+        if(_latestPosture) renderDecisionBar(_latestPosture);
         // Wire live price subscriptions after DOM is ready
         syncPriceSubs();
       }
