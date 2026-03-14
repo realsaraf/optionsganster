@@ -12,19 +12,7 @@
     <div class="load-bar" id="loader"></div>
 
     <nav class="topnav">
-      <div class="logo">Options<span>Gangster</span></div>
-      <div class="pb-pills">
-        <span class="pb-pill active" data-pb="all" onclick="setPB('all')"
-          >All</span
-        >
-        <span class="pb-pill" data-pb="0dte" onclick="setPB('0dte')">0DTE</span>
-        <span class="pb-pill" data-pb="swing" onclick="setPB('swing')"
-          >Swing</span
-        >
-        <span class="pb-pill" data-pb="scalp" onclick="setPB('scalp')"
-          >Scalp</span
-        >
-      </div>
+      <div class="logo">Options<span>Gangster</span></div>      
       <div class="spacer"></div>
       <div class="sym-wrap">
         <input
@@ -613,6 +601,7 @@
             </button>
           </div>
           <div id="lwc-chart"></div>
+          <div class="chart-alert-tooltip" id="chartAlertTooltip"></div>
           <div id="lwc-rsi"></div>
           <!-- Option Tracker -->
           <div id="optTracker" class="opt-tracker" style="display: none">
@@ -851,6 +840,7 @@
       let _settingsTab='profile';
       let _alertSymbolSearchTimer=null;
       let _confirmResolver=null;
+      let _alertMarkerDetails=new Map();
       let _feedWs=null,_topAlert=null,_playbook='all',_chartRange='today',_interval=1;
       const _OPT={active:false,ticker:'',chart:null,series:null,bars:[],optVolSeries:null,undVolSeries:null};
       const DPR=window.devicePixelRatio||1;
@@ -1458,6 +1448,22 @@
         return new Date().toLocaleDateString('en-CA');
       }
 
+      function _allChartAlerts(){
+        const merged=new Map();
+        [...(S.alertHistory||[]), ...(S.alerts||[])].forEach(alert=>{
+          const key=alert.id||`${alert.detected_at||alert.created_at||''}:${alert.setup_name||''}:${alert.direction||''}`;
+          if(!key) return;
+          if(!merged.has(key)) merged.set(key, alert);
+        });
+        return Array.from(merged.values());
+      }
+
+      function _refreshAlertMarkers(){
+        if(BT.active) return;
+        const showAlerts=!!document.getElementById('chkAlrt')?.checked;
+        _drawHistoricalAlertMarkers(showAlerts?_allChartAlerts():[],S.allBars);
+      }
+
       async function fetchAlertHistory(sym){
         try{
           const alertDate=_currentAlertDate();
@@ -1465,7 +1471,7 @@
           if(!r.ok){S.alertHistory=[];return;}
           S.alertHistory=await r.json();
           renderAlerts();
-          if(!BT.active) _drawHistoricalAlertMarkers(document.getElementById('chkAlrt')?.checked?S.alertHistory:[],S.allBars);
+          _refreshAlertMarkers();
         }catch(e){console.warn('alert history',e);}
       }
 
@@ -1578,6 +1584,7 @@
           if(msg.volume_regime  !== undefined) S.vol_regime = msg.volume_regime;
           if(msg.proximity_score!== undefined) S.proximity_score = msg.proximity_score;
           if(msg.proximity_detail!==undefined) S.proximity_detail = msg.proximity_detail;
+          _refreshAlertMarkers();
           // Render updated sections (skip chart redraw — bars unchanged mid-session)
           renderAlerts();renderChain();renderVolRegime();renderProximity();
           if(msg.posture) renderDecisionBar(msg.posture);
@@ -1997,6 +2004,18 @@
         _vwapLSeries =_lwcChart.addLineSeries({color:'rgba(96,165,250,.35)',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
         _ema9Series  =_lwcChart.addLineSeries({color:'#fbbf24',lineWidth:1.2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
         _ema20Series =_lwcChart.addLineSeries({color:'#c084fc',lineWidth:1.2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+        _lwcChart.subscribeCrosshairMove(param=>{
+          if(!param||!param.time||!param.point||param.point.x<0||param.point.y<0){
+            _hideChartAlertTooltip();
+            return;
+          }
+          const items=_alertMarkerDetails.get(Number(param.time));
+          if(!items||!items.length){
+            _hideChartAlertTooltip();
+            return;
+          }
+          _showChartAlertTooltip(param.point, items);
+        });
         // RSI pane
         const rsiEl=document.getElementById('lwc-rsi');
         if(rsiEl){
@@ -2026,6 +2045,38 @@
       function _lwcResize(){
         if(_lwcChart){const c=document.getElementById('lwc-chart');if(c)_lwcChart.applyOptions({width:c.offsetWidth});}
         if(_lwcRsi){const c=document.getElementById('lwc-rsi');if(c)_lwcRsi.applyOptions({width:c.offsetWidth});}
+        _hideChartAlertTooltip();
+      }
+
+      function _hideChartAlertTooltip(){
+        const tooltip=document.getElementById('chartAlertTooltip');
+        if(!tooltip) return;
+        tooltip.classList.remove('open');
+      }
+
+      function _showChartAlertTooltip(point, items){
+        const tooltip=document.getElementById('chartAlertTooltip');
+        const container=document.getElementById('lwc-chart');
+        if(!tooltip||!container||!items||!items.length) return;
+        tooltip.innerHTML=items.map(item=>`
+          <div class="chart-alert-tooltip-item">
+            <div class="chart-alert-tooltip-head">
+              <span class="chart-alert-tooltip-dir ${item.direction==='CALL'?'is-call':'is-put'}">${esc(item.direction)}</span>
+              <span class="chart-alert-tooltip-state">${esc(item.state||'PENDING')}</span>
+            </div>
+            <div class="chart-alert-tooltip-name">${esc(item.setup_name||'Alert')}</div>
+            <div class="chart-alert-tooltip-meta">${esc(_fmtStamp(item.detected_at||item.created_at||''))}</div>
+            <div class="chart-alert-tooltip-meta">Entry ${fp(item.trigger_price)} · Score ${esc(item.edge_score||'')}</div>
+          </div>
+        `).join('');
+        tooltip.classList.add('open');
+        const pad=8;
+        const width=tooltip.offsetWidth||220;
+        const height=tooltip.offsetHeight||110;
+        const left=Math.min(Math.max(pad, point.x+14), Math.max(pad, container.clientWidth-width-pad));
+        const top=Math.min(Math.max(pad, point.y+14), Math.max(pad, container.clientHeight-height-pad));
+        tooltip.style.left=`${left}px`;
+        tooltip.style.top=`${top}px`;
       }
 
       function _buildIndData(arr){
@@ -2112,7 +2163,7 @@
             });
           }
         }
-        if(!BT.active) _drawHistoricalAlertMarkers(showA?(S.alertHistory||[]):[],S.allBars);
+        _refreshAlertMarkers();
         // Header price labels
         if(cData.length){
           const last=cData[cData.length-1];
@@ -3136,27 +3187,45 @@
       function _drawHistoricalAlertMarkers(alerts, bars){
         if(!_candleSeries||!bars||!bars.length) return;
         if(!alerts||!alerts.length){
+          _alertMarkerDetails=new Map();
+          _hideChartAlertTooltip();
           try{_candleSeries.setMarkers([]);}catch{}
           return;
         }
         const markers=[];
+        const detailsByTime=new Map();
         alerts.forEach(a=>{
           const bar=_findBarByIsoTime(bars,a.detected_at||a.created_at||'');
           if(!bar) return;
           const isCall=(a.direction||'').toUpperCase()==='CALL';
+          const time=_lwcTime(bar.datetime);
+          const detail={
+            direction:isCall?'CALL':'PUT',
+            setup_name:a.setup_name||'',
+            state:a.state||'',
+            detected_at:a.detected_at||a.created_at||'',
+            trigger_price:a.trigger_price,
+            edge_score:a.edge_score,
+          };
+          if(!detailsByTime.has(time)) detailsByTime.set(time, []);
+          detailsByTime.get(time).push(detail);
           markers.push({
-            time:_lwcTime(bar.datetime),
+            time,
             position:isCall?'belowBar':'aboveBar',
             color:isCall?'#22c55e':'#ef4444',
             shape:isCall?'arrowUp':'arrowDown',
-            text:`${a.direction||''} ${a.setup_name||''} ${a.state||''}`.trim()
+            text:isCall?'CALL':'PUT'
           });
         });
+        _alertMarkerDetails=detailsByTime;
+        _hideChartAlertTooltip();
         markers.sort((a,b)=>a.time-b.time);
         _candleSeries.setMarkers(markers);
       }
       function _drawTradeMarkers(trades, bars){
         if(!_candleSeries||!bars||!bars.length) return;
+        _alertMarkerDetails=new Map();
+        _hideChartAlertTooltip();
         const markers=[];
         // Build time lookup from bars
         trades.forEach(t=>{
