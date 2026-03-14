@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import httpx
-from google.auth.transport.requests import Request
 from google.oauth2 import id_token as google_id_token
 
 from app.config import settings
@@ -66,6 +65,8 @@ def verify_firebase_token(token: str) -> dict:
     if not firebase_enabled():
         raise FirebaseAuthError("Firebase auth is not configured")
     try:
+        from google.auth.transport.requests import Request
+
         claims = google_id_token.verify_firebase_token(
             token,
             Request(),

@@ -12,6 +12,7 @@ python-dotenv>=1.0.0
 
 # HTTP client (async)
 httpx>=0.26.0
+requests>=2.31.0
 
 # WebSocket client (upstream Polygon feed)
 websockets>=12.0
