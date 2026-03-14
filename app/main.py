@@ -51,6 +51,7 @@ from app.firebase_auth import FirebaseAuthError, firebase_enabled, get_firebase_
 from app.scanner_engine import scanner_engine
 from app.subscription_scanner import SubscriptionScanner
 from app.ticker_service import ticker_service
+from app.twilio_sms import twilio_sms_notifier
 from app.user_alert_store import DEFAULT_ALERT_TYPES, user_alert_store
 from app.mongo import close_db
 import app.llm_narrator as llm_narrator
@@ -289,6 +290,7 @@ app = FastAPI(
 
 alert_manager.register_listener(alert_store.handle_alert_event)
 alert_manager.register_listener(user_alert_store.handle_alert_event)
+alert_manager.register_listener(twilio_sms_notifier.handle_alert_event)
 
 
 # ── Auth middleware ─────────────────────────────────────────

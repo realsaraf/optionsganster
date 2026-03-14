@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     MONGO_URI: str = ""
     MONGO_DB: str = ""
 
+    # Twilio SMS notifications
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_SMS_FROM: str = ""
+    TWILIO_SMS_TO: str = ""
+    TWILIO_SMS_ALERT_TYPES: str = "actionable"
+
     # Cache TTLs (seconds)
     CACHE_TTL_EXPIRATIONS: int = 3600  # 1 hour – expiry dates rarely change
     CACHE_TTL_STRIKES: int = 3600      # 1 hour – strikes rarely change
