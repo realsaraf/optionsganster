@@ -1,5 +1,5 @@
 """
-OptionsGangster Configuration
+OptionGangster Configuration
 Uses Pydantic BaseSettings for validated, typed config with .env auto-loading.
 """
 from pathlib import Path
@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     TWILIO_SMS_FROM: str = ""
     TWILIO_SMS_TO: str = ""
     TWILIO_SMS_ALERT_TYPES: str = "actionable"
+
+    # Twilio WhatsApp notifications
+    TWILIO_WHATSAPP_FROM: str = ""  # e.g. "whatsapp:+16562554167"
+    TWILIO_WA_OTP_TEMPLATE_SID: str = ""  # Content template SID for OTP
+    TWILIO_WA_ALERT_TEMPLATE_SID: str = ""  # Content template SID for alerts
 
     # Cache TTLs (seconds)
     CACHE_TTL_EXPIRATIONS: int = 3600  # 1 hour – expiry dates rarely change

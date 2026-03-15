@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>OptionsGangster – Idea Engine</title>
+    <title>OptionGangster – Idea Engine</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
     <link rel="stylesheet" href="/static/index.css" />
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -137,6 +137,38 @@
               <div class="pnl-title" style="margin-top:16px">Recent Matching Alerts <span class="cnt" id="alertUnreadCount">0</span></div>
               <div class="alert-feed" id="alertNotificationsList">
                 <div class="admin-empty">No notifications yet</div>
+              </div>
+            </div>
+
+            <div class="settings-card" id="whatsappSettingsCard" style="margin-top:16px">
+              <h4>WhatsApp Alerts</h4>
+              <div class="settings-sub">Get trade alerts on WhatsApp. Verify your number with a one-time code to enable.</div>
+              <div id="whatsappStatus" style="margin:8px 0"></div>
+              <div id="whatsappSetupSection">
+                <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                  <div style="flex:1;min-width:180px">
+                    <label>WhatsApp Number</label>
+                    <input class="settings-input" id="whatsappPhoneInput" placeholder="+1 555 123 4567" autocomplete="tel" />
+                  </div>
+                  <button class="btn" id="whatsappSendOtpBtn" onclick="whatsappSendOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Send Code</button>
+                </div>
+                <div id="whatsappOtpSection" style="display:none;margin-top:10px">
+                  <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                    <div style="flex:1;min-width:120px;max-width:200px">
+                      <label>Verification Code</label>
+                      <input class="settings-input" id="whatsappOtpInput" placeholder="123456" maxlength="6" autocomplete="one-time-code" />
+                    </div>
+                    <button class="btn primary" id="whatsappVerifyBtn" onclick="whatsappVerifyOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Verify</button>
+                  </div>
+                </div>
+              </div>
+              <div id="whatsappVerifiedSection" style="display:none;margin-top:10px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="color:var(--green);font-size:.82rem" id="whatsappVerifiedLabel">✓ Verified</span>
+                  <label class="alert-pref-toggle" style="margin:0">
+                    <input type="checkbox" id="whatsappEnabledToggle" onchange="whatsappToggle(this.checked)" /> Enable WhatsApp alerts
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -1044,10 +1076,82 @@
           ALERT_PREFS.symbol_settings=(d.symbol_settings||[]).map(item=>({symbol:(item.symbol||'').toUpperCase(),alert_types:{..._defaultAlertTypes(),...(item.alert_types||{})}}));
           ALERT_PREFS.notifications=d.notifications||[];
           ALERT_PREFS.unread_count=d.unread_count||0;
+          ALERT_PREFS.whatsapp_enabled=!!d.whatsapp_enabled;
+          ALERT_PREFS.whatsapp_number=d.whatsapp_number||'';
+          ALERT_PREFS.whatsapp_verified=!!d.whatsapp_verified;
           renderAlertSettings();
+          renderWhatsAppState();
         }catch(e){
           _setAlertSettingsStatus(e.message||'Failed to load alert settings','err');
           document.getElementById('alertNotificationsList').innerHTML='<div class="admin-empty">Failed to load notifications</div>';
+        }
+      }
+      function renderWhatsAppState(){
+        const setup=document.getElementById('whatsappSetupSection');
+        const verified=document.getElementById('whatsappVerifiedSection');
+        const status=document.getElementById('whatsappStatus');
+        if(ALERT_PREFS.whatsapp_verified){
+          setup.style.display='none';
+          verified.style.display='block';
+          document.getElementById('whatsappEnabledToggle').checked=!!ALERT_PREFS.whatsapp_enabled;
+          const phone=ALERT_PREFS.whatsapp_number||'';
+          document.getElementById('whatsappVerifiedLabel').textContent='✓ Verified: +' + phone.replace(/^\+/,'');
+          status.textContent=ALERT_PREFS.whatsapp_enabled?'WhatsApp alerts are ON':'WhatsApp alerts are OFF';
+          status.style.color=ALERT_PREFS.whatsapp_enabled?'var(--green)':'var(--muted)';
+        }else{
+          setup.style.display='block';
+          verified.style.display='none';
+          status.textContent='';
+        }
+      }
+      async function whatsappSendOtp(){
+        const phone=document.getElementById('whatsappPhoneInput').value.trim();
+        if(!phone){toast('Enter your WhatsApp phone number','err');return;}
+        const btn=document.getElementById('whatsappSendOtpBtn');
+        btn.disabled=true;btn.textContent='Sending…';
+        try{
+          const r=await fetch('/api/whatsapp/send-otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.detail||'Failed to send OTP');
+          document.getElementById('whatsappOtpSection').style.display='block';
+          toast('Verification code sent to WhatsApp');
+        }catch(e){
+          toast(e.message||'Failed to send code','err');
+        }finally{
+          btn.disabled=false;btn.textContent='Send Code';
+        }
+      }
+      async function whatsappVerifyOtp(){
+        const code=document.getElementById('whatsappOtpInput').value.trim();
+        if(!code){toast('Enter the verification code','err');return;}
+        const btn=document.getElementById('whatsappVerifyBtn');
+        btn.disabled=true;btn.textContent='Verifying…';
+        try{
+          const r=await fetch('/api/whatsapp/verify-otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.detail||'Invalid or expired code');
+          ALERT_PREFS.whatsapp_enabled=!!d.whatsapp_enabled;
+          ALERT_PREFS.whatsapp_number=d.whatsapp_number||'';
+          ALERT_PREFS.whatsapp_verified=!!d.whatsapp_verified;
+          renderWhatsAppState();
+          toast('WhatsApp number verified!');
+        }catch(e){
+          toast(e.message||'Verification failed','err');
+        }finally{
+          btn.disabled=false;btn.textContent='Verify';
+        }
+      }
+      async function whatsappToggle(enabled){
+        try{
+          const r=await fetch('/api/whatsapp/toggle',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.detail||'Failed to update');
+          ALERT_PREFS.whatsapp_enabled=!!d.whatsapp_enabled;
+          renderWhatsAppState();
+          toast(enabled?'WhatsApp alerts enabled':'WhatsApp alerts disabled');
+        }catch(e){
+          toast(e.message||'Failed to toggle WhatsApp','err');
+          document.getElementById('whatsappEnabledToggle').checked=!!ALERT_PREFS.whatsapp_enabled;
         }
       }
       function renderAccountState(){
@@ -1167,7 +1271,11 @@
           ALERT_PREFS.symbol_settings=(d.symbol_settings||[]).map(item=>({symbol:(item.symbol||'').toUpperCase(),alert_types:{..._defaultAlertTypes(),...(item.alert_types||{})}}));
           ALERT_PREFS.notifications=d.notifications||[];
           ALERT_PREFS.unread_count=d.unread_count||0;
+          ALERT_PREFS.whatsapp_enabled=!!d.whatsapp_enabled;
+          ALERT_PREFS.whatsapp_number=d.whatsapp_number||'';
+          ALERT_PREFS.whatsapp_verified=!!d.whatsapp_verified;
           renderAlertSettings();
+          renderWhatsAppState();
           _setAlertSettingsStatus(`Saved ${ALERT_PREFS.symbols.length} subscribed symbol(s).`,'ok');
           toast('Alert subscriptions saved');
         }catch(e){
@@ -3805,5 +3913,9 @@
         fetchPerformance();
       })();
     </script>
+    <div style="text-align:center;padding:12px 0 18px;font-size:0.72rem;color:#64748b">
+      <a href="/terms" style="color:#64748b;text-decoration:none;margin:0 8px">Terms of Service</a>
+      <a href="/privacy" style="color:#64748b;text-decoration:none;margin:0 8px">Privacy Policy</a>
+    </div>
   </body>
 </html>

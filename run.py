@@ -1,5 +1,5 @@
 """
-Run the OptionsGangster application
+Run the OptionGangster application
 """
 import os, sys
 
@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     print(f"""
     ╔═══════════════════════════════════════════╗
-    ║        OptionsGangster v2.0                ║
+    ║        OptionGangster v2.0                ║
     ║        VPA Options Analysis Tool          ║
     ╠═══════════════════════════════════════════╣
     ║  Server starting at:                      ║

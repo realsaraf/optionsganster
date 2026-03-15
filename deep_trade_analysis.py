@@ -880,7 +880,7 @@ def generate_report(all_entries: list[BuyEntry], stats: dict, qqq_daily: dict) -
     L("## 14. ALGORITHM IMPROVEMENT RECOMMENDATIONS")
     L("")
     L("Based on the entry-level analysis, here are specific changes to improve the")
-    L("OptionsGangster buy/sell signal algorithm:")
+    L("OptionGangster buy/sell signal algorithm:")
     L("")
 
     L("### Signal Filters to ADD:")

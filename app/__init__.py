@@ -1,1 +1,1 @@
-# OptionsGangster - VPA Options Analysis Tool
+# OptionGangster - VPA Options Analysis Tool

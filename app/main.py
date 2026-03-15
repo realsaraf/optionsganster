@@ -1,5 +1,5 @@
 """
-OptionsGangster – VPA Options Analysis Tool
+OptionGangster – VPA Options Analysis Tool
 Main FastAPI Application
 
 Changes from v1:
@@ -52,6 +52,7 @@ from app.scanner_engine import scanner_engine
 from app.subscription_scanner import SubscriptionScanner
 from app.ticker_service import ticker_service
 from app.twilio_sms import twilio_sms_notifier
+from app.twilio_whatsapp import twilio_whatsapp_notifier, send_otp, verify_otp
 from app.user_alert_store import DEFAULT_ALERT_TYPES, user_alert_store
 from app.mongo import close_db
 import app.llm_narrator as llm_narrator
@@ -282,7 +283,7 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(
-    title="OptionsGangster",
+    title="OptionGangster",
     description="Volume Price Analysis for Options Trading",
     version="2.0.0",
     lifespan=lifespan,
@@ -291,10 +292,11 @@ app = FastAPI(
 alert_manager.register_listener(alert_store.handle_alert_event)
 alert_manager.register_listener(user_alert_store.handle_alert_event)
 alert_manager.register_listener(twilio_sms_notifier.handle_alert_event)
+alert_manager.register_listener(twilio_whatsapp_notifier.handle_alert_event)
 
 
 # ── Auth middleware ─────────────────────────────────────────
-PUBLIC_PATHS = {"/login", "/api/login", "/api/auth/config", "/api/auth/google", "/api/logout"}
+PUBLIC_PATHS = {"/login", "/terms", "/privacy", "/api/login", "/api/auth/config", "/api/auth/google", "/api/logout"}
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -737,19 +739,19 @@ LOGIN_HTML = """
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>OptionsGangster – AI-Powered Options Signals</title>
+<title>OptionGangster – AI-Powered Options Signals</title>
 <meta name="description" content="AI-driven options signals that cut through the noise. One actionable verdict — BUY, SELL, or HOLD — with a confidence score. Free to use.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://optionsgangster.com">
-<meta property="og:title" content="OptionsGangster – AI-Powered Options Signals">
+<meta property="og:url" content="https://optiongangster.com">
+<meta property="og:title" content="OptionGangster – AI-Powered Options Signals">
 <meta property="og:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score. Free.">
-<meta property="og:image" content="https://optionsgangster.com/static/og-image.png">
+<meta property="og:image" content="https://optiongangster.com/static/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="OptionsGangster – AI-Powered Options Signals">
+<meta name="twitter:title" content="OptionGangster – AI-Powered Options Signals">
 <meta name="twitter:description" content="Stop guessing. Our AI analyzes multiple market dimensions in real time and delivers one clear verdict with a confidence score.">
-<meta name="twitter:image" content="https://optionsgangster.com/static/og-image.png">
+<meta name="twitter:image" content="https://optiongangster.com/static/og-image.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
@@ -953,7 +955,7 @@ footer{padding:32px 24px;text-align:center;color:#4b5563;font-size:.8rem;border-
   </div>
 </section>
 
-<footer>&copy; 2026 OptionsGangster. Built for traders who want an edge.</footer>
+<footer>&copy; 2026 OptionGangster. Built for traders who want an edge.</footer>
 
 <!-- LOGIN MODAL -->
 <div class="modal-overlay" id="modal">
@@ -994,6 +996,14 @@ async def login_page():
         "app/static/login.html",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page():
+    return FileResponse("app/static/terms.html")
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page():
+    return FileResponse("app/static/privacy.html")
 
 
 class GoogleLoginRequest(BaseModel):
@@ -1127,6 +1137,9 @@ async def _build_alert_settings_payload(email: str) -> dict:
         "notifications": notifications,
         "unread_count": unread_count,
         "scan_interval_seconds": 60,
+        "whatsapp_enabled": settings_doc.get("whatsapp_enabled", False),
+        "whatsapp_number": settings_doc.get("whatsapp_number", ""),
+        "whatsapp_verified": settings_doc.get("whatsapp_verified", False),
     }
 
 
@@ -1243,6 +1256,57 @@ async def mark_alert_notifications_read(request: Request, body: AlertNotificatio
         "modified": modified,
         "unread_count": await user_alert_store.unread_count(user["email"]),
     }
+
+
+class WhatsAppOTPRequest(BaseModel):
+    phone: str
+
+
+class WhatsAppVerifyRequest(BaseModel):
+    code: str
+
+
+class WhatsAppToggleRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/whatsapp/send-otp")
+async def whatsapp_send_otp(request: Request, body: WhatsAppOTPRequest):
+    user = _require_user(request)
+    phone = re.sub(r"[^\d+]", "", body.phone.strip())
+    if len(phone) < 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number")
+    ok = await send_otp(phone, user["email"])
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to send OTP. Check WhatsApp configuration.")
+    return {"ok": True}
+
+
+@app.post("/api/whatsapp/verify-otp")
+async def whatsapp_verify_otp(request: Request, body: WhatsAppVerifyRequest):
+    user = _require_user(request)
+    code = body.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+    ok = await verify_otp(user["email"], code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    return await _build_alert_settings_payload(user["email"])
+
+
+@app.put("/api/whatsapp/toggle")
+async def whatsapp_toggle(request: Request, body: WhatsAppToggleRequest):
+    user = _require_user(request)
+    from app.mongo import get_db
+    db = get_db()
+    doc = await db.user_alert_settings.find_one({"email": user["email"]})
+    if not doc or not doc.get("whatsapp_verified"):
+        raise HTTPException(status_code=400, detail="WhatsApp number not verified")
+    await db.user_alert_settings.update_one(
+        {"email": user["email"]},
+        {"$set": {"whatsapp_enabled": body.enabled}},
+    )
+    return await _build_alert_settings_payload(user["email"])
 
 
 # ── Endpoints ───────────────────────────────────────────────

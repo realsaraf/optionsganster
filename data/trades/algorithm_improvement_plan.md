@@ -1,4 +1,4 @@
-# Algorithm Improvement Plan — OptionsGangster
+# Algorithm Improvement Plan — OptionGangster
 
 ## Based on Deep Trade Analysis of 120 Individual Buy Entries (Jan-Feb 2026)
 

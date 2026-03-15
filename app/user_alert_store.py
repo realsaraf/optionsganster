@@ -155,6 +155,9 @@ class UserAlertStore:
                 "alert_mode": "shared",
                 "shared_alert_types": dict(DEFAULT_ALERT_TYPES),
                 "symbol_settings": [],
+                "whatsapp_enabled": False,
+                "whatsapp_number": "",
+                "whatsapp_verified": False,
                 "created_at": None,
                 "updated_at": None,
             }
@@ -163,6 +166,9 @@ class UserAlertStore:
         doc["shared_alert_types"] = self.merge_alert_types(doc.get("shared_alert_types") or doc.get("alert_types"))
         doc["symbol_settings"] = self.normalize_symbol_settings(doc.get("symbol_settings"), doc["symbols"], doc["shared_alert_types"])
         doc["alert_types"] = dict(doc["shared_alert_types"])
+        doc.setdefault("whatsapp_enabled", False)
+        doc.setdefault("whatsapp_number", "")
+        doc.setdefault("whatsapp_verified", False)
         return doc
 
     async def update_settings(self, email: str, symbols: list[str], alert_mode: str, shared_alert_types: dict, symbol_settings: list[dict] | None = None) -> dict:

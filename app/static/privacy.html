@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy – OptionGangster</title>
+    <style>
+      :root {
+        --bg: #08111f;
+        --panel: rgba(15, 23, 42, 0.88);
+        --border: rgba(148, 163, 184, 0.18);
+        --text: #e5eefb;
+        --muted: #9fb0c9;
+        --accent: #3b82f6;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 15% 20%, rgba(59, 130, 246, 0.18), transparent 32%),
+          radial-gradient(circle at 85% 18%, rgba(16, 185, 129, 0.12), transparent 26%),
+          linear-gradient(180deg, #08111f 0%, #0f172a 48%, #08111f 100%);
+        padding: 24px;
+      }
+      .wrap {
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      .logo-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 28px;
+      }
+      .logo {
+        font-size: 1.25rem;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+        text-decoration: none;
+        color: var(--text);
+      }
+      .logo span { color: #ef5350; }
+      .back-link {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 0.88rem;
+        font-weight: 600;
+      }
+      .back-link:hover { text-decoration: underline; }
+      .card {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+        border-radius: 22px;
+        box-shadow: 0 20px 70px rgba(2, 6, 23, 0.45);
+        padding: 36px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 2rem;
+        letter-spacing: -1px;
+      }
+      .updated {
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-bottom: 28px;
+      }
+      h2 {
+        font-size: 1.15rem;
+        margin: 28px 0 10px;
+        letter-spacing: -0.3px;
+      }
+      p, li {
+        color: var(--muted);
+        line-height: 1.75;
+        font-size: 0.94rem;
+        margin: 0 0 12px;
+      }
+      ul { padding-left: 20px; }
+      li { margin-bottom: 6px; }
+      a { color: var(--accent); }
+      .footer-links {
+        text-align: center;
+        margin-top: 24px;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .footer-links a {
+        color: var(--muted);
+        text-decoration: none;
+        margin: 0 10px;
+      }
+      .footer-links a:hover { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="logo-bar">
+        <a href="/" class="logo">Options<span>Gangster</span></a>
+        <a href="/login" class="back-link">← Back to login</a>
+      </div>
+      <div class="card">
+        <h1>Privacy Policy</h1>
+        <p class="updated">Last updated: March 15, 2026</p>
+
+        <h2>1. Introduction</h2>
+        <p>Gurho Inc. ("we", "us", "our") operates OptionGangster. This Privacy Policy explains how we collect, use, and protect your personal information when you use our Service.</p>
+
+        <h2>2. Information We Collect</h2>
+        <p><strong>Account Information:</strong> When you sign in via Google, we receive your name, email address, and profile picture from your Google account.</p>
+        <p><strong>Alert Preferences:</strong> If you opt into SMS or WhatsApp alerts, we collect your phone number. We store a one-way verification status but do not retain OTP codes after verification.</p>
+        <p><strong>Usage Data:</strong> We may collect information about how you interact with the Service, including pages visited, features used, and timestamps.</p>
+        <p><strong>Session Data:</strong> We store server-side session tokens in MongoDB to manage authenticated access.</p>
+
+        <h2>3. How We Use Your Information</h2>
+        <ul>
+          <li>To authenticate and authorize your access to the platform.</li>
+          <li>To deliver trade alerts via your chosen channels (in-app, SMS, WhatsApp).</li>
+          <li>To improve and operate the Service.</li>
+          <li>To communicate important updates about the Service.</li>
+        </ul>
+
+        <h2>4. Third-Party Services</h2>
+        <p>We use the following third-party services that may process your data:</p>
+        <ul>
+          <li><strong>Google Firebase:</strong> Authentication and identity verification.</li>
+          <li><strong>MongoDB Atlas:</strong> Database hosting for user data and session management.</li>
+          <li><strong>Twilio:</strong> SMS and WhatsApp message delivery for trade alerts and OTP verification.</li>
+          <li><strong>Polygon.io:</strong> Market data feeds (no personal data shared).</li>
+          <li><strong>DigitalOcean:</strong> Application hosting.</li>
+        </ul>
+        <p>Each third-party service is governed by its own privacy policy. We do not sell your personal data to any third party.</p>
+
+        <h2>5. Data Retention</h2>
+        <p>We retain your account information for as long as your access is active. If your access is revoked, we may retain minimal records for compliance purposes. You may request deletion of your data by contacting us.</p>
+
+        <h2>6. Data Security</h2>
+        <p>We implement reasonable security measures including encrypted connections (TLS), server-side session management, and restricted access controls. However, no method of electronic transmission or storage is 100% secure.</p>
+
+        <h2>7. Cookies &amp; Local Storage</h2>
+        <p>The Service uses server-side session cookies for authentication. We may also use browser local storage for user interface preferences (e.g., alert settings, watchlist). We do not use third-party tracking cookies.</p>
+
+        <h2>8. Your Rights</h2>
+        <ul>
+          <li><strong>Access:</strong> You may request a copy of the personal data we hold about you.</li>
+          <li><strong>Correction:</strong> You may request correction of inaccurate data.</li>
+          <li><strong>Deletion:</strong> You may request deletion of your personal data.</li>
+          <li><strong>Opt-out:</strong> You may disable alerts at any time through the app settings.</li>
+        </ul>
+        <p>To exercise any of these rights, contact us at <a href="mailto:support@optiongangster.com">support@optiongangster.com</a>.</p>
+
+        <h2>9. Children's Privacy</h2>
+        <p>The Service is not intended for individuals under 18 years of age. We do not knowingly collect personal information from minors.</p>
+
+        <h2>10. Changes to This Policy</h2>
+        <p>We may update this Privacy Policy from time to time. Continued use of the Service after changes constitutes acceptance of the updated policy.</p>
+
+        <h2>11. Contact</h2>
+        <p>For questions or concerns about this Privacy Policy, contact us at <a href="mailto:support@optiongangster.com">support@optiongangster.com</a>.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/terms">Terms of Service</a>
+        <a href="/privacy">Privacy Policy</a>
+      </div>
+    </div>
+  </body>
+</html>

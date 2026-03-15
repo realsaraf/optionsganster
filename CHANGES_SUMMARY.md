@@ -1,8 +1,8 @@
-# OptionsGangster - Three Issues Fixed
+# OptionGangster - Three Issues Fixed
 
 ## Summary
 
-This PR successfully addresses three critical issues in the OptionsGangster application:
+This PR successfully addresses three critical issues in the OptionGangster application:
 
 1. **Real-time watchlist prices** - Watchlist now shows live/15-min delayed prices instead of stale previous-day data
 2. **Live mode improvements** - Fixed cache issues and eliminated chart flickering during live updates
