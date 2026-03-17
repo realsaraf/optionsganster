@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # Twilio WhatsApp notifications
     TWILIO_WHATSAPP_FROM: str = ""  # e.g. "whatsapp:+16562554167"
-    TWILIO_WA_OTP_TEMPLATE_SID: str = ""  # Content template SID for OTP
+    TWILIO_VERIFY_SERVICE_SID: str = ""  # Verify service SID for OTP
     TWILIO_WA_ALERT_TEMPLATE_SID: str = ""  # Content template SID for alerts
 
     # Cache TTLs (seconds)

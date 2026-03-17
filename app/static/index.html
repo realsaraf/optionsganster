@@ -84,13 +84,84 @@
                 <button class="btn" onclick="logoutApp()" style="font-size:.74rem;padding:8px 12px;background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3);color:#fda4af">Sign Out</button>
               </div>
             </div>
-            <div class="settings-card danger-card">
-              <h4>Delete My Account</h4>
-              <div class="settings-sub">This starts as a soft delete. Your account is deactivated immediately and hidden from access, while the underlying records remain in the database for recovery or audit.</div>
-              <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap">
-                <button class="btn" id="deleteAccountBtn" onclick="deleteMyAccount()" style="font-size:.74rem;padding:8px 12px;background:rgba(239,68,68,.16);border-color:rgba(239,68,68,.35);color:#fecaca">Delete My Account</button>
+
+            <div class="settings-card" id="smsSettingsCard" style="margin-top:16px">
+              <h4>SMS Alerts</h4>
+              <div class="settings-sub">Get trade alerts via text message. Verify your number with a one-time code to enable.</div>
+              <div id="smsStatus" style="margin:8px 0"></div>
+              <div id="smsSetupSection">
+                <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                  <div style="flex:1;min-width:180px">
+                    <label>Phone Number</label>
+                    <div class="phone-row">
+                      <div class="country-prefix"><span class="flag">🇺🇸</span> +1</div>
+                      <input class="settings-input" id="smsPhoneInput" placeholder="(555) 123-4567" autocomplete="tel" />
+                    </div>
+                  </div>
+                  <button class="btn" id="smsSendOtpBtn" onclick="smsSendOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Send Code</button>
+                </div>
+                <div id="smsOtpSection" style="display:none;margin-top:10px">
+                  <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                    <div style="flex:1;min-width:120px;max-width:200px">
+                      <label>Verification Code</label>
+                      <input class="settings-input" id="smsOtpInput" placeholder="123456" maxlength="6" autocomplete="one-time-code" />
+                    </div>
+                    <button class="btn primary" id="smsVerifyBtn" onclick="smsVerifyOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Verify</button>
+                  </div>
+                </div>
               </div>
-              <div class="danger-note" id="deleteAccountHelp">Soft delete disables sign-in and background alerts for this account. Hard delete can be added later after the workflow is proven.</div>
+              <div id="smsVerifiedSection" style="display:none;margin-top:10px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="color:var(--green);font-size:.82rem" id="smsVerifiedLabel">✓ Verified</span>
+                  <label class="alert-pref-toggle" style="margin:0">
+                    <input type="checkbox" id="smsEnabledToggle" onchange="smsToggle(this.checked)" /> Enable SMS alerts
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card" id="whatsappSettingsCard" style="margin-top:16px">
+              <h4>WhatsApp Alerts</h4>
+              <div class="settings-sub">Get trade alerts on WhatsApp. Verify your number with a one-time code to enable.</div>
+              <div id="whatsappStatus" style="margin:8px 0"></div>
+              <div id="whatsappSetupSection">
+                <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                  <div style="flex:1;min-width:180px">
+                    <label>WhatsApp Number</label>
+                    <div class="phone-row">
+                      <div class="country-prefix"><span class="flag">🇺🇸</span> +1</div>
+                      <input class="settings-input" id="whatsappPhoneInput" placeholder="(555) 123-4567" autocomplete="tel" />
+                    </div>
+                  </div>
+                  <button class="btn" id="whatsappSendOtpBtn" onclick="whatsappSendOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Send Code</button>
+                </div>
+                <div id="whatsappOtpSection" style="display:none;margin-top:10px">
+                  <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                    <div style="flex:1;min-width:120px;max-width:200px">
+                      <label>Verification Code</label>
+                      <input class="settings-input" id="whatsappOtpInput" placeholder="123456" maxlength="6" autocomplete="one-time-code" />
+                    </div>
+                    <button class="btn primary" id="whatsappVerifyBtn" onclick="whatsappVerifyOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Verify</button>
+                  </div>
+                </div>
+              </div>
+              <div id="whatsappVerifiedSection" style="display:none;margin-top:10px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="color:var(--green);font-size:.82rem" id="whatsappVerifiedLabel">✓ Verified</span>
+                  <label class="alert-pref-toggle" style="margin:0">
+                    <input type="checkbox" id="whatsappEnabledToggle" onchange="whatsappToggle(this.checked)" /> Enable WhatsApp alerts
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card danger-card" style="margin-top:16px;padding:12px">
+              <h4 style="font-size:.82rem;margin:0 0 4px">Delete My Account</h4>
+              <div class="settings-sub" style="margin-bottom:8px;font-size:.68rem">Soft delete — your account is deactivated immediately. Records remain for recovery.</div>
+              <div style="display:flex;justify-content:flex-end">
+                <button class="btn" id="deleteAccountBtn" onclick="deleteMyAccount()" style="font-size:.7rem;padding:6px 10px;background:rgba(239,68,68,.16);border-color:rgba(239,68,68,.35);color:#fecaca">Delete My Account</button>
+              </div>
+              <div class="danger-note" id="deleteAccountHelp" style="font-size:.66rem;margin-top:6px"></div>
             </div>
           </div>
 
@@ -140,37 +211,6 @@
               </div>
             </div>
 
-            <div class="settings-card" id="whatsappSettingsCard" style="margin-top:16px">
-              <h4>WhatsApp Alerts</h4>
-              <div class="settings-sub">Get trade alerts on WhatsApp. Verify your number with a one-time code to enable.</div>
-              <div id="whatsappStatus" style="margin:8px 0"></div>
-              <div id="whatsappSetupSection">
-                <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-                  <div style="flex:1;min-width:180px">
-                    <label>WhatsApp Number</label>
-                    <input class="settings-input" id="whatsappPhoneInput" placeholder="+1 555 123 4567" autocomplete="tel" />
-                  </div>
-                  <button class="btn" id="whatsappSendOtpBtn" onclick="whatsappSendOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Send Code</button>
-                </div>
-                <div id="whatsappOtpSection" style="display:none;margin-top:10px">
-                  <div class="settings-field" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-                    <div style="flex:1;min-width:120px;max-width:200px">
-                      <label>Verification Code</label>
-                      <input class="settings-input" id="whatsappOtpInput" placeholder="123456" maxlength="6" autocomplete="one-time-code" />
-                    </div>
-                    <button class="btn primary" id="whatsappVerifyBtn" onclick="whatsappVerifyOtp()" style="font-size:.74rem;padding:8px 12px;white-space:nowrap">Verify</button>
-                  </div>
-                </div>
-              </div>
-              <div id="whatsappVerifiedSection" style="display:none;margin-top:10px">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <span style="color:var(--green);font-size:.82rem" id="whatsappVerifiedLabel">✓ Verified</span>
-                  <label class="alert-pref-toggle" style="margin:0">
-                    <input type="checkbox" id="whatsappEnabledToggle" onchange="whatsappToggle(this.checked)" /> Enable WhatsApp alerts
-                  </label>
-                </div>
-              </div>
-            </div>
           </div>
 
           <div class="settings-pane" id="settingsPaneAdmin">
@@ -1086,6 +1126,80 @@
           document.getElementById('alertNotificationsList').innerHTML='<div class="admin-empty">Failed to load notifications</div>';
         }
       }
+      function renderSmsState(){
+        const setup=document.getElementById('smsSetupSection');
+        const verified=document.getElementById('smsVerifiedSection');
+        const status=document.getElementById('smsStatus');
+        if(ALERT_PREFS.sms_verified){
+          setup.style.display='none';
+          verified.style.display='block';
+          document.getElementById('smsEnabledToggle').checked=!!ALERT_PREFS.sms_enabled;
+          const phone=ALERT_PREFS.sms_number||'';
+          document.getElementById('smsVerifiedLabel').textContent='\u2713 Verified: +' + phone.replace(/^\+/,'');
+          status.textContent=ALERT_PREFS.sms_enabled?'SMS alerts are ON':'SMS alerts are OFF';
+          status.style.color=ALERT_PREFS.sms_enabled?'var(--green)':'var(--muted)';
+        }else{
+          setup.style.display='block';
+          verified.style.display='none';
+          status.textContent='';
+        }
+      }
+      function _phoneWithCountry(raw){
+        const digits=raw.replace(/\D/g,'');
+        if(!digits||digits.length<7||digits.length>10){return null;}
+        return '+1'+digits.slice(-10);
+      }
+      async function smsSendOtp(){
+        const raw=document.getElementById('smsPhoneInput').value.trim();
+        const phone=_phoneWithCountry(raw);
+        if(!phone){toast('Enter a valid 10-digit US / Canada number','err');return;}
+        const btn=document.getElementById('smsSendOtpBtn');
+        btn.disabled=true;btn.textContent='Sending\u2026';
+        try{
+          const r=await fetch('/api/sms/send-otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.detail||'Failed to send OTP');
+          document.getElementById('smsOtpSection').style.display='block';
+          toast('Verification code sent via SMS');
+        }catch(e){
+          toast(e.message||'Failed to send code','err');
+        }finally{
+          btn.disabled=false;btn.textContent='Send Code';
+        }
+      }
+      async function smsVerifyOtp(){
+        const code=document.getElementById('smsOtpInput').value.trim();
+        if(!code){toast('Enter the verification code','err');return;}
+        const btn=document.getElementById('smsVerifyBtn');
+        btn.disabled=true;btn.textContent='Verifying\u2026';
+        try{
+          const r=await fetch('/api/sms/verify-otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.detail||'Invalid or expired code');
+          ALERT_PREFS.sms_enabled=!!d.sms_enabled;
+          ALERT_PREFS.sms_number=d.sms_number||'';
+          ALERT_PREFS.sms_verified=!!d.sms_verified;
+          renderSmsState();
+          toast('Phone number verified!');
+        }catch(e){
+          toast(e.message||'Verification failed','err');
+        }finally{
+          btn.disabled=false;btn.textContent='Verify';
+        }
+      }
+      async function smsToggle(enabled){
+        try{
+          const r=await fetch('/api/sms/toggle',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.detail||'Failed to update');
+          ALERT_PREFS.sms_enabled=!!d.sms_enabled;
+          renderSmsState();
+          toast(enabled?'SMS alerts enabled':'SMS alerts disabled');
+        }catch(e){
+          toast(e.message||'Failed to toggle SMS','err');
+          document.getElementById('smsEnabledToggle').checked=!!ALERT_PREFS.sms_enabled;
+        }
+      }
       function renderWhatsAppState(){
         const setup=document.getElementById('whatsappSetupSection');
         const verified=document.getElementById('whatsappVerifiedSection');
@@ -1105,8 +1219,9 @@
         }
       }
       async function whatsappSendOtp(){
-        const phone=document.getElementById('whatsappPhoneInput').value.trim();
-        if(!phone){toast('Enter your WhatsApp phone number','err');return;}
+        const raw=document.getElementById('whatsappPhoneInput').value.trim();
+        const phone=_phoneWithCountry(raw);
+        if(!phone){toast('Enter a valid 10-digit US / Canada number','err');return;}
         const btn=document.getElementById('whatsappSendOtpBtn');
         btn.disabled=true;btn.textContent='Sending…';
         try{

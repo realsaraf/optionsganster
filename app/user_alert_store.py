@@ -155,6 +155,9 @@ class UserAlertStore:
                 "alert_mode": "shared",
                 "shared_alert_types": dict(DEFAULT_ALERT_TYPES),
                 "symbol_settings": [],
+                "sms_enabled": False,
+                "sms_number": "",
+                "sms_verified": False,
                 "whatsapp_enabled": False,
                 "whatsapp_number": "",
                 "whatsapp_verified": False,
@@ -166,6 +169,9 @@ class UserAlertStore:
         doc["shared_alert_types"] = self.merge_alert_types(doc.get("shared_alert_types") or doc.get("alert_types"))
         doc["symbol_settings"] = self.normalize_symbol_settings(doc.get("symbol_settings"), doc["symbols"], doc["shared_alert_types"])
         doc["alert_types"] = dict(doc["shared_alert_types"])
+        doc.setdefault("sms_enabled", False)
+        doc.setdefault("sms_number", "")
+        doc.setdefault("sms_verified", False)
         doc.setdefault("whatsapp_enabled", False)
         doc.setdefault("whatsapp_number", "")
         doc.setdefault("whatsapp_verified", False)

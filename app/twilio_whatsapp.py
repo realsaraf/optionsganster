@@ -1,10 +1,7 @@
-"""Twilio WhatsApp alert fan-out using Content Templates."""
+"""Twilio WhatsApp alert fan-out using Content Templates + Verify API for OTP."""
 from __future__ import annotations
 
 import logging
-import random
-import string
-from datetime import datetime, timezone
 
 import httpx
 
@@ -23,8 +20,6 @@ _KNOWN_ALERT_TYPES = {
     "timed_out",
     "invalidated",
 }
-
-OTP_EXPIRY_SECONDS = 300  # 5 minutes
 
 
 def _event_preference_key(event_type: str, alert: ActiveAlert) -> str | None:
@@ -60,9 +55,17 @@ def _format_contract(alert: ActiveAlert) -> str:
 
 
 def _build_template_vars(preference_key: str, alert: ActiveAlert) -> dict:
-    """Build Content Template variables for og_trade_alert.
+    """Build Content Template variables for og_trade_alert_v2.
 
-    Template body: {{1}}: {{2}} | Exp {{3}} {{4}}
+    Template body:
+    OptionGangster Trade Alert
+
+    Signal: {{1}}
+    Contract: {{2}}
+    Expiration: {{3}}
+    Details: {{4}}
+
+    Manage alerts at optiongangster.com
     """
     label_map = {
         "actionable": "ACTIONABLE",
@@ -123,82 +126,79 @@ async def _send_content_template(to_number: str, content_sid: str, variables: di
         return response.json()
 
 
-def _generate_otp(length: int = 6) -> str:
-    """Generate a random numeric OTP code."""
-    return "".join(random.choices(string.digits, k=length))
-
-
 async def send_otp(phone_number: str, email: str) -> bool:
-    """Generate and send an OTP to verify WhatsApp number ownership."""
-    otp_template_sid = settings.TWILIO_WA_OTP_TEMPLATE_SID
-    if not otp_template_sid:
-        logger.warning("[WhatsApp] OTP template SID not configured")
+    """Send an OTP via Twilio Verify API (SMS channel) to verify phone ownership."""
+    verify_sid = settings.TWILIO_VERIFY_SERVICE_SID
+    if not verify_sid or not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        logger.warning("[WhatsApp] Verify service not configured")
         return False
 
-    code = _generate_otp()
+    # Store phone→email mapping so verify_otp can look it up
     db = get_db()
     await db.whatsapp_otp.update_one(
         {"email": email},
-        {
-            "$set": {
-                "email": email,
-                "phone": phone_number,
-                "code": code,
-                "created_at": datetime.now(timezone.utc),
-                "verified": False,
-            }
-        },
+        {"$set": {"email": email, "phone": phone_number}},
         upsert=True,
     )
 
+    url = f"https://verify.twilio.com/v2/Services/{verify_sid}/Verifications"
+    auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    # Normalize phone to E.164
+    clean_phone = "+" + phone_number.lstrip("+").lstrip("0")
+
     try:
-        # Auth templates use {{1}} for the OTP code
-        result = await _send_content_template(
-            phone_number, otp_template_sid, {"1": code}
-        )
-        logger.info("[WhatsApp] OTP sent to %s (%s)", phone_number, result.get("sid", "") if result else "")
-        return True
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, auth=auth, data={
+                "To": clean_phone,
+                "Channel": "sms",
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info("[WhatsApp] Verify OTP sent to %s (sid=%s, channel=%s)",
+                        phone_number, data.get("sid", ""), data.get("channel", ""))
+            return True
     except Exception as exc:
-        logger.warning("[WhatsApp] Failed to send OTP to %s: %s", phone_number, exc)
+        logger.warning("[WhatsApp] Failed to send Verify OTP to %s: %s", phone_number, exc)
         return False
 
 
-async def verify_otp(email: str, code: str) -> bool:
-    """Verify OTP code and mark WhatsApp as verified if correct."""
+async def verify_otp(phone_number: str, code: str, email: str) -> bool:
+    """Check OTP via Twilio Verify API and mark WhatsApp as verified."""
+    verify_sid = settings.TWILIO_VERIFY_SERVICE_SID
+    if not verify_sid or not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        return False
+
+    url = f"https://verify.twilio.com/v2/Services/{verify_sid}/VerificationCheck"
+    auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    clean_phone = "+" + phone_number.lstrip("+").lstrip("0")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, auth=auth, data={
+                "To": clean_phone,
+                "Code": code,
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") != "approved":
+                return False
+    except Exception as exc:
+        logger.warning("[WhatsApp] Verify check failed for %s: %s", phone_number, exc)
+        return False
+
+    # Mark verified in user alert settings
     db = get_db()
-    doc = await db.whatsapp_otp.find_one({"email": email})
-    if not doc:
-        return False
-
-    created_at = doc.get("created_at")
-    if created_at:
-        elapsed = (datetime.now(timezone.utc) - created_at).total_seconds()
-        if elapsed > OTP_EXPIRY_SECONDS:
-            return False
-
-    if doc.get("code") != code:
-        return False
-
-    # Mark verified
-    await db.whatsapp_otp.update_one(
-        {"email": email},
-        {"$set": {"verified": True}},
-    )
-
-    # Update user alert settings to enable whatsapp
-    phone = doc.get("phone", "")
     await db.user_alert_settings.update_one(
         {"email": email},
         {
             "$set": {
-                "whatsapp_number": phone,
+                "whatsapp_number": phone_number,
                 "whatsapp_verified": True,
                 "whatsapp_enabled": True,
             }
         },
         upsert=True,
     )
-
     return True
 
 

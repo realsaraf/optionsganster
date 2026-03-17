@@ -264,6 +264,32 @@
         background: rgba(15, 23, 42, 0.72);
         padding: 16px;
       }
+      .phone-row {
+        display: flex;
+        gap: 0;
+        align-items: stretch;
+      }
+      .country-prefix {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border: 1px solid var(--border2);
+        border-right: none;
+        border-radius: 10px 0 0 10px;
+        background: var(--surface2);
+        color: var(--muted);
+        font-size: 0.78rem;
+        white-space: nowrap;
+        cursor: default;
+        user-select: none;
+      }
+      .country-prefix .flag { font-size: 1.1rem; }
+      .phone-row .settings-input {
+        border-radius: 0 10px 10px 0;
+        flex: 1;
+        min-width: 0;
+      }
       .settings-card h4 {
         margin: 0 0 8px;
         font-size: 0.9rem;

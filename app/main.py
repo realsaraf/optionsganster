@@ -51,7 +51,7 @@ from app.firebase_auth import FirebaseAuthError, firebase_enabled, get_firebase_
 from app.scanner_engine import scanner_engine
 from app.subscription_scanner import SubscriptionScanner
 from app.ticker_service import ticker_service
-from app.twilio_sms import twilio_sms_notifier
+from app.twilio_sms import twilio_sms_notifier, send_sms_otp, verify_sms_otp
 from app.twilio_whatsapp import twilio_whatsapp_notifier, send_otp, verify_otp
 from app.user_alert_store import DEFAULT_ALERT_TYPES, user_alert_store
 from app.mongo import close_db
@@ -1137,6 +1137,9 @@ async def _build_alert_settings_payload(email: str) -> dict:
         "notifications": notifications,
         "unread_count": unread_count,
         "scan_interval_seconds": 60,
+        "sms_enabled": settings_doc.get("sms_enabled", False),
+        "sms_number": settings_doc.get("sms_number", ""),
+        "sms_verified": settings_doc.get("sms_verified", False),
         "whatsapp_enabled": settings_doc.get("whatsapp_enabled", False),
         "whatsapp_number": settings_doc.get("whatsapp_number", ""),
         "whatsapp_verified": settings_doc.get("whatsapp_verified", False),
@@ -1258,6 +1261,72 @@ async def mark_alert_notifications_read(request: Request, body: AlertNotificatio
     }
 
 
+class SMSOTPRequest(BaseModel):
+    phone: str
+
+
+class SMSVerifyRequest(BaseModel):
+    code: str
+
+
+class SMSToggleRequest(BaseModel):
+    enabled: bool
+
+
+def _validate_us_ca_phone(raw: str) -> str:
+    """Strip non-digits, normalize to +1XXXXXXXXXX. Raise 400 if not US/CA."""
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith("1") and len(digits) == 11:
+        digits = digits  # already has country code
+    elif len(digits) == 10:
+        digits = "1" + digits
+    else:
+        raise HTTPException(status_code=400, detail="Only US and Canada (+1) numbers are supported")
+    return "+" + digits
+
+
+@app.post("/api/sms/send-otp")
+async def sms_send_otp(request: Request, body: SMSOTPRequest):
+    user = _require_user(request)
+    phone = _validate_us_ca_phone(body.phone)
+    ok = await send_sms_otp(phone, user["email"])
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to send verification code.")
+    return {"ok": True}
+
+
+@app.post("/api/sms/verify-otp")
+async def sms_verify_otp_endpoint(request: Request, body: SMSVerifyRequest):
+    user = _require_user(request)
+    code = body.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+    from app.mongo import get_db
+    db = get_db()
+    otp_doc = await db.sms_otp.find_one({"email": user["email"]})
+    if not otp_doc or not otp_doc.get("phone"):
+        raise HTTPException(status_code=400, detail="No pending verification. Send OTP first.")
+    ok = await verify_sms_otp(otp_doc["phone"], code, user["email"])
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    return await _build_alert_settings_payload(user["email"])
+
+
+@app.put("/api/sms/toggle")
+async def sms_toggle(request: Request, body: SMSToggleRequest):
+    user = _require_user(request)
+    from app.mongo import get_db
+    db = get_db()
+    doc = await db.user_alert_settings.find_one({"email": user["email"]})
+    if not doc or not doc.get("sms_verified"):
+        raise HTTPException(status_code=400, detail="SMS number not verified")
+    await db.user_alert_settings.update_one(
+        {"email": user["email"]},
+        {"$set": {"sms_enabled": body.enabled}},
+    )
+    return await _build_alert_settings_payload(user["email"])
+
+
 class WhatsAppOTPRequest(BaseModel):
     phone: str
 
@@ -1273,9 +1342,7 @@ class WhatsAppToggleRequest(BaseModel):
 @app.post("/api/whatsapp/send-otp")
 async def whatsapp_send_otp(request: Request, body: WhatsAppOTPRequest):
     user = _require_user(request)
-    phone = re.sub(r"[^\d+]", "", body.phone.strip())
-    if len(phone) < 10:
-        raise HTTPException(status_code=400, detail="Invalid phone number")
+    phone = _validate_us_ca_phone(body.phone)
     ok = await send_otp(phone, user["email"])
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to send OTP. Check WhatsApp configuration.")
@@ -1288,7 +1355,13 @@ async def whatsapp_verify_otp(request: Request, body: WhatsAppVerifyRequest):
     code = body.code.strip()
     if not code:
         raise HTTPException(status_code=400, detail="Code is required")
-    ok = await verify_otp(user["email"], code)
+    # Look up the phone number stored during send-otp
+    from app.mongo import get_db
+    db = get_db()
+    otp_doc = await db.whatsapp_otp.find_one({"email": user["email"]})
+    if not otp_doc or not otp_doc.get("phone"):
+        raise HTTPException(status_code=400, detail="No pending verification. Send OTP first.")
+    ok = await verify_otp(otp_doc["phone"], code, user["email"])
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid or expired code")
     return await _build_alert_settings_payload(user["email"])

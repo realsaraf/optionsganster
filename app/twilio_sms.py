@@ -1,4 +1,4 @@
-"""Twilio SMS alert fan-out for actionable trade events."""
+"""Twilio SMS alert fan-out with per-user phone numbers + Verify OTP."""
 from __future__ import annotations
 
 import logging
@@ -7,6 +7,7 @@ import httpx
 
 from app.alert_manager import ActiveAlert
 from app.config import settings
+from app.mongo import get_db
 
 logger = logging.getLogger("optionsganster")
 
@@ -29,28 +30,6 @@ def _event_preference_key(event_type: str, alert: ActiveAlert) -> str | None:
     if event_type == "resolved":
         return alert.state.value.lower()
     return None
-
-
-def _configured_recipients() -> list[str]:
-    recipients: list[str] = []
-    seen: set[str] = set()
-    for raw in (settings.TWILIO_SMS_TO or "").split(","):
-        number = raw.strip()
-        if not number or number in seen:
-            continue
-        seen.add(number)
-        recipients.append(number)
-    return recipients
-
-
-def _configured_alert_types() -> set[str]:
-    configured = {
-        item.strip().lower()
-        for item in (settings.TWILIO_SMS_ALERT_TYPES or "actionable").split(",")
-        if item.strip()
-    }
-    matched = configured & _KNOWN_ALERT_TYPES
-    return matched or {"actionable"}
 
 
 def _sms_body(preference_key: str, alert: ActiveAlert) -> str:
@@ -81,17 +60,90 @@ def _sms_body(preference_key: str, alert: ActiveAlert) -> str:
     return body[:320]
 
 
+# ── OTP via Twilio Verify ───────────────────────────────────
+
+async def send_sms_otp(phone_number: str, email: str) -> bool:
+    """Send an OTP via Twilio Verify API (SMS) to verify phone ownership."""
+    verify_sid = settings.TWILIO_VERIFY_SERVICE_SID
+    if not verify_sid or not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        logger.warning("[SMS] Verify service not configured")
+        return False
+
+    db = get_db()
+    await db.sms_otp.update_one(
+        {"email": email},
+        {"$set": {"email": email, "phone": phone_number}},
+        upsert=True,
+    )
+
+    url = f"https://verify.twilio.com/v2/Services/{verify_sid}/Verifications"
+    auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    clean_phone = "+" + phone_number.lstrip("+").lstrip("0")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, auth=auth, data={
+                "To": clean_phone,
+                "Channel": "sms",
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info("[SMS] Verify OTP sent to %s (sid=%s)", phone_number, data.get("sid", ""))
+            return True
+    except Exception as exc:
+        logger.warning("[SMS] Failed to send Verify OTP to %s: %s", phone_number, exc)
+        return False
+
+
+async def verify_sms_otp(phone_number: str, code: str, email: str) -> bool:
+    """Check OTP via Twilio Verify API and mark SMS as verified."""
+    verify_sid = settings.TWILIO_VERIFY_SERVICE_SID
+    if not verify_sid or not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        return False
+
+    url = f"https://verify.twilio.com/v2/Services/{verify_sid}/VerificationCheck"
+    auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    clean_phone = "+" + phone_number.lstrip("+").lstrip("0")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, auth=auth, data={
+                "To": clean_phone,
+                "Code": code,
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") != "approved":
+                return False
+    except Exception as exc:
+        logger.warning("[SMS] Verify check failed for %s: %s", phone_number, exc)
+        return False
+
+    db = get_db()
+    await db.user_alert_settings.update_one(
+        {"email": email},
+        {
+            "$set": {
+                "sms_number": phone_number,
+                "sms_verified": True,
+                "sms_enabled": True,
+            }
+        },
+        upsert=True,
+    )
+    return True
+
+
+# ── Alert fan-out ───────────────────────────────────────────
+
 class TwilioSMSNotifier:
     @staticmethod
     def is_enabled() -> bool:
-        return all(
-            [
-                settings.TWILIO_ACCOUNT_SID,
-                settings.TWILIO_AUTH_TOKEN,
-                settings.TWILIO_SMS_FROM,
-                _configured_recipients(),
-            ]
-        )
+        return all([
+            settings.TWILIO_ACCOUNT_SID,
+            settings.TWILIO_AUTH_TOKEN,
+            settings.TWILIO_SMS_FROM,
+        ])
 
     async def handle_alert_event(self, event_type: str, alert: ActiveAlert) -> None:
         preference_key = _event_preference_key(event_type, alert)
@@ -99,29 +151,53 @@ class TwilioSMSNotifier:
             return
         if not self.is_enabled():
             return
-        if preference_key not in _configured_alert_types():
-            return
 
         body = _sms_body(preference_key, alert)
+        symbol = (alert.symbol or "").upper()
+
+        db = get_db()
+        from app.user_alert_store import UserAlertStore
+        cursor = db.user_alert_settings.find(
+            {
+                "symbols": symbol,
+                "sms_enabled": True,
+                "sms_verified": True,
+                "sms_number": {"$ne": ""},
+            },
+            {"_id": 0},
+        )
+        subscribers = await cursor.to_list(length=500)
+        if not subscribers:
+            return
+
         url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json"
         auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+
         async with httpx.AsyncClient(timeout=15.0) as client:
-            for recipient in _configured_recipients():
+            for subscriber in subscribers:
+                effective_types = UserAlertStore.effective_alert_types(subscriber, symbol)
+                if not effective_types.get(preference_key):
+                    continue
+
+                phone = subscriber.get("sms_number", "")
+                if not phone:
+                    continue
+
                 try:
                     response = await client.post(
                         url,
                         auth=auth,
                         data={
                             "From": settings.TWILIO_SMS_FROM,
-                            "To": recipient,
+                            "To": phone,
                             "Body": body,
                         },
                     )
                     response.raise_for_status()
                     payload = response.json()
-                    logger.info("[TwilioSMS] Sent %s alert for %s to %s (%s)", preference_key, alert.symbol, recipient, payload.get("sid", ""))
+                    logger.info("[SMS] Sent %s alert for %s to %s (%s)", preference_key, symbol, phone, payload.get("sid", ""))
                 except Exception as exc:
-                    logger.warning("[TwilioSMS] failed to send %s alert for %s to %s: %s", preference_key, alert.symbol, recipient, exc)
+                    logger.warning("[SMS] Failed to send %s alert for %s to %s: %s", preference_key, symbol, phone, exc)
 
 
 twilio_sms_notifier = TwilioSMSNotifier()
