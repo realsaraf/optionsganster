@@ -552,7 +552,7 @@
                     type="checkbox"
                     id="chkVwap"
                     checked
-                    onchange="redrawChart()"
+                    onchange="redrawChart(true)"
                   />
                   VWAP</label
                 >
@@ -561,7 +561,7 @@
                     type="checkbox"
                     id="chkAlrt"
                     checked
-                    onchange="redrawChart()"
+                    onchange="redrawChart(true)"
                   />
                   Alerts</label
                 >
@@ -578,11 +578,11 @@
               <button class="chart-more-btn" id="chartMoreBtn" type="button" onclick="toggleChartMore()" aria-expanded="false">More</button>
               <div class="chart-toggle-secondary" id="chartToggleSecondary">
                 <label class="chk-label"
-                  ><input type="checkbox" id="chkEma" onchange="redrawChart()" />
+                  ><input type="checkbox" id="chkEma" onchange="redrawChart(true)" />
                   EMA</label
                 >
                 <label class="chk-label"
-                  ><input type="checkbox" id="chkLvl" onchange="redrawChart()" />
+                  ><input type="checkbox" id="chkLvl" onchange="redrawChart(true)" />
                   Levels</label
                 >
               </div>
@@ -1628,7 +1628,7 @@
         renderWatchlist();
       }
 
-      async function fetchSignals(sym,nocache=false){
+      async function fetchSignals(sym,nocache=false,keepPosition=false){
         try{
           const r=await fetch(`/api/signals/${encodeURIComponent(sym)}?interval=${_interval}${nocache?'&nocache=true':''}`);
           if(!r.ok){const e=await r.json().catch(()=>({detail:r.statusText}));toast('Error: '+(e.detail||r.statusText),'err');return;}
@@ -1644,7 +1644,7 @@
           S.prevClose=d.prev_close||0;
           _applyAssetClass();
           const _v=getVisibleBars();S.bars=_v.bars;S.barStart=_v.start;
-          redrawChart();renderRsi();renderAlerts();renderLevels();renderChain();renderVpa();renderFv();renderVolRegime();renderProximity();
+          redrawChart(keepPosition);renderRsi();renderAlerts();renderLevels();renderChain();renderVpa();renderFv();renderVolRegime();renderProximity();
         }catch(e){toast('Signals error: '+e.message,'err');}
       }
 
@@ -1742,7 +1742,7 @@
         if(_liveRefreshTimer) return;
         _liveRefreshTimer=setInterval(()=>{
           if(_feedWs&&S.sym&&!BT.active){
-            fetchSignals(S.sym);
+            fetchSignals(S.sym,false,true);
             fetchAlertHistory(S.sym);
           }
         },60000); // refresh bars every 60s
@@ -1809,7 +1809,7 @@
           if(msg.proximity_detail!==undefined) S.proximity_detail = msg.proximity_detail;
           // Render updated sections (skip chart redraw — bars unchanged mid-session)
           renderAlerts();renderChain();renderVolRegime();renderProximity();
-          if(msg.active_alerts !== undefined && !BT.active) redrawChart();
+          if(msg.active_alerts !== undefined && !BT.active) redrawChart(true);
           else _refreshAlertMarkers();
           if(msg.posture) renderDecisionBar(msg.posture);
           document.getElementById('last-update').textContent='Live '+new Date().toLocaleTimeString();
@@ -2216,6 +2216,27 @@
         // shows the exact Eastern Time the backend produced — no browser-tz shift.
         return Math.floor(new Date(dtStr.replace(' ','T')+'Z').getTime()/1000);
       }
+      function _alertToChartEpoch(isoStr){
+        // Convert a real UTC (or naive-UTC) alert timestamp to the chart's
+        // ET-as-fake-UTC epoch so it matches the bar epochs from _lwcTime.
+        if(!isoStr) return 0;
+        let d;
+        if(isoStr.includes('+')||isoStr.endsWith('Z')){
+          d=new Date(isoStr);  // tz-aware
+        } else {
+          d=new Date(isoStr.replace(' ','T')+'Z');  // naive → assume UTC
+        }
+        if(isNaN(d.getTime())) return 0;
+        // Convert that UTC instant to an Eastern Time wall-clock string,
+        // then build a fake-UTC epoch from the ET components.
+        const s=d.toLocaleString('en-US',{timeZone:'America/New_York',
+          year:'numeric',month:'2-digit',day:'2-digit',
+          hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+        const m=s.match(/(\d+)\/(\d+)\/(\d+)[,\s]+(\d+):(\d+):(\d+)/);
+        if(!m) return 0;
+        const [,mo,dd,yy,hh,mm,ss]=m;
+        return Math.floor(Date.UTC(+yy,+mo-1,+dd,+hh,+mm,+ss)/1000);
+      }
       function _etNowMs(){
         // Return current Eastern Time wall-clock expressed as fake-UTC milliseconds
         // so live bars get the same 'epoch' convention as _lwcTime / historical bars.
@@ -2338,10 +2359,15 @@
         return out.sort((a,b)=>a.time-b.time);
       }
 
-      function redrawChart(){
+      function redrawChart(preservePosition){
         if(!S.allBars||S.allBars.length<2) return;
         _ensureChart();
         if(!_candleSeries) return;
+        // Save current scroll position so live updates don't jump
+        let savedRange=null;
+        if(preservePosition&&_lwcChart){
+          try{savedRange=_lwcChart.timeScale().getVisibleLogicalRange();}catch{}
+        }
         const showV=document.getElementById('chkVwap')?.checked;
         const showE=document.getElementById('chkEma')?.checked;
         const showL=document.getElementById('chkLvl')?.checked;
@@ -2421,7 +2447,11 @@
           cel.className=chg>=0?'change-up':'change-dn';
         }
         renderRsi();
-        _applyChartRange();
+        if(savedRange){
+          try{_lwcChart.timeScale().setVisibleLogicalRange(savedRange);}catch{_applyChartRange();}
+        } else {
+          _applyChartRange();
+        }
       }
 
       function _applyChartRange(){
@@ -2467,7 +2497,13 @@
           _topAlert=null;
         } else {
           _topAlert=_selectTopAlert(as);
-          activeHtml=as.map(a=>`
+          activeHtml=as.map(a=>{
+          const isCall=a.direction==='CALL';
+          const optName=a.option?friendlyOption(a.option.ticker):(isCall?'calls':'puts');
+          const act=isCall
+            ?`Buy ${optName} near $${fp(a.trigger_price)} — stop if under $${fp(a.stop_price)}, take profit at $${fp(a.target_1)}`
+            :`Buy ${optName} near $${fp(a.trigger_price)} — stop if above $${fp(a.stop_price)}, take profit at $${fp(a.target_1)}`;
+          return `
       <div class="alert-card ${esc(a.direction)}">
         <div class="ac-header">
           <span class="dir-pill">${esc(a.direction)}</span>
@@ -2476,6 +2512,12 @@
           <span class="score-lbl">Score&nbsp;${a.edge_score}</span>
           <span style="margin-left:auto;font-size:.68rem;color:var(--muted)">UND&nbsp;<span class="tick-cell" data-und="${esc(S.sym)}" style="font-weight:700;color:var(--text)">—</span></span>
         </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 10px;font-size:.68rem;color:var(--muted)">
+          <span>Detected ${ft(a.detected_at||a.created_at)}</span>
+        </div>
+        <div style="padding:6px 10px;background:rgba(59,130,246,.07);border-radius:6px;margin:4px 0;font-size:.73rem;color:var(--accent);line-height:1.4">
+          <b>Action:</b> ${act}
+        </div>
         <div class="ac-levels">
           <div class="lv-box"><span class="lv-lbl">Entry</span><span class="lv-val c-entry">${fp(a.trigger_price)}</span></div>
           <div class="lv-box"><span class="lv-lbl">Stop</span><span class="lv-val c-stop">${fp(a.stop_price)}</span></div>
@@ -2483,9 +2525,8 @@
           <div class="lv-box"><span class="lv-lbl">Target 2</span><span class="lv-val c-t2">${fp(a.target_2)}</span></div>
         </div>
         <div class="rr-line">R:R <b>${(a.reward_risk_ratio||0).toFixed(1)}×</b>&nbsp;·&nbsp;Time Stop <b>${a.time_stop_minutes}min</b>&nbsp;·&nbsp;${esc((a.regime||'').replace(/_/g,' '))}</div>
-        ${(a.reasons||[]).length?`<div class="reasons">${a.reasons.map(r=>`<span class="rtag">${esc(r)}</span>`).join('')}</div>`:''}
         ${a.option?`<div class="opt-row">
-          <span class="opt-ticker">${esc(a.option.ticker)}</span>
+          <span class="opt-ticker">${esc(friendlyOption(a.option.ticker))}</span>
           <span><span class="opt-k">Δ</span>&nbsp;<span class="opt-v">${(a.option.delta||0).toFixed(2)}</span></span>
           <span><span class="opt-k">Spread</span>&nbsp;<span class="opt-v">${(a.option.spread_pct||0).toFixed(1)}%</span></span>
           <span><span class="opt-k">IV</span>&nbsp;<span class="opt-v">${((a.option.iv||0)*100).toFixed(0)}%</span></span>
@@ -2501,21 +2542,21 @@
           ${a.state==='PENDING'?`<button class="btn" style="margin-left:auto;font-size:.66rem;padding:3px 7px" onclick="activateAlert('${esc(a.id)}')">Mark Entered</button>`:''}
           ${a.state==='ACTIVE'?`<button class="btn" style="margin-left:auto;font-size:.66rem;padding:3px 7px" onclick="resolveAlert('${esc(a.id)}')">Resolve</button>`:''}
         </div>
-      </div>`).join('');
+      </div>`;}).join('');
         }
         const historyHtml=`<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:.74rem;font-weight:700;color:var(--text)">Today's Alert History</span>
             <span style="font-size:.66rem;color:var(--muted)">${hist.length}</span>
           </div>
-          ${hist.length?hist.slice().reverse().map(a=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);margin-bottom:6px">
+          ${hist.length?hist.slice().reverse().map(a=>{const ho=a.option?friendlyOption(a.option.ticker):'';return `<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);margin-bottom:6px">
             <span class="st-pill st-${esc(a.state)}" style="min-width:62px;text-align:center">${esc(a.state)}</span>
             <span style="font-size:.72rem;font-weight:700;color:${a.direction==='CALL'?'#22c55e':'#ef4444'}">${esc(a.direction)}</span>
             <div style="min-width:0;flex:1">
               <div style="font-size:.72rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.setup_name)}</div>
-              <div style="font-size:.64rem;color:var(--muted)">${ft(a.detected_at)} · Entry ${fp(a.trigger_price)} · Score ${a.edge_score}</div>
+              <div style="font-size:.64rem;color:var(--muted)">${ft(a.detected_at)} · Entry ${fp(a.trigger_price)} · Score ${a.edge_score}${ho?` · ${esc(ho)}`:''}${a.option?` · Est. $${(a.option.entry_premium_est||0).toFixed(2)}`:''}</div>
             </div>
-          </div>`).join(''):`<div class="no-data">No actionable alerts logged for ${esc(_currentAlertDate())}</div>`}
+          </div>`;}).join(''):`<div class="no-data">No actionable alerts logged for ${esc(_currentAlertDate())}</div>`}
         </div>`;
         col.innerHTML=activeHtml+historyHtml;
         if(_latestPosture) renderDecisionBar(_latestPosture);
@@ -2526,13 +2567,13 @@
       async function activateAlert(id){
         const prem=prompt('Entry premium paid ($)?','');if(prem===null)return;
         const r=await fetch(`/api/alerts/${id}/activate?premium=${encodeURIComponent(prem)}`,{method:'POST'});
-        if(r.ok){await fetchSignals(S.sym,true);await fetchAlertHistory(S.sym);}else toast('Activate failed','err');
+        if(r.ok){await fetchSignals(S.sym,true,true);await fetchAlertHistory(S.sym);}else toast('Activate failed','err');
       }
       async function resolveAlert(id){
         const state=prompt('Exit state (HIT_T1, HIT_T2, STOPPED, TIMED_OUT)?','HIT_T1');if(!state)return;
         const prem=prompt('Exit premium ($)?','');
         const r=await fetch(`/api/alerts/${id}/resolve?state=${encodeURIComponent(state)}&exit_premium=${encodeURIComponent(prem||0)}`,{method:'POST'});
-        if(r.ok){await fetchSignals(S.sym,true);await fetchAlertHistory(S.sym);}else toast('Resolve failed','err');
+        if(r.ok){await fetchSignals(S.sym,true,true);await fetchAlertHistory(S.sym);}else toast('Resolve failed','err');
       }
 
       function _nearestLevels(lvls, n){
@@ -2630,7 +2671,32 @@
       }
 
       function fp(p){return p!=null?Number(p).toFixed(2):'—';}
-      function ft(s){if(!s)return '';try{return new Date(s).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(e){return s;}}
+      function friendlyOption(ticker){
+        // Convert O:QQQ260318P00598000 → QQQ Mar 18 $598 Put
+        if(!ticker) return '';
+        const raw=ticker.replace(/^O:/,'');
+        const m=raw.match(/^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
+        if(!m) return ticker;
+        const [,sym,yy,mo,dd,cp,strikeRaw]=m;
+        const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const strike=parseFloat(strikeRaw)/1000;
+        const sStr=strike%1===0?strike.toFixed(0):strike.toFixed(strike>=100?0:1);
+        return `${sym} ${months[+mo-1]} ${+dd} $${sStr} ${cp==='C'?'Call':'Put'}`;
+      }
+      function ft(s){
+        // Convert any timestamp to Eastern Time display
+        if(!s) return '';
+        try{
+          let d;
+          if(s.includes('+')||s.endsWith('Z')){
+            d=new Date(s);  // tz-aware → parse directly
+          } else {
+            d=new Date(s.replace(' ','T')+'Z');  // naive → assume UTC
+          }
+          if(isNaN(d.getTime())) return s;
+          return d.toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'});
+        }catch(e){return s;}
+      }
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
       function setLoader(on){document.getElementById('loader').classList.toggle('on',on);}
       function toast(msg,type=''){
@@ -3444,17 +3510,19 @@
         return t.type==='CALLS'?'BUY':'SELL';
       }
       function _findBarByIsoTime(bars, isoStr){
-        if(!isoStr||!bars.length) return bars[bars.length-1];
-        const target=_lwcTime(isoStr);
-        if(!target) return _findBarByTime(bars, isoStr);
-        let best=null,bestDiff=Infinity;
+        if(!isoStr||!bars.length) return null;
+        const target=_alertToChartEpoch(isoStr);
+        if(!target) return null;
+        // Floor: find the latest bar whose time is <= alert time
+        // so the marker stays on the candle where it was detected
+        let best=null;
         for(const b of bars){
           const barTs=_lwcTime(b.datetime);
           if(!barTs) continue;
-          const diff=Math.abs(barTs-target);
-          if(diff<bestDiff){bestDiff=diff;best=b;}
+          if(barTs<=target) best=b;
+          else break; // bars are chronological, no need to continue
         }
-        return best||bars[bars.length-1];
+        return best;
       }
       function _drawHistoricalAlertMarkers(alerts, bars){
         if(!_candleSeries||!bars||!bars.length) return;
@@ -3466,6 +3534,8 @@
         }
         const markers=[];
         const detailsByTime=new Map();
+        // Group alerts by bar time to avoid stacking markers
+        const barGroups=new Map();
         alerts.forEach(a=>{
           const bar=_findBarByIsoTime(bars,a.detected_at||a.created_at||'');
           if(!bar) return;
@@ -3481,13 +3551,29 @@
           };
           if(!detailsByTime.has(time)) detailsByTime.set(time, []);
           detailsByTime.get(time).push(detail);
-          markers.push({
-            time,
-            position:isCall?'belowBar':'aboveBar',
-            color:isCall?'#22c55e':'#ef4444',
-            shape:isCall?'arrowUp':'arrowDown',
-            text:isCall?'CALL':'PUT'
-          });
+          if(!barGroups.has(time)) barGroups.set(time,{calls:0,puts:0});
+          if(isCall) barGroups.get(time).calls++; else barGroups.get(time).puts++;
+        });
+        // Create at most one CALL marker + one PUT marker per bar
+        barGroups.forEach((counts,time)=>{
+          if(counts.calls>0){
+            markers.push({
+              time,
+              position:'belowBar',
+              color:'#22c55e',
+              shape:'arrowUp',
+              text:'CALL'
+            });
+          }
+          if(counts.puts>0){
+            markers.push({
+              time,
+              position:'aboveBar',
+              color:'#ef4444',
+              shape:'arrowDown',
+              text:'PUT'
+            });
+          }
         });
         _alertMarkerDetails=detailsByTime;
         _hideChartAlertTooltip();
@@ -3756,7 +3842,7 @@
       function trackIdeaOnChart(idx){
         _trackedIdea=(_trackedIdea===idx)?null:idx;
         renderIdeas(S.briefing?.trade_ideas||[]);
-        redrawChart();
+        redrawChart(true);
       }
 
       function trackOption(optTicker){

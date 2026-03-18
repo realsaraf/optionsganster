@@ -291,10 +291,19 @@ def _build_kill_switches(
         f"Time stop: exit after {setup.time_stop_minutes} minutes regardless of P&L"
     )
 
-    # Regime shift
-    conditions.append(
-        "Market regime flips to RANGE_CHOP or REVERSAL_EXHAUSTION — exit immediately"
-    )
+    # Regime shift — context-aware: don't tell user to exit on the same
+    # regime the setup was designed for.
+    _bad_regimes = {"RANGE_CHOP", "REVERSAL_EXHAUSTION"}
+    _setup_home = {
+        "Range Mean Reversion": {"RANGE_CHOP"},
+        "Exhaustion Fade": {"REVERSAL_EXHAUSTION", "RANGE_CHOP"},
+    }
+    home = _setup_home.get(setup.name, set())
+    exit_regimes = _bad_regimes - home
+    if exit_regimes:
+        conditions.append(
+            f"Market regime flips to {' or '.join(sorted(exit_regimes))} — exit immediately"
+        )
 
     return conditions
 

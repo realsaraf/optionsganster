@@ -161,7 +161,7 @@ class AlertManager:
     """
 
     MAX_ACTIVE_ALERTS_PER_SYMBOL = 2
-    DEBOUNCE_MINUTES   = 5
+    DEBOUNCE_MINUTES   = 10
 
     def __init__(self):
         self._alerts: dict[str, ActiveAlert] = {}     # id → ActiveAlert
@@ -187,7 +187,7 @@ class AlertManager:
         Returns list of newly admitted alerts (for WS broadcast).
         """
         if current_time is None:
-            current_time = datetime.utcnow()
+            current_time = datetime.now(timezone.utc)
 
         # 1. Evaluate existing alerts
         self._evaluate_existing(current_price, current_time, symbol=symbol)
